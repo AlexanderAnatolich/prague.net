@@ -20,6 +20,7 @@ public struct CacheQueryBuilderCoreCombined<TKey, TValue>
 	private Predicate<TValue>? _filter;
 	private bool _disposed;
 	private bool _isIntersecter;
+	private bool _candidatesPreFiltered;
 	internal bool _first;
 	internal ValueSet<TKey, DefaultKeyComparer<TKey>> Candidates;
 	internal RefHolder<ValueSet<TKey, DefaultKeyComparer<TKey>>.IncrementalIntersecter> _incrementalIntersecter;
@@ -33,6 +34,13 @@ public struct CacheQueryBuilderCoreCombined<TKey, TValue>
 	void ICandidatesExecutor<TKey, TValue>.ExecuteBase<TContainer>(ref TContainer c) => Execute(ref c);
 	int ICandidatesExecutor<TKey, TValue>.CountBase() => Count();
 	void ICandidatesExecutor<TKey, TValue>.Dispose() => Dispose();
+
+	void ICandidatesExecutor<TKey, TValue>.NarrowCandidatesWithFilter() {
+		if (_filter == null || _candidatesPreFiltered || !Candidates.IsInitlized || Candidates.Count == 0)
+			return;
+		_dataCache.TryNarrow(ref Candidates, _filter);
+		_candidatesPreFiltered = true;
+	}
 
 	public CacheQueryBuilderCoreCombined(InMemoryDataCache<TKey, TValue> dataCache) {
 		_dataCache = dataCache;
@@ -854,6 +862,8 @@ public struct CacheQueryBuilderCoreCombined<TKey, TValue>
 		if (!Candidates.IsInitlized) {
 			var initContainer = new InitContainer(ref Candidates);
 			_dataCache.EnumerateAllValuesInit(ref initContainer, _filter);
+			// Auto-populate already applied _filter — NarrowCandidatesWithFilter can skip its pass.
+			_candidatesPreFiltered = true;
 		}
 
 		return ref Unsafe.As<ValueSet<TKey, DefaultKeyComparer<TKey>>, ValueSet<TKey1, DefaultKeyComparer<TKey1>>>(ref Unsafe.AsRef(in Candidates));
@@ -893,6 +903,8 @@ public struct PairedCacheQueryBuilderCoreCombined<TLeft, TKey, TValue>
 void ICandidatesExecutor<TKey, TValue>.ExecuteBase<TContainer>(ref TContainer c) => Execute(ref c);
 	int ICandidatesExecutor<TKey, TValue>.CountBase() => 0; // stub — not needed in Phase α
 	void ICandidatesExecutor<TKey, TValue>.Dispose() => Dispose();
+	// Paired flow applies the base filter inside ExecutePaired — pairs need no pre-narrowing.
+	void ICandidatesExecutor<TKey, TValue>.NarrowCandidatesWithFilter() { }
 
 	/// <summary>
 	/// Constructs with a pre-seeded candidate set.  The caller (typically <c>UseIndexAsPairs</c>)
@@ -1809,6 +1821,7 @@ public struct CacheQueryBuilderCombined<TDiscriminator, TLeftQuery, TLeftKey, TL
 
 	int ICandidatesExecutor<TLeftKey, TLeftValue>.CountBase() => _leftQuery.CountBase();
 	void ICandidatesExecutor<TLeftKey, TLeftValue>.Dispose() => _leftQuery.Dispose();
+	void ICandidatesExecutor<TLeftKey, TLeftValue>.NarrowCandidatesWithFilter() => _leftQuery.NarrowCandidatesWithFilter();
 
 	[UnscopedRef]
 	ref ValueSet<TLeftKey, DefaultKeyComparer<TLeftKey>> ICandidatesExecutor<TLeftKey, TLeftValue>.Candidates => ref _leftQuery.Candidates;

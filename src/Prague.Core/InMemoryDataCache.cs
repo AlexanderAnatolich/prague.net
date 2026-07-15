@@ -1296,6 +1296,10 @@ public sealed class InMemoryDataCache<TKey, TValue>
 			: _cache.TryCountValues(ref keys, predicate);
 	}
 
+	internal void TryNarrow(ref ValueSet<TKey, DefaultKeyComparer<TKey>> keys, Predicate<TValue> predicate) {
+		_cache.TryNarrowValues(ref keys, predicate);
+	}
+
 	internal int TryGet<TContainer>(ref TContainer container, ref ValueSet<TKey, DefaultKeyComparer<TKey>> keys,
 		Predicate<TValue>? predicate = null)
 		where TContainer : IJoinedResultContainer<TKey, TValue>, allows ref struct {

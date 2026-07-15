@@ -163,6 +163,14 @@ public interface ICandidatesExecutor<TLeftKey, TLeftValue> : IUnsafeCandidatesEx
 	/// cannot leak the rented set.
 	/// </summary>
 	internal void Dispose();
+
+	/// <summary>
+	/// Intersects an already-initialized candidate set with the base Where filter. Runs before
+	/// the indexed-inner walk so inner-join slot materialization never sees filter-rejected
+	/// lefts (they would surface as phantom rows with a default Left). No-op when there is no
+	/// filter or when candidates were populated with the filter already applied (auto-populate).
+	/// </summary>
+	internal void NarrowCandidatesWithFilter();
 }
 
 

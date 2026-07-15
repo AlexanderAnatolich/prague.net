@@ -36,12 +36,15 @@ public class JoinManyRightListIndexCoreTests {
 	private InMemoryDataCache<int, MnBook> _bookCache = null!;
 	// List-valued right-side index keyed by MnBook.AuthorId.
 	private CacheKeyValueListIndex<int, MnBook, int> _authorIdIndex = null!;
+	// Left-side index for UseIndex narrowing scenarios.
+	private CacheKeyValueListIndex<int, MnAuthor, string> _authorByNameIndex = null!;
 
 	[SetUp]
 	public void SetUp() {
 		_authorCache = new InMemoryDataCache<int, MnAuthor>();
 		_bookCache = new InMemoryDataCache<int, MnBook>();
 		_authorIdIndex = _bookCache.CacheKeyValueListIndex<int>((_, v) => v.AuthorId);
+		_authorByNameIndex = _authorCache.CacheKeyValueListIndex<string>((_, v) => v.Name);
 	}
 
 	// ── Test 1: full match — every author has books ──────────────────────────
@@ -156,6 +159,64 @@ public class JoinManyRightListIndexCoreTests {
 		var ids = results.Select(r => r.Left.Id).OrderBy(i => i).ToArray();
 		Assert.That(ids, Is.EqualTo(new[] { 1, 3 }));
 		Assert.That(results.All(r => r.Right.Count > 0), Is.True);
+	}
+
+	// ── Test 6b: UseIndex + Where + inner — no phantom row for a filter-rejected left ──
+	//
+	// With UseIndex the candidate set is NOT pre-filtered by Where, so the indexed-inner
+	// walk used to materialize a result slot for a candidate that passes the join but
+	// fails Where; the base execute skipped it without removing the slot → Execute()
+	// returned a row with Left == null while Count() said 0.
+
+	[Test]
+	public void InnerJoinMany_UseIndexPlusWhere_FilterRejectedJoinedLeftIsDropped() {
+		_authorCache.AddOrUpdate(1, new MnAuthor { Id = 1, Name = "Tolkien" });
+		_authorCache.AddOrUpdate(2, new MnAuthor { Id = 2, Name = "Tolkien" }); // same index key, no books
+
+		_bookCache.AddOrUpdate(101, new MnBook { Id = 101, AuthorId = 1, Title = "Hobbit" });
+
+		// Author 1 passes the join (has books) but fails Where.
+		var results = _authorCache.Query()
+			.UseIndex(_authorByNameIndex, "Tolkien")
+			.Where(a => a.Id != 1)
+			.InnerJoinMany(_bookCache, _authorIdIndex)
+			.Execute();
+
+		Assert.That(results.Count, Is.EqualTo(0));
+		Assert.That(results.All(r => r.Left is not null), Is.True, "no row may carry a null Left");
+
+		var count = _authorCache.Query()
+			.UseIndex(_authorByNameIndex, "Tolkien")
+			.Where(a => a.Id != 1)
+			.InnerJoinMany(_bookCache, _authorIdIndex)
+			.Count();
+		Assert.That(count, Is.EqualTo(results.Count));
+	}
+
+	[Test]
+	public void InnerJoinMany_UseIndexPlusWhere_KeepsFilterPassingJoinedLeft() {
+		_authorCache.AddOrUpdate(1, new MnAuthor { Id = 1, Name = "Tolkien" });
+		_authorCache.AddOrUpdate(2, new MnAuthor { Id = 2, Name = "Tolkien" });
+
+		_bookCache.AddOrUpdate(101, new MnBook { Id = 101, AuthorId = 1, Title = "Hobbit" });
+		_bookCache.AddOrUpdate(201, new MnBook { Id = 201, AuthorId = 2, Title = "Foundation" });
+
+		var results = _authorCache.Query()
+			.UseIndex(_authorByNameIndex, "Tolkien")
+			.Where(a => a.Id != 1)
+			.InnerJoinMany(_bookCache, _authorIdIndex)
+			.Execute();
+
+		Assert.That(results.Count, Is.EqualTo(1));
+		Assert.That(results.Single().Left.Id, Is.EqualTo(2));
+		Assert.That(results.Single().Right.Count, Is.EqualTo(1));
+
+		var count = _authorCache.Query()
+			.UseIndex(_authorByNameIndex, "Tolkien")
+			.Where(a => a.Id != 1)
+			.InnerJoinMany(_bookCache, _authorIdIndex)
+			.Count();
+		Assert.That(count, Is.EqualTo(1));
 	}
 
 	// ── Test 7: InnerJoinMany with filter that drops all rights for some left

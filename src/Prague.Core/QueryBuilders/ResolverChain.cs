@@ -138,8 +138,14 @@ internal ref struct JoinedResultContaier<TLeftKey, TLeftValue, TResolverChain, T
 
 		var e = new PrepareIndexedInnerProcessor<TLeftKey, TLeftValue, TExecutor>(ref leftQuery,  _cloneOnAdd, _shouldPool, ref _disposer);
 		_chainedResolvers.Execute(ref e);
-		if (e._hadHit)
+		if (e._hadHit) {
+			// Align index-narrowed candidates with the base Where filter BEFORE the indexed-inner
+			// walk materializes result slots — a filter-rejected candidate that passes the join
+			// would otherwise surface as a phantom row with a default Left (the base execute
+			// skips it without removing the slot).
+			leftQuery.NarrowCandidatesWithFilter();
 			Init(leftQuery.Candidates.Count);
+		}
 		_totalCont = _results.Count;
 	}
 

@@ -434,6 +434,21 @@ internal class ConcurrentCacheStore<TKey, TValue> where TKey : notnull {
 		return count;
 	}
 
+	/// <summary>Removes from <paramref name="keys"/> every key whose value is missing or fails
+	/// <paramref name="predicate"/> — aligns an index-narrowed candidate set with the base Where
+	/// filter BEFORE inner-join slots are materialized. Lock-free tables snapshot, same
+	/// consistency contract as the TryCountValues overloads.</summary>
+	internal void TryNarrowValues(ref ValueSet<TKey, DefaultKeyComparer<TKey>> keys, Predicate<TValue> predicate) {
+		if (keys.Count == 0)
+			return;
+		keys.RemoveWhere(new MissingOrRejected(this, predicate));
+	}
+
+	private readonly struct MissingOrRejected(ConcurrentCacheStore<TKey, TValue> store, Predicate<TValue> predicate)
+		: IPredicate<TKey> {
+		public bool Should(TKey key) => !store.TryGetValue(key, out var value) || !predicate(value);
+	}
+
 	[MethodImpl(MethodImplOptions.AggressiveOptimization)]
 	internal int TryGetValues<TContainer>(ref TContainer container, ref ValueSet<TKey, DefaultKeyComparer<TKey>> keys)
 		where TContainer : IJoinedResultContainer<TKey, TValue>, allows ref struct {
@@ -1612,27 +1627,27 @@ internal class ConcurrentCacheStore<TKey, TValue> where TKey : notnull {
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	private bool AreAllBucketsEmpty() => !_tables.CountPerLock.AsSpan().ContainsAnyExcept(0);
 
-	internal int CountValues(Predicate<TValue> predicate) {
-		var locksAcquired = 0;
-		try {
-			AcquireAllLocks(ref locksAcquired);
-			var count = GetCountNoLocks();
-			if (count == 0)
-				return 0;
-			foreach (var bucket in _tables.Buckets) {
-				for (var node = bucket.Node; node is not null; node = node.Next) {
-					if (predicate(node.Value))
-						++count;
+		internal int CountValues(Predicate<TValue> predicate) {
+				var locksAcquired = 0;
+				try {
+						AcquireAllLocks(ref locksAcquired);
+						if (GetCountNoLocks() == 0)
+								return 0;
+						var count = 0;
+						foreach (var bucket in _tables.Buckets) {
+								for (var node = bucket.Node; node is not null; node = node.Next) {
+										if (predicate(node.Value))
+												++count;
+								}
+						}
+
+						return count;
+				} finally {
+						ReleaseLocks(locksAcquired);
 				}
-			}
-
-			return count;
-		} finally {
-			ReleaseLocks(locksAcquired);
 		}
-	}
 
-	internal ArraySegment<TValue> GetValues(Predicate<TValue> predicate) {
+		internal ArraySegment<TValue> GetValues(Predicate<TValue> predicate) {
 		var locksAcquired = 0;
 		try {
 			AcquireAllLocks(ref locksAcquired);

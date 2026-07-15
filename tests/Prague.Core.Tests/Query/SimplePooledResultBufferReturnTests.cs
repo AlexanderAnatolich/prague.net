@@ -52,6 +52,14 @@ public class SimplePooledResultBufferReturnTests {
 			Assert.That(r.Count, Is.EqualTo(0));
 		});
 
+	[Test]
+	public void Count_WithUnindexedWhere_CountsOnlyMatches() {
+		// Regression: ConcurrentCacheStore.CountValues seeded its counter with the TOTAL
+		// cache size and added matches on top (10 items, 5 matches → returned 15).
+		var count = _cache.Query().Where(v => v.Id % 2 == 0).Count();
+		Assert.That(count, Is.EqualTo(ItemCount / 2));
+	}
+
 	private static void AssertQueryReturnsValueBuffer(Action runQuery) {
 		var pool = ArrayPool<SqItem>.Shared;
 		var probe = pool.Rent(ItemCount);

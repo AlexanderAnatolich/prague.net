@@ -1003,6 +1003,30 @@ internal struct ValueSet<T, TKeyComparer> : IDisposable
 		}
 	}
 
+	/// <summary>Removes every element the predicate rejects. Walks slot metadata directly
+	/// (same pattern as the intersect helpers), so removal during the walk is safe.</summary>
+	internal void RemoveWhere<TPredicate>(TPredicate shouldRemove)
+		where TPredicate : struct, IPredicate<T> {
+		var lastIndex = _lastIndex;
+		var metasArr = _slotMetasArray;
+		var valuesArr = _valuesArray;
+		ref var metaStart = ref metasArr is null
+			? ref Unsafe.AsRef(in _inlineSlotMetas.Value)
+			: ref MemoryMarshal.GetArrayDataReference(metasArr);
+		ref var valueStart = ref valuesArr is null
+			? ref Unsafe.AsRef(in _inlineValues.Value)
+			: ref MemoryMarshal.GetArrayDataReference(valuesArr);
+
+		for (var i = 0; i < lastIndex; i++) {
+			ref var meta = ref Unsafe.Add(ref metaStart, i);
+			if (meta.HashCode >= 0) {
+				var item = Unsafe.Add(ref valueStart, i);
+				if (shouldRemove.Should(item))
+					Remove(item);
+			}
+		}
+	}
+
 	private void IntersectWithPooledSet<TOther, TInto>(TInto into, PooledSet<TOther, DefaultKeyComparer<TOther>> other)
 		where TOther : notnull
 		where TInto : struct, IInto<TOther, T> {
