@@ -65,4 +65,13 @@ public sealed class DataCacheIndexAttribute : Attribute {
 	///   index-driven joins like <c>JoinOne(leftIndex, rightCache)</c>.
 	/// </summary>
 	public bool Symmetric { get; set; } = false;
+
+	/// <summary>
+	///   Sizing hint for <see cref="DataCacheIndexType.Many"/> indexes: the expected number
+	///   of values per index key, used as the slot capacity of the FIRST table each per-key
+	///   bucket rents (rounded up to a prime). It is a hint, not a floor — buckets still
+	///   start unallocated, grow past the hint on demand and never shrink below live content.
+	///   Unset keeps default (127 slots per bucket)
+	/// </summary>
+	public int ExpectedValuesPerKey { get; set; } = 0;
 }
