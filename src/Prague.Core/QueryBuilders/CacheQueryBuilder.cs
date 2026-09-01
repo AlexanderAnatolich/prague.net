@@ -1775,6 +1775,57 @@ public struct CacheQueryBuilderCombined<TDiscriminator, TLeftQuery, TLeftKey, TL
 		}
 	}
 
+	/// <summary>
+	/// Bounded top-K variant of <see cref="ExecuteCoreJoined{TJoinResult}"/>. When the chain shape
+	/// allows it (exactly one sorter, innermost, ordering by the left value, and every inner resolver
+	/// narrow-only capable), the base walk selects the [skip, skip+take) page with a heap of size
+	/// skip+take, and only those rows get a dictionary slot and join fill. Any other shape falls back
+	/// to the classic core — same results, just not bounded.
+	/// </summary>
+	internal QueryResults<TJoinResult> ExecuteCoreJoinedTop<TJoinResult>(bool pool, bool clone, int skip, int take)
+		where TJoinResult : struct, IJoinResult<TLeftValue> {
+		// Cheap gates first: negative or unbounded paging keeps the classic core's historical
+		// behavior exactly (bounding is a pure optimization, never a gate), and bailing here skips
+		// the chain walk — which would otherwise box the sorter's comparer for nothing.
+		if (skip < 0 || take < 0 || take == int.MaxValue || (long)skip + take > int.MaxValue) {
+			return ExecuteCoreJoined<TJoinResult>(pool, clone, skip, take);
+		}
+
+		var probe = TopKProbeProcessor<TLeftValue>.Create();
+		_resolverChain.Execute(ref probe);
+		var canBound = probe.SorterCount == 1
+		               && probe.SorterInnermost
+		               && probe.LeftComparer is not null
+		               && probe.AllInnerNarrowable;
+		if (!canBound) {
+			return ExecuteCoreJoined<TJoinResult>(pool, clone, skip, take);
+		}
+
+		var container = new JoinedResultContaier<TLeftKey, TLeftValue, TResolverChain, TJoinResult>(
+			ref _resolverChain, pool, clone, _manyCount, bounded: true);
+		var topK = new TopKJoinedBaseContainer<TLeftKey, TLeftValue>(probe.LeftComparer!, skip + take);
+		try {
+			container.PrepareIndexedInnerBounded(ref this);
+			container.NarrowIndexedInner(ref this);
+			_leftQuery.ExecuteBase(ref topK);
+			var kept = topK.Drain();
+			container.MaterializeTopK(topK.Buffer, skip, Math.Max(kept - skip, 0), topK.TotalCount);
+			container.ExecuteJoinsBounded();
+			return container.BuildResults();
+		} finally {
+			topK.Dispose();
+			container.Dispose();
+			// A candidate set auto-populated by PrepareIndexedInnerBounded that the base execution
+			// never consumed is still ours — the narrow pass runs user code (join filters, Where
+			// predicates) and can throw before ExecuteBase's own finally would have released it.
+			// ValueSet.Dispose is idempotent, so after a legitimate consume this is a no-op.
+			var candidates = _leftQuery.Candidates;
+			if (candidates.IsInitlized) {
+				candidates.Dispose();
+			}
+		}
+	}
+
 	// Nested-join seam: run the full joined pipeline but hand back the keyed result map
 	// (desk key → JoinResult row) instead of the flattened QueryResults, plus the disposer
 	// holding any pooled inner-Many buffers. The caller (JoinManyNestedResolver) seeds
@@ -1833,6 +1884,34 @@ public struct CacheQueryBuilderCombined<TDiscriminator, TLeftQuery, TLeftKey, TL
 		}
 	}
 
+
+	/// <summary>
+	/// Bounded top-K variant of <see cref="ExecuteCoreSimple{TResolver}"/>: when the resolver is a
+	/// left-ordering sorter and take is bounded, selects the [skip, skip+take) page with a heap of
+	/// size skip+take instead of materializing and full-sorting every matched row. Falls back to
+	/// the classic core for unsupported shapes — always correct, just not bounded.
+	/// </summary>
+	internal QueryResults<TLeftValue> ExecuteCoreSimpleTop<TResolver>(ref TResolver resolver, bool pool, bool clone, int skip, int take)
+		where TResolver : struct, IJoinResolver {
+		// Negative or unbounded paging goes through the classic core so the public terminals keep
+		// their historical behavior exactly; bounding is a pure optimization, never a gate.
+		if (skip < 0
+		    || take < 0
+		    || take == int.MaxValue
+		    || (long)skip + take > int.MaxValue
+		    || !TResolver.IsSorter
+		    || !resolver.TryGetLeftComparer<TLeftValue>(out var comparer)) {
+			return ExecuteCoreSimple(ref resolver, pool, clone, skip, take);
+		}
+
+		var container = new TopKSimpleResultContainer<TLeftKey, TLeftValue>(comparer!, pool, clone, skip, take);
+		try {
+			_leftQuery.ExecuteBase(ref container);
+			return container.BuildResults();
+		} finally {
+			container.Dispose();
+		}
+	}
 
 	internal int CountCoreSimple() {
 		return _leftQuery.CountBase();
@@ -2414,6 +2493,19 @@ public static class CacheQueryBuilderCombinedExecuteJoinedExtensions {
 		where TResult : struct, IJoinResult<TValue>
 		=> Unsafe.AsRef(in builder).CountCoreJoined<TResult>();
 
+	// ── Sorted joined terminals: transparently bounded ───────────────────────────
+	// With a bounded take, the [skip, skip+take) page is selected with a heap of size skip+take
+	// and only those rows get a dictionary slot and join fill (see ExecuteCoreJoinedTop). Rows
+	// and TotalCount match the classic full-sort pipeline, with two documented divergences:
+	// tie order at the selection boundary may differ (both paths sort unstably), and where the
+	// classic path emits a phantom row with a default Left — possible when UseIndex-seeded
+	// candidates are combined with Where and an inner join, since index-seeded candidates bypass
+	// the predicate — the bounded plan omits it. Chain shapes that cannot be bounded (comparer
+	// over joined fields, post-join sorter, unbounded take, an inner resolver without narrow-only
+	// support) run the classic pipeline unchanged. The bounded plan runs two passes over inner
+	// joins (narrow, then fill); the user's join filter is applied only in the narrow pass, but a
+	// non-identity key selector runs in both — both must therefore be deterministic.
+
 	public static QueryResults<TResult> Execute<TDiscriminator, TExecutor, TKey, TValue, TResolverChain, TResult>(
 		this in CacheQueryBuilderCombined<SortedQuery<TDiscriminator>, TExecutor, TKey, TValue, TResolverChain, TResult> builder,
 		int skip = 0, int take = int.MaxValue)
@@ -2423,7 +2515,7 @@ public static class CacheQueryBuilderCombinedExecuteJoinedExtensions {
 		where TKey : notnull, IEquatable<TKey>
 		where TValue : ICacheEquatable<TValue>, ICacheClonable<TValue>
 		where TResult : struct, IJoinResult<TValue>
-		=> Unsafe.AsRef(in builder).ExecuteCoreJoined<TResult>(false, false, skip, take);
+		=> Unsafe.AsRef(in builder).ExecuteCoreJoinedTop<TResult>(false, false, skip, take);
 
 	public static QueryResults<TResult> ExecuteCloned<TDiscriminator, TExecutor, TKey, TValue, TResolverChain, TResult>(
 		this in CacheQueryBuilderCombined<SortedQuery<TDiscriminator>, TExecutor, TKey, TValue, TResolverChain, TResult> builder,
@@ -2434,7 +2526,7 @@ public static class CacheQueryBuilderCombinedExecuteJoinedExtensions {
 		where TKey : notnull, IEquatable<TKey>
 		where TValue : ICacheEquatable<TValue>, ICacheClonable<TValue>
 		where TResult : struct, IJoinResult<TValue>
-		=> Unsafe.AsRef(in builder).ExecuteCoreJoined<TResult>(false, true, skip, take);
+		=> Unsafe.AsRef(in builder).ExecuteCoreJoinedTop<TResult>(false, true, skip, take);
 
 	public static QueryResults<TResult> ExecutePooled<TDiscriminator, TExecutor, TKey, TValue, TResolverChain, TResult>(
 		this in CacheQueryBuilderCombined<SortedQuery<TDiscriminator>, TExecutor, TKey, TValue, TResolverChain, TResult> builder,
@@ -2445,7 +2537,7 @@ public static class CacheQueryBuilderCombinedExecuteJoinedExtensions {
 		where TKey : notnull, IEquatable<TKey>
 		where TValue : ICacheEquatable<TValue>, ICacheClonable<TValue>
 		where TResult : struct, IJoinResult<TValue>
-		=> Unsafe.AsRef(in builder).ExecuteCoreJoined<TResult>(true, false, skip, take);
+		=> Unsafe.AsRef(in builder).ExecuteCoreJoinedTop<TResult>(true, false, skip, take);
 
 	public static QueryResults<TResult> ExecutePooledCloned<TDiscriminator, TExecutor, TKey, TValue, TResolverChain, TResult>(
 		this in CacheQueryBuilderCombined<SortedQuery<TDiscriminator>, TExecutor, TKey, TValue, TResolverChain, TResult> builder,
@@ -2456,7 +2548,7 @@ public static class CacheQueryBuilderCombinedExecuteJoinedExtensions {
 		where TKey : notnull, IEquatable<TKey>
 		where TValue : ICacheEquatable<TValue>, ICacheClonable<TValue>
 		where TResult : struct, IJoinResult<TValue>
-		=> Unsafe.AsRef(in builder).ExecuteCoreJoined<TResult>(true, true, skip, take);
+		=> Unsafe.AsRef(in builder).ExecuteCoreJoinedTop<TResult>(true, true, skip, take);
 }
 public static class CacheQueryBuilderCombinedExecuteSimpleExtensions {
 	// Non-join builders (TResult pinned to TValue): no narrowing to run, so Count reports
@@ -2479,6 +2571,12 @@ public static class CacheQueryBuilderCombinedExecuteSimpleExtensions {
 		where TValue : ICacheEquatable<TValue>, ICacheClonable<TValue>
 		=> Unsafe.AsRef(in builder).CountCoreSimple();
 
+	// ── Sorted simple terminals: transparently bounded ───────────────────────────
+	// With a bounded take, the [skip, skip+take) page is selected with a heap of size skip+take
+	// instead of materializing and sorting every matched row (see ExecuteCoreSimpleTop). Rows and
+	// TotalCount match the classic full-sort pipeline; tie order at the selection boundary may
+	// differ (both paths sort unstably). Unbounded take runs the classic pipeline unchanged.
+
 	public static QueryResults<TValue> Execute<TDiscriminator, TExecutor, TKey, TValue, TResolver>(
 		this in CacheQueryBuilderCombined<SortedQuery<TDiscriminator>, TExecutor, TKey, TValue, Resolvers<TResolver>, TValue> builder,
 		int skip = 0, int take = int.MaxValue)
@@ -2487,7 +2585,7 @@ public static class CacheQueryBuilderCombinedExecuteSimpleExtensions {
 		where TResolver : struct, IJoinResolver
 		where TKey : notnull, IEquatable<TKey>
 		where TValue : ICacheEquatable<TValue>, ICacheClonable<TValue>
-		=> Unsafe.AsRef(in builder).ExecuteCoreSimple(ref builder._resolverChain.Resolver, false, false, skip, take);
+		=> Unsafe.AsRef(in builder).ExecuteCoreSimpleTop(ref builder._resolverChain.Resolver, false, false, skip, take);
 
 	public static QueryResults<TValue> ExecuteCloned<TDiscriminator, TExecutor, TKey, TValue, TResolver>(
 		this in CacheQueryBuilderCombined<SortedQuery<TDiscriminator>, TExecutor, TKey, TValue,  Resolvers<TResolver>, TValue> builder,
@@ -2497,7 +2595,7 @@ public static class CacheQueryBuilderCombinedExecuteSimpleExtensions {
 		where TResolver : struct, IJoinResolver
 		where TKey : notnull, IEquatable<TKey>
 		where TValue : ICacheEquatable<TValue>, ICacheClonable<TValue>
-		=> Unsafe.AsRef(in builder).ExecuteCoreSimple(ref builder._resolverChain.Resolver,false, true, skip, take);
+		=> Unsafe.AsRef(in builder).ExecuteCoreSimpleTop(ref builder._resolverChain.Resolver,false, true, skip, take);
 
 	public static QueryResults<TValue> ExecutePooled<TDiscriminator, TExecutor, TKey, TValue, TResolver>(
 		this in CacheQueryBuilderCombined<SortedQuery<TDiscriminator>, TExecutor, TKey, TValue,  Resolvers<TResolver>, TValue> builder,
@@ -2507,7 +2605,7 @@ public static class CacheQueryBuilderCombinedExecuteSimpleExtensions {
 		where TResolver : struct, IJoinResolver
 		where TKey : notnull, IEquatable<TKey>
 		where TValue : ICacheEquatable<TValue>, ICacheClonable<TValue>
-		=> Unsafe.AsRef(in builder).ExecuteCoreSimple(ref builder._resolverChain.Resolver,true, false, skip, take);
+		=> Unsafe.AsRef(in builder).ExecuteCoreSimpleTop(ref builder._resolverChain.Resolver,true, false, skip, take);
 
 	public static QueryResults<TValue> ExecutePooledCloned<TDiscriminator, TExecutor, TKey, TValue, TResolver>(
 		this in CacheQueryBuilderCombined<SortedQuery<TDiscriminator>, TExecutor, TKey, TValue,  Resolvers<TResolver>, TValue> builder,
@@ -2517,7 +2615,7 @@ public static class CacheQueryBuilderCombinedExecuteSimpleExtensions {
 		where TResolver : struct, IJoinResolver
 		where TKey : notnull, IEquatable<TKey>
 		where TValue : ICacheEquatable<TValue>, ICacheClonable<TValue>
-		=> Unsafe.AsRef(in builder).ExecuteCoreSimple(ref builder._resolverChain.Resolver,true, true, skip, take);
+		=> Unsafe.AsRef(in builder).ExecuteCoreSimpleTop(ref builder._resolverChain.Resolver,true, true, skip, take);
 
 	public static QueryResults<TValue> Execute<TDiscriminator, TExecutor, TKey, TValue, TResolver>(
 		this in CacheQueryBuilderCombined<TDiscriminator, TExecutor, TKey, TValue, Resolvers<TResolver>, TValue> builder,
@@ -2558,6 +2656,7 @@ public static class CacheQueryBuilderCombinedExecuteSimpleExtensions {
 		where TKey : notnull, IEquatable<TKey>
 		where TValue : ICacheEquatable<TValue>, ICacheClonable<TValue>
 		=> Unsafe.AsRef(in builder).ExecuteCoreSimple(ref builder._resolverChain.Resolver,true, true, skip, take);
+
 }
 
 

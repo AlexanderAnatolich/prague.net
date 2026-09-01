@@ -52,6 +52,20 @@ public struct SortResolver<TLeftKey, TLeftValue, TResult, TComparer> : IJoinReso
 			results.SortAndCrop(new JoinSortComparerWrapper<TFullResult>(_comparer), skip, take);
 	}
 
+	bool IJoinResolver.TryGetLeftComparer<TLeft>(out IComparer<TLeft>? comparer) {
+		// _isLeftValue pins TResult == TLeftValue; the typeof check additionally pins the
+		// caller's TLeft to the same runtime type, making the boxed cast safe. One boxing
+		// of the struct-generic TComparer per query — the classic sort path pays the same
+		// interface-dispatch per comparison anyway.
+		if (_isLeftValue && typeof(TLeft) == typeof(TResult)) {
+			comparer = (IComparer<TLeft>)(object)_comparer!;
+			return true;
+		}
+
+		comparer = null;
+		return false;
+	}
+
 	private struct LeftSortComparerWrapper<TFullResult> : IComparer<TFullResult>
 		where TFullResult : struct, IJoinResult {
 		private TComparer _comparer;
