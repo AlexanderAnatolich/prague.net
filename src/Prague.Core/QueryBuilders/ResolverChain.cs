@@ -132,6 +132,21 @@ internal ref struct JoinedResultContaier<TLeftKey, TLeftValue, TResolverChain, T
 		_disposer = pool && manyCount > 0 ? new QueryResultsDisposer(manyCount) : default;
 	}
 
+	/// <summary>
+	///   Bounded top-K constructor. The page is selected upstream (heap over the base walk), so the
+	///   container itself neither slices nor sorts: skip/take stay neutral and cloning is always the
+	///   deferred kind — only the surviving page rows are cloned, once, in BuildResults.
+	/// </summary>
+	public JoinedResultContaier(ref TResolverChain chainedResolvers, bool pool, bool clone, int manyCount, bool bounded) {
+		_chainedResolvers = ref chainedResolvers;
+		_shouldPool = pool;
+		_cloneOnAdd = false;
+		_clone = clone;
+		_skip = 0;
+		_take = int.MaxValue;
+		_disposer = pool && manyCount > 0 ? new QueryResultsDisposer(manyCount) : default;
+	}
+
 
 
 	public void PrepareIndexedInner<TExecutor>(ref TExecutor leftQuery)
@@ -167,7 +182,8 @@ internal ref struct JoinedResultContaier<TLeftKey, TLeftValue, TResolverChain, T
 
 	/// <summary>Execute joins for resolver 1 (reverse joins only — forward joins resolved in Add when active).</summary>
 	public void ExecuteJoins() {
-		var p = new ExecuteWithAccessorProcessor<TLeftKey, TResult>(ref _results, _skip, _take, _cloneOnAdd, _shouldPool, ref _disposer);
+		var p = new ExecuteWithAccessorProcessor<TLeftKey, TResult>(
+			ref _results, _skip, _take, _cloneOnAdd, _shouldPool, ref _disposer, fillInner: false, skipSorter: false);
 		_chainedResolvers.Execute(ref p);
 		if (!p.DidSort && (_skip > 0 || _take < int.MaxValue))
 			_results.Crop(_skip, _take);
@@ -175,6 +191,54 @@ internal ref struct JoinedResultContaier<TLeftKey, TLeftValue, TResolverChain, T
 
 	/// <summary>Finalize results — placeholder for post-execute work; currently a no-op.</summary>
 	public void FinalizeResults() {
+	}
+
+	// ── Bounded top-K path ───────────────────────────────────────────────────────
+
+	/// <summary>
+	///   Bounded-path Prepare: triggers candidate auto-population exactly like
+	///   <see cref="PrepareIndexedInner{TExecutor}"/>, but does NOT size the results dictionary to
+	///   the candidate count — the dictionary is created later, sized to the selected page.
+	/// </summary>
+	public void PrepareIndexedInnerBounded<TExecutor>(ref TExecutor leftQuery)
+		where TExecutor : struct, ICandidatesExecutor<TLeftKey, TLeftValue> {
+		var e = new PrepareIndexedInnerProcessor<TLeftKey, TLeftValue, TExecutor>(ref leftQuery, _cloneOnAdd, _shouldPool, ref _disposer);
+		_chainedResolvers.Execute(ref e);
+	}
+
+	/// <summary>Runs every inner resolver in narrow-only mode (candidate narrowing, no dictionary writes).</summary>
+	public void NarrowIndexedInner<TExecutor>(ref TExecutor leftQuery)
+		where TExecutor : struct, ICandidatesExecutor<TLeftKey, TLeftValue> {
+		var e = new NarrowIndexedInnerProcessor<TExecutor>(ref leftQuery);
+		_chainedResolvers.Execute(ref e);
+	}
+
+	/// <summary>
+	///   Materializes the selected top-K rows into the results dictionary: page rows are inserted in
+	///   ascending (final) order, keys are unique (they come from a candidate set), and metadata built
+	///   by plain appends stays lookup-consistent for the join fill pass that follows.
+	/// </summary>
+	public void MaterializeTopK((TLeftKey Key, TLeftValue Left)[] pairs, int start, int count, int totalCount) {
+		// ValueDictionary is fixed-capacity; clamp to at least 1 so the rent path stays on
+		// well-trodden ground. An empty page is handled by BuildResults' Count == 0 guard.
+		Init(Math.Max(count, 1));
+		for (var i = 0; i < count; i++) {
+			ref readonly var pair = ref pairs[start + i];
+			ref var v = ref _results.GetValueRefOrAddDefault(pair.Key, out _);
+			Unsafe.AsRef(in v.Left) = pair.Left;
+		}
+
+		_totalCont = totalCount;
+	}
+
+	/// <summary>
+	///   Join fill for the bounded path: fills inner AND reverse slots, for the page rows only.
+	///   The sorter is skipped (rows are already ordered and cropped) and no fallback Crop runs.
+	/// </summary>
+	public void ExecuteJoinsBounded() {
+		var p = new ExecuteWithAccessorProcessor<TLeftKey, TResult>(
+			ref _results, 0, int.MaxValue, _cloneOnAdd, _shouldPool, ref _disposer, fillInner: true, skipSorter: true);
+		_chainedResolvers.Execute(ref p);
 	}
 
 	public QueryResults<TResult> BuildResults() {
@@ -278,6 +342,227 @@ internal ref struct SimpleResultContainer<TKey, TValue, TResolver>
 	public void Dispose() {
 		if (!_handedOff)
 			_results.Dispose();
+	}
+}
+
+/// <summary>
+///   Bounded counterpart of <see cref="SimpleResultContainer{TKey,TValue,TResolver}"/>: instead of
+///   materializing every matched row, keeps only the top (skip+take) rows per the sorter's left
+///   comparer in a pooled max-heap buffer, counting the true total on the fly. BuildResults drains
+///   the heap ascending, drops the skip prefix, and produces a page-sized QueryResults whose
+///   TotalCount is the full matched count (via UnsafeSetTotal — its first caller).
+///   Clone semantics mirror the sliced classic path: survivors cloned once, after selection.
+///   The heap buffer never transfers ownership — Dispose always returns it; the page rows are
+///   copied into the result's own buffer.
+/// </summary>
+internal ref struct TopKSimpleResultContainer<TKey, TValue>
+	: IResultContainerInitializer<TKey, TValue>
+	where TKey : notnull, IEquatable<TKey>
+	where TValue : ICacheEquatable<TValue>, ICacheClonable<TValue> {
+	private readonly bool _shouldPool;
+	private readonly bool _clone;
+	private readonly int _skip;
+	private readonly int _take;
+	private readonly int _k;
+	private readonly IComparer<TValue> _comparer;
+	private TValue[]? _heap;
+	private int _heapCount;
+	private bool _heapified;
+	private int _totalCount;
+
+	public int TotalCount => _totalCount;
+
+	public TopKSimpleResultContainer(IComparer<TValue> comparer, bool pool, bool clone, int skip, int take) {
+		_comparer = comparer;
+		_shouldPool = pool;
+		// Bounded selection always slices, so cloning is always deferred to the survivors.
+		_clone = clone;
+		_skip = skip;
+		_take = take;
+		_k = skip + take;
+	}
+
+	public void Init(int maxCount) {
+		// maxCount is an upper bound on matched rows; never rent more than K slots.
+		var capacity = Math.Min(_k, maxCount);
+		if (capacity > 0 && _heap is null) {
+			_heap = PragueArrayPool<TValue>.Pool.Rent(capacity);
+		}
+	}
+
+	public void Seal(int actualCount) => _totalCount = actualCount;
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public int Add(TKey foreignKey, TValue result) {
+		if (_heap is not null) {
+			TopKSelect.Push(_heap, ref _heapCount, ref _heapified, _k, result, _comparer);
+		}
+
+		return 0;
+	}
+
+	public QueryResults<TValue> BuildResults() {
+		if (_totalCount == 0 || _skip > _totalCount) {
+			return QueryResults<TValue>.EmptyWithTotalCount(_totalCount);
+		}
+
+		var kept = _heap is null ? 0 : TopKSelect.DrainAscending(_heap, ref _heapCount, ref _heapified, _comparer);
+		var page = Math.Max(kept - _skip, 0);
+		if (page == 0) {
+			return QueryResults<TValue>.EmptyWithTotalCount(_totalCount);
+		}
+
+		var results = new QueryResults<TValue>(page, _shouldPool);
+		for (var i = 0; i < page; i++) {
+			results.UnsafeAdd(_heap![_skip + i]);
+		}
+
+		results.UnsafeSetTotal(_totalCount);
+		if (!_clone) {
+			return results;
+		}
+
+		try {
+			return results.CloneInPlace();
+		} catch {
+			// User Clone() threw: the page buffer was never handed to a caller, so it is still ours.
+			results.Dispose();
+			throw;
+		}
+	}
+
+	public void Dispose() {
+		if (_heap is not null) {
+			PragueArrayPool<TValue>.Pool.Return(_heap, RuntimeHelpers.IsReferenceOrContainsReferences<TValue>());
+			_heap = null;
+		}
+	}
+}
+
+/// <summary>Compares (key, left) selection pairs by the left value only.</summary>
+internal readonly struct TopKPairComparer<TKey, TValue> : IComparer<(TKey Key, TValue Left)> {
+	private readonly IComparer<TValue> _inner;
+
+	public TopKPairComparer(IComparer<TValue> inner) {
+		_inner = inner;
+	}
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public int Compare((TKey Key, TValue Left) x, (TKey Key, TValue Left) y) => _inner.Compare(x.Left, y.Left);
+}
+
+/// <summary>
+///   Bounded base-walk container for the joined top-K path: receives every (key, left) match from the
+///   base execution (post-Where, post-inner-narrowing), keeps the top skip+take pairs in a pooled
+///   max-heap, and records the authoritative total via Seal. The kept pairs are then drained into the
+///   real results dictionary. The heap buffer never transfers ownership — Dispose always returns it.
+/// </summary>
+internal ref struct TopKJoinedBaseContainer<TKey, TValue>
+	: IResultContainerInitializer<TKey, TValue>
+	where TKey : notnull, IEquatable<TKey> {
+	private readonly int _k;
+	private readonly TopKPairComparer<TKey, TValue> _comparer;
+	private (TKey Key, TValue Left)[]? _heap;
+	private int _heapCount;
+	private bool _heapified;
+	private int _totalCount;
+
+	public int TotalCount => _totalCount;
+
+	public TopKJoinedBaseContainer(IComparer<TValue> comparer, int k) {
+		_comparer = new TopKPairComparer<TKey, TValue>(comparer);
+		_k = k;
+	}
+
+	public void Init(int maxCount) {
+		// maxCount is an upper bound on matched rows; never rent more than K slots.
+		var capacity = Math.Min(_k, maxCount);
+		if (capacity > 0 && _heap is null) {
+			_heap = PragueArrayPool<(TKey, TValue)>.Pool.Rent(capacity);
+		}
+	}
+
+	public void Seal(int actualCount) => _totalCount = actualCount;
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public int Add(TKey foreignKey, TValue result) {
+		if (_heap is not null) {
+			TopKSelect.Push(_heap, ref _heapCount, ref _heapified, _k, (foreignKey, result), _comparer);
+		}
+
+		return 0;
+	}
+
+	/// <summary>Heapsorts the kept pairs ascending; returns the kept count.</summary>
+	internal int Drain() {
+		return _heap is null ? 0 : TopKSelect.DrainAscending(_heap, ref _heapCount, ref _heapified, _comparer);
+	}
+
+	/// <summary>
+	///   The kept pairs' backing buffer. Valid only between <see cref="Drain"/> and
+	///   <see cref="Dispose"/>; empty when nothing was ever kept.
+	/// </summary>
+	internal (TKey Key, TValue Left)[] Buffer => _heap ?? [];
+
+	public void Dispose() {
+		if (_heap is not null) {
+			PragueArrayPool<(TKey, TValue)>.Pool.Return(_heap, RuntimeHelpers.IsReferenceOrContainsReferences<(TKey, TValue)>());
+			_heap = null;
+		}
+	}
+}
+
+/// <summary>
+///   Pre-execution probe for the bounded top-K path. Walks the resolver chain and answers: is there
+///   exactly one sorter, is it the innermost resolver (chain base, position 0 — only the pre-join Sort
+///   overload produces that), does it order by the left value (comparer extractable), and does every
+///   inner resolver support narrow-only execution.
+/// </summary>
+internal ref struct TopKProbeProcessor<TLeftValue> : IResolverExecutor {
+	internal int SorterCount;
+	internal bool SorterInnermost;
+	internal bool AllInnerNarrowable;
+	internal IComparer<TLeftValue>? LeftComparer;
+
+	public static TopKProbeProcessor<TLeftValue> Create() => new() { AllInnerNarrowable = true };
+
+	public void Process<TResolver>(int position, ref TResolver resolver) where TResolver : struct, IJoinResolver {
+		if (TResolver.IsSorter) {
+			SorterCount++;
+			SorterInnermost = position == 0;
+			if (resolver.TryGetLeftComparer<TLeftValue>(out var cmp)) {
+				LeftComparer = cmp;
+			}
+
+			return;
+		}
+
+		if (resolver.Inner && !TResolver.SupportsNarrowOnly) {
+			AllInnerNarrowable = false;
+		}
+	}
+}
+
+/// <summary>
+///   Chain walker for the bounded top-K path: runs every inner resolver in narrow-only mode
+///   (candidates intersected with survivors, no dictionary writes). Callers must have verified
+///   via the probe that every inner resolver in the chain has SupportsNarrowOnly == true.
+///   Hand-written (unlike the generated processors) because it needs no per-position accessor.
+/// </summary>
+internal ref struct NarrowIndexedInnerProcessor<TExecutor> : IResolverExecutor
+	where TExecutor : struct, IUnsafeCandidatesExecutor {
+	private ref TExecutor _leftQuery;
+
+	public NarrowIndexedInnerProcessor(ref TExecutor leftQuery) {
+		_leftQuery = ref leftQuery;
+	}
+
+	public void Process<TResolver>(int position, ref TResolver resolver) where TResolver : struct, IJoinResolver {
+		if (!resolver.Inner) {
+			return;
+		}
+
+		resolver.UnsafeNarrowIndexedInner(ref _leftQuery);
 	}
 }
 

@@ -39,6 +39,47 @@ public interface IJoinResolver {
 		where TFullResult: struct, IJoinResult
 		where TKey : notnull, IEquatable<TKey> => throw new InvalidOperationException("Join resolver is not sortable");
 
+	/// <summary>
+	/// Sorter-only seam: exposes the user comparer as an <see cref="IComparer{TLeft}"/> over the
+	/// LEFT value when this sorter orders by the left value itself (TResult == TLeftValue).
+	/// Default: not a sorter / not left-ordered. Callers must gate on the JIT-folded
+	/// <see cref="IsSorter"/> so this default is never constrained-called on join resolver structs.
+	/// </summary>
+	internal bool TryGetLeftComparer<TLeft>(out IComparer<TLeft>? comparer) {
+		comparer = null;
+		return false;
+	}
+
+	/// <summary>
+	/// Whether this resolver supports narrow-only inner execution
+	/// (<see cref="UnsafeNarrowIndexedInner{TExecutor}"/>). JIT-folded per instantiation;
+	/// the bounded top-K path probes this before committing to the bounded plan.
+	/// </summary>
+	static virtual bool SupportsNarrowOnly => false;
+
+	/// <summary>
+	/// Narrow-only inner execution: intersects the outer query's candidate set with the lefts
+	/// that have a (filter-passing) right match, WITHOUT writing anything into a results map.
+	/// Only invoked by the bounded top-K path, and only on resolvers whose
+	/// <see cref="SupportsNarrowOnly"/> is true.
+	/// </summary>
+	internal void UnsafeNarrowIndexedInner<TExecutor>(ref TExecutor leftQuery)
+		where TExecutor : struct, IUnsafeCandidatesExecutor
+		=> throw new InvalidOperationException("Resolver does not support narrow-only inner execution");
+
+	/// <summary>
+	/// Bounded-path fill for an inner resolver whose membership was already decided by
+	/// <see cref="UnsafeNarrowIndexedInner{TExecutor}"/>: fetches the right values for the selected
+	/// page rows WITHOUT re-applying the join filter (membership is settled; re-applying it would
+	/// invoke the user's lambda a second time), then drops any page row whose slot came back empty
+	/// — a right row retired between the two passes must not surface on an inner join.
+	/// Only invoked on resolvers whose <see cref="SupportsNarrowOnly"/> is true.
+	/// </summary>
+	internal void UnsafeFillNarrowedInner<TAccessor>(ref TAccessor accessor, bool cloneOnAdd, bool shouldPool,
+		ref QueryResultsDisposer disposer)
+		where TAccessor : struct, IUnsafeValueAccessor, allows ref struct
+		=> throw new InvalidOperationException("Resolver does not support narrow-only inner execution");
+
 	void UnsafeExecuteIndexedInner<TAccessor, TExecutor>(
 		ref TAccessor accessor,
 		ref TExecutor leftQuery,
