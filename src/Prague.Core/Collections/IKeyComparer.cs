@@ -26,8 +26,8 @@ public interface IKeyComparer<T> {
 /// Default key comparer — dispatches to <c>T.Equals</c> / <c>T.GetHashCode</c> via the
 /// <see cref="IEquatable{T}"/> contract. Zero-size struct: occupies no field space, so collections
 /// parameterized by it stay layout-compatible with their pre-generic predecessors
-/// (a load-bearing invariant for <c>Unsafe.As</c> reinterprets in <c>LeftKeySetView</c> and the
-/// fan-out containers).
+/// (a load-bearing invariant for the <c>Unsafe.As</c> reinterpret of <c>LeftKeySetView</c> back to
+/// <c>PooledSet</c> in the JoinOne LeftSym fan-out containers).
 /// </summary>
 public readonly struct DefaultKeyComparer<T> : IKeyComparer<T> {
 	public static bool IsDefault => true;

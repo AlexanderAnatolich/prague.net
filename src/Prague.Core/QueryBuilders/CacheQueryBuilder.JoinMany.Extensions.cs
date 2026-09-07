@@ -508,7 +508,7 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	public static CacheQueryBuilderCombined<TDiscriminator, TExecutor, TLeftKey, TLeftValue,
 		Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TLookupKey, TRightKey, TRightValue,
-			NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+			NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 			IdentitySelector<TLookupKey>>>,
 		JoinResult<TLeftValue, QueryResults<TRightValue>>>
 		JoinMany<TDiscriminator, TExecutor, TResolverChain, TLeftKey, TLeftValue, TLookupKey, TRightCache, TRightKey, TRightValue>(
@@ -526,16 +526,16 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 		where TRightKey : notnull, IEquatable<TRightKey>
 		where TRightCache : IDataCache<TRightCache, TRightKey, TRightValue> {
 		var resolver = new JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TLookupKey, TRightKey, TRightValue,
-			NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+			NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 			IdentitySelector<TLookupKey>>(
 			leftSymIndex, (TRightCache)rightCache, rightIndex, default, default);
 		return Unsafe.AsRef(in builder).AddResolver<
 			Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TLookupKey, TRightKey, TRightValue,
-				NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+				NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 				IdentitySelector<TLookupKey>>>,
 			JoinResult<TLeftValue, QueryResults<TRightValue>>>(
 			new Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TLookupKey, TRightKey, TRightValue,
-				NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+				NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 				IdentitySelector<TLookupKey>>>(
 				builder._resolverChain, resolver),
 			true);
@@ -546,7 +546,7 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	public static CacheQueryBuilderCombined<TDiscriminator, TExecutor, TLeftKey, TLeftValue,
 		Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TLookupKey, TRightKey, TRightValue,
-			JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+			JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 			IdentitySelector<TLookupKey>>>,
 		JoinResult<TLeftValue, QueryResults<TRightValue>>>
 		JoinMany<TDiscriminator, TExecutor, TResolverChain, TLeftKey, TLeftValue, TLookupKey, TRightCache, TRightKey, TRightValue>(
@@ -555,8 +555,8 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 			IDataCache<TRightCache, TRightKey, TRightValue> rightCache,
 			CacheKeyValueListIndex<TRightKey, TRightValue, TLookupKey> rightIndex,
 			Func<
-				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>,
-				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>> filter)
+				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>,
+				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>> filter)
 		where TExecutor : struct, ICandidatesExecutor<TLeftKey, TLeftValue>
 		where TDiscriminator : struct, IBaseJoinable
 		where TResolverChain : struct, IResolvers
@@ -567,18 +567,18 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 		where TRightKey : notnull, IEquatable<TRightKey>
 		where TRightCache : IDataCache<TRightCache, TRightKey, TRightValue> {
 		var resolver = new JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TLookupKey, TRightKey, TRightValue,
-			JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+			JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 			IdentitySelector<TLookupKey>>(
 			leftSymIndex, (TRightCache)rightCache, rightIndex,
-			new JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>(filter),
+			new JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>(filter),
 			default);
 		return Unsafe.AsRef(in builder).AddResolver<
 			Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TLookupKey, TRightKey, TRightValue,
-				JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+				JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 				IdentitySelector<TLookupKey>>>,
 			JoinResult<TLeftValue, QueryResults<TRightValue>>>(
 			new Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TLookupKey, TRightKey, TRightValue,
-				JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+				JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 				IdentitySelector<TLookupKey>>>(
 				builder._resolverChain, resolver),
 			true);
@@ -589,7 +589,7 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	public static CacheQueryBuilderCombined<TDiscriminator, TExecutor, TLeftKey, TLeftValue,
 		Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TLookupKey, TRightKey, TRightValue,
-			JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TArg>,
+			JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TArg>,
 			IdentitySelector<TLookupKey>>>,
 		JoinResult<TLeftValue, QueryResults<TRightValue>>>
 		JoinMany<TDiscriminator, TExecutor, TResolverChain, TLeftKey, TLeftValue, TLookupKey, TRightCache, TRightKey, TArg, TRightValue>(
@@ -598,9 +598,9 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 			IDataCache<TRightCache, TRightKey, TRightValue> rightCache,
 			CacheKeyValueListIndex<TRightKey, TRightValue, TLookupKey> rightIndex,
 			Func<
-				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>,
+				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>,
 				TArg,
-				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>> filter,
+				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>> filter,
 			TArg arg)
 		where TExecutor : struct, ICandidatesExecutor<TLeftKey, TLeftValue>
 		where TDiscriminator : struct, IBaseJoinable
@@ -612,18 +612,18 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 		where TRightKey : notnull, IEquatable<TRightKey>
 		where TRightCache : IDataCache<TRightCache, TRightKey, TRightValue> {
 		var resolver = new JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TLookupKey, TRightKey, TRightValue,
-			JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TArg>,
+			JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TArg>,
 			IdentitySelector<TLookupKey>>(
 			leftSymIndex, (TRightCache)rightCache, rightIndex,
-			new JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TArg>(filter, arg),
+			new JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TArg>(filter, arg),
 			default);
 		return Unsafe.AsRef(in builder).AddResolver<
 			Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TLookupKey, TRightKey, TRightValue,
-				JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TArg>,
+				JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TArg>,
 				IdentitySelector<TLookupKey>>>,
 			JoinResult<TLeftValue, QueryResults<TRightValue>>>(
 			new Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TLookupKey, TRightKey, TRightValue,
-				JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TArg>,
+				JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TArg>,
 				IdentitySelector<TLookupKey>>>(
 				builder._resolverChain, resolver),
 			true);
@@ -634,7 +634,7 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	public static CacheQueryBuilderCombined<TDiscriminator, TExecutor, TLeftKey, TLeftValue,
 		Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TLookupKey, TRightKey, TRightValue,
-			NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+			NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 			IdentitySelector<TLookupKey>>>,
 		JoinResult<TLeftValue, QueryResults<TRightValue>>>
 		InnerJoinMany<TDiscriminator, TExecutor, TResolverChain, TLeftKey, TLeftValue, TLookupKey, TRightCache, TRightKey, TRightValue>(
@@ -652,16 +652,16 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 		where TRightKey : notnull, IEquatable<TRightKey>
 		where TRightCache : IDataCache<TRightCache, TRightKey, TRightValue> {
 		var resolver = new JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TLookupKey, TRightKey, TRightValue,
-			NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+			NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 			IdentitySelector<TLookupKey>>(
 			leftSymIndex, (TRightCache)rightCache, rightIndex, default, default, isInner: true);
 		return Unsafe.AsRef(in builder).AddResolver<
 			Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TLookupKey, TRightKey, TRightValue,
-				NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+				NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 				IdentitySelector<TLookupKey>>>,
 			JoinResult<TLeftValue, QueryResults<TRightValue>>>(
 			new Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TLookupKey, TRightKey, TRightValue,
-				NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+				NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 				IdentitySelector<TLookupKey>>>(
 				builder._resolverChain, resolver),
 			true);
@@ -672,7 +672,7 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	public static CacheQueryBuilderCombined<TDiscriminator, TExecutor, TLeftKey, TLeftValue,
 		Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TLookupKey, TRightKey, TRightValue,
-			JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+			JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 			IdentitySelector<TLookupKey>>>,
 		JoinResult<TLeftValue, QueryResults<TRightValue>>>
 		InnerJoinMany<TDiscriminator, TExecutor, TResolverChain, TLeftKey, TLeftValue, TLookupKey, TRightCache, TRightKey, TRightValue>(
@@ -681,8 +681,8 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 			IDataCache<TRightCache, TRightKey, TRightValue> rightCache,
 			CacheKeyValueListIndex<TRightKey, TRightValue, TLookupKey> rightIndex,
 			Func<
-				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>,
-				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>> filter)
+				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>,
+				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>> filter)
 		where TExecutor : struct, ICandidatesExecutor<TLeftKey, TLeftValue>
 		where TDiscriminator : struct, IBaseJoinable
 		where TResolverChain : struct, IResolvers
@@ -693,18 +693,18 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 		where TRightKey : notnull, IEquatable<TRightKey>
 		where TRightCache : IDataCache<TRightCache, TRightKey, TRightValue> {
 		var resolver = new JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TLookupKey, TRightKey, TRightValue,
-			JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+			JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 			IdentitySelector<TLookupKey>>(
 			leftSymIndex, (TRightCache)rightCache, rightIndex,
-			new JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>(filter),
+			new JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>(filter),
 			default, isInner: true);
 		return Unsafe.AsRef(in builder).AddResolver<
 			Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TLookupKey, TRightKey, TRightValue,
-				JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+				JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 				IdentitySelector<TLookupKey>>>,
 			JoinResult<TLeftValue, QueryResults<TRightValue>>>(
 			new Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TLookupKey, TRightKey, TRightValue,
-				JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+				JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 				IdentitySelector<TLookupKey>>>(
 				builder._resolverChain, resolver),
 			true);
@@ -715,7 +715,7 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	public static CacheQueryBuilderCombined<TDiscriminator, TExecutor, TLeftKey, TLeftValue,
 		Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TLookupKey, TRightKey, TRightValue,
-			JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TArg>,
+			JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TArg>,
 			IdentitySelector<TLookupKey>>>,
 		JoinResult<TLeftValue, QueryResults<TRightValue>>>
 		InnerJoinMany<TDiscriminator, TExecutor, TResolverChain, TLeftKey, TLeftValue, TLookupKey, TRightCache, TRightKey, TArg, TRightValue>(
@@ -724,9 +724,9 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 			IDataCache<TRightCache, TRightKey, TRightValue> rightCache,
 			CacheKeyValueListIndex<TRightKey, TRightValue, TLookupKey> rightIndex,
 			Func<
-				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>,
+				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>,
 				TArg,
-				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>> filter,
+				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>> filter,
 			TArg arg)
 		where TExecutor : struct, ICandidatesExecutor<TLeftKey, TLeftValue>
 		where TDiscriminator : struct, IBaseJoinable
@@ -738,18 +738,18 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 		where TRightKey : notnull, IEquatable<TRightKey>
 		where TRightCache : IDataCache<TRightCache, TRightKey, TRightValue> {
 		var resolver = new JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TLookupKey, TRightKey, TRightValue,
-			JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TArg>,
+			JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TArg>,
 			IdentitySelector<TLookupKey>>(
 			leftSymIndex, (TRightCache)rightCache, rightIndex,
-			new JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TArg>(filter, arg),
+			new JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TArg>(filter, arg),
 			default, isInner: true);
 		return Unsafe.AsRef(in builder).AddResolver<
 			Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TLookupKey, TRightKey, TRightValue,
-				JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TArg>,
+				JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TArg>,
 				IdentitySelector<TLookupKey>>>,
 			JoinResult<TLeftValue, QueryResults<TRightValue>>>(
 			new Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TLookupKey, TRightKey, TRightValue,
-				JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TArg>,
+				JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TArg>,
 				IdentitySelector<TLookupKey>>>(
 				builder._resolverChain, resolver),
 			true);
@@ -769,7 +769,7 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	public static CacheQueryBuilderCombined<TDiscriminator, TExecutor, TLeftKey, TLeftValue,
 		Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-			NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+			NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 			KeySelector<TLookupKey, TRightIndexKey>>>,
 		JoinResult<TLeftValue, QueryResults<TRightValue>>>
 		JoinMany<TDiscriminator, TExecutor, TResolverChain, TLeftKey, TLeftValue, TLookupKey, TRightIndexKey, TRightCache, TRightKey, TRightValue>(
@@ -789,16 +789,16 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 		where TRightKey : notnull, IEquatable<TRightKey>
 		where TRightCache : IDataCache<TRightCache, TRightKey, TRightValue> {
 		var resolver = new JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-			NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+			NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 			KeySelector<TLookupKey, TRightIndexKey>>(
 			leftSymIndex, (TRightCache)rightCache, rightIndex, default, new KeySelector<TLookupKey, TRightIndexKey>(keySelector));
 		return Unsafe.AsRef(in builder).AddResolver<
 			Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-				NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+				NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 				KeySelector<TLookupKey, TRightIndexKey>>>,
 			JoinResult<TLeftValue, QueryResults<TRightValue>>>(
 			new Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-				NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+				NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 				KeySelector<TLookupKey, TRightIndexKey>>>(
 				builder._resolverChain, resolver),
 			true);
@@ -809,7 +809,7 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	public static CacheQueryBuilderCombined<TDiscriminator, TExecutor, TLeftKey, TLeftValue,
 		Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-			JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+			JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 			KeySelector<TLookupKey, TRightIndexKey>>>,
 		JoinResult<TLeftValue, QueryResults<TRightValue>>>
 		JoinMany<TDiscriminator, TExecutor, TResolverChain, TLeftKey, TLeftValue, TLookupKey, TRightIndexKey, TRightCache, TRightKey, TRightValue>(
@@ -819,8 +819,8 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 			IDataCache<TRightCache, TRightKey, TRightValue> rightCache,
 			CacheKeyValueListIndex<TRightKey, TRightValue, TRightIndexKey> rightIndex,
 			Func<
-				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>,
-				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>> filter)
+				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>,
+				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>> filter)
 		where TExecutor : struct, ICandidatesExecutor<TLeftKey, TLeftValue>
 		where TDiscriminator : struct, IBaseJoinable
 		where TResolverChain : struct, IResolvers
@@ -832,18 +832,18 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 		where TRightKey : notnull, IEquatable<TRightKey>
 		where TRightCache : IDataCache<TRightCache, TRightKey, TRightValue> {
 		var resolver = new JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-			JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+			JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 			KeySelector<TLookupKey, TRightIndexKey>>(
 			leftSymIndex, (TRightCache)rightCache, rightIndex,
-			new JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>(filter),
+			new JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>(filter),
 			new KeySelector<TLookupKey, TRightIndexKey>(keySelector));
 		return Unsafe.AsRef(in builder).AddResolver<
 			Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-				JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+				JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 				KeySelector<TLookupKey, TRightIndexKey>>>,
 			JoinResult<TLeftValue, QueryResults<TRightValue>>>(
 			new Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-				JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+				JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 				KeySelector<TLookupKey, TRightIndexKey>>>(
 				builder._resolverChain, resolver),
 			true);
@@ -854,7 +854,7 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	public static CacheQueryBuilderCombined<TDiscriminator, TExecutor, TLeftKey, TLeftValue,
 		Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-			JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TFilterArg>,
+			JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TFilterArg>,
 			KeySelector<TLookupKey, TRightIndexKey>>>,
 		JoinResult<TLeftValue, QueryResults<TRightValue>>>
 		JoinMany<TDiscriminator, TExecutor, TResolverChain, TLeftKey, TLeftValue, TLookupKey, TRightIndexKey, TRightCache, TRightKey, TFilterArg, TRightValue>(
@@ -864,9 +864,9 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 			IDataCache<TRightCache, TRightKey, TRightValue> rightCache,
 			CacheKeyValueListIndex<TRightKey, TRightValue, TRightIndexKey> rightIndex,
 			Func<
-				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>,
+				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>,
 				TFilterArg,
-				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>> filter,
+				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>> filter,
 			TFilterArg arg)
 		where TExecutor : struct, ICandidatesExecutor<TLeftKey, TLeftValue>
 		where TDiscriminator : struct, IBaseJoinable
@@ -879,18 +879,18 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 		where TRightKey : notnull, IEquatable<TRightKey>
 		where TRightCache : IDataCache<TRightCache, TRightKey, TRightValue> {
 		var resolver = new JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-			JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TFilterArg>,
+			JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TFilterArg>,
 			KeySelector<TLookupKey, TRightIndexKey>>(
 			leftSymIndex, (TRightCache)rightCache, rightIndex,
-			new JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TFilterArg>(filter, arg),
+			new JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TFilterArg>(filter, arg),
 			new KeySelector<TLookupKey, TRightIndexKey>(keySelector));
 		return Unsafe.AsRef(in builder).AddResolver<
 			Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-				JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TFilterArg>,
+				JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TFilterArg>,
 				KeySelector<TLookupKey, TRightIndexKey>>>,
 			JoinResult<TLeftValue, QueryResults<TRightValue>>>(
 			new Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-				JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TFilterArg>,
+				JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TFilterArg>,
 				KeySelector<TLookupKey, TRightIndexKey>>>(
 				builder._resolverChain, resolver),
 			true);
@@ -901,7 +901,7 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	public static CacheQueryBuilderCombined<TDiscriminator, TExecutor, TLeftKey, TLeftValue,
 		Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-			NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+			NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 			KeySelector<TLookupKey, TRightIndexKey>>>,
 		JoinResult<TLeftValue, QueryResults<TRightValue>>>
 		InnerJoinMany<TDiscriminator, TExecutor, TResolverChain, TLeftKey, TLeftValue, TLookupKey, TRightIndexKey, TRightCache, TRightKey, TRightValue>(
@@ -921,16 +921,16 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 		where TRightKey : notnull, IEquatable<TRightKey>
 		where TRightCache : IDataCache<TRightCache, TRightKey, TRightValue> {
 		var resolver = new JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-			NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+			NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 			KeySelector<TLookupKey, TRightIndexKey>>(
 			leftSymIndex, (TRightCache)rightCache, rightIndex, default, new KeySelector<TLookupKey, TRightIndexKey>(keySelector), isInner: true);
 		return Unsafe.AsRef(in builder).AddResolver<
 			Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-				NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+				NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 				KeySelector<TLookupKey, TRightIndexKey>>>,
 			JoinResult<TLeftValue, QueryResults<TRightValue>>>(
 			new Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-				NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+				NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 				KeySelector<TLookupKey, TRightIndexKey>>>(
 				builder._resolverChain, resolver),
 			true);
@@ -941,7 +941,7 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	public static CacheQueryBuilderCombined<TDiscriminator, TExecutor, TLeftKey, TLeftValue,
 		Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-			JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+			JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 			KeySelector<TLookupKey, TRightIndexKey>>>,
 		JoinResult<TLeftValue, QueryResults<TRightValue>>>
 		InnerJoinMany<TDiscriminator, TExecutor, TResolverChain, TLeftKey, TLeftValue, TLookupKey, TRightIndexKey, TRightCache, TRightKey, TRightValue>(
@@ -951,8 +951,8 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 			IDataCache<TRightCache, TRightKey, TRightValue> rightCache,
 			CacheKeyValueListIndex<TRightKey, TRightValue, TRightIndexKey> rightIndex,
 			Func<
-				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>,
-				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>> filter)
+				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>,
+				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>> filter)
 		where TExecutor : struct, ICandidatesExecutor<TLeftKey, TLeftValue>
 		where TDiscriminator : struct, IBaseJoinable
 		where TResolverChain : struct, IResolvers
@@ -964,18 +964,18 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 		where TRightKey : notnull, IEquatable<TRightKey>
 		where TRightCache : IDataCache<TRightCache, TRightKey, TRightValue> {
 		var resolver = new JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-			JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+			JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 			KeySelector<TLookupKey, TRightIndexKey>>(
 			leftSymIndex, (TRightCache)rightCache, rightIndex,
-			new JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>(filter),
+			new JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>(filter),
 			new KeySelector<TLookupKey, TRightIndexKey>(keySelector), isInner: true);
 		return Unsafe.AsRef(in builder).AddResolver<
 			Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-				JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+				JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 				KeySelector<TLookupKey, TRightIndexKey>>>,
 			JoinResult<TLeftValue, QueryResults<TRightValue>>>(
 			new Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-				JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+				JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 				KeySelector<TLookupKey, TRightIndexKey>>>(
 				builder._resolverChain, resolver),
 			true);
@@ -986,7 +986,7 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	public static CacheQueryBuilderCombined<TDiscriminator, TExecutor, TLeftKey, TLeftValue,
 		Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-			JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TFilterArg>,
+			JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TFilterArg>,
 			KeySelector<TLookupKey, TRightIndexKey>>>,
 		JoinResult<TLeftValue, QueryResults<TRightValue>>>
 		InnerJoinMany<TDiscriminator, TExecutor, TResolverChain, TLeftKey, TLeftValue, TLookupKey, TRightIndexKey, TRightCache, TRightKey, TFilterArg, TRightValue>(
@@ -996,9 +996,9 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 			IDataCache<TRightCache, TRightKey, TRightValue> rightCache,
 			CacheKeyValueListIndex<TRightKey, TRightValue, TRightIndexKey> rightIndex,
 			Func<
-				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>,
+				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>,
 				TFilterArg,
-				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>> filter,
+				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>> filter,
 			TFilterArg arg)
 		where TExecutor : struct, ICandidatesExecutor<TLeftKey, TLeftValue>
 		where TDiscriminator : struct, IBaseJoinable
@@ -1011,18 +1011,18 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 		where TRightKey : notnull, IEquatable<TRightKey>
 		where TRightCache : IDataCache<TRightCache, TRightKey, TRightValue> {
 		var resolver = new JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-			JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TFilterArg>,
+			JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TFilterArg>,
 			KeySelector<TLookupKey, TRightIndexKey>>(
 			leftSymIndex, (TRightCache)rightCache, rightIndex,
-			new JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TFilterArg>(filter, arg),
+			new JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TFilterArg>(filter, arg),
 			new KeySelector<TLookupKey, TRightIndexKey>(keySelector), isInner: true);
 		return Unsafe.AsRef(in builder).AddResolver<
 			Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-				JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TFilterArg>,
+				JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TFilterArg>,
 				KeySelector<TLookupKey, TRightIndexKey>>>,
 			JoinResult<TLeftValue, QueryResults<TRightValue>>>(
 			new Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-				JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TFilterArg>,
+				JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TFilterArg>,
 				KeySelector<TLookupKey, TRightIndexKey>>>(
 				builder._resolverChain, resolver),
 			true);
@@ -1041,7 +1041,7 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	public static CacheQueryBuilderCombined<TDiscriminator, TExecutor, TLeftKey, TLeftValue,
 		Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-			NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+			NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 			KeySelectorWithArg<TLookupKey, TSelectorArg, TRightIndexKey>>>,
 		JoinResult<TLeftValue, QueryResults<TRightValue>>>
 		JoinMany<TDiscriminator, TExecutor, TResolverChain, TLeftKey, TLeftValue, TLookupKey, TSelectorArg, TRightIndexKey, TRightCache, TRightKey, TRightValue>(
@@ -1062,16 +1062,16 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 		where TRightKey : notnull, IEquatable<TRightKey>
 		where TRightCache : IDataCache<TRightCache, TRightKey, TRightValue> {
 		var resolver = new JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-			NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+			NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 			KeySelectorWithArg<TLookupKey, TSelectorArg, TRightIndexKey>>(
 			leftSymIndex, (TRightCache)rightCache, rightIndex, default, new KeySelectorWithArg<TLookupKey, TSelectorArg, TRightIndexKey>(keySelector, selectorArg));
 		return Unsafe.AsRef(in builder).AddResolver<
 			Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-				NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+				NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 				KeySelectorWithArg<TLookupKey, TSelectorArg, TRightIndexKey>>>,
 			JoinResult<TLeftValue, QueryResults<TRightValue>>>(
 			new Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-				NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+				NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 				KeySelectorWithArg<TLookupKey, TSelectorArg, TRightIndexKey>>>(
 				builder._resolverChain, resolver),
 			true);
@@ -1082,7 +1082,7 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	public static CacheQueryBuilderCombined<TDiscriminator, TExecutor, TLeftKey, TLeftValue,
 		Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-			JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+			JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 			KeySelectorWithArg<TLookupKey, TSelectorArg, TRightIndexKey>>>,
 		JoinResult<TLeftValue, QueryResults<TRightValue>>>
 		JoinMany<TDiscriminator, TExecutor, TResolverChain, TLeftKey, TLeftValue, TLookupKey, TSelectorArg, TRightIndexKey, TRightCache, TRightKey, TRightValue>(
@@ -1093,8 +1093,8 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 			IDataCache<TRightCache, TRightKey, TRightValue> rightCache,
 			CacheKeyValueListIndex<TRightKey, TRightValue, TRightIndexKey> rightIndex,
 			Func<
-				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>,
-				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>> filter)
+				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>,
+				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>> filter)
 		where TExecutor : struct, ICandidatesExecutor<TLeftKey, TLeftValue>
 		where TDiscriminator : struct, IBaseJoinable
 		where TResolverChain : struct, IResolvers
@@ -1106,18 +1106,18 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 		where TRightKey : notnull, IEquatable<TRightKey>
 		where TRightCache : IDataCache<TRightCache, TRightKey, TRightValue> {
 		var resolver = new JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-			JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+			JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 			KeySelectorWithArg<TLookupKey, TSelectorArg, TRightIndexKey>>(
 			leftSymIndex, (TRightCache)rightCache, rightIndex,
-			new JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>(filter),
+			new JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>(filter),
 			new KeySelectorWithArg<TLookupKey, TSelectorArg, TRightIndexKey>(keySelector, selectorArg));
 		return Unsafe.AsRef(in builder).AddResolver<
 			Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-				JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+				JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 				KeySelectorWithArg<TLookupKey, TSelectorArg, TRightIndexKey>>>,
 			JoinResult<TLeftValue, QueryResults<TRightValue>>>(
 			new Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-				JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+				JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 				KeySelectorWithArg<TLookupKey, TSelectorArg, TRightIndexKey>>>(
 				builder._resolverChain, resolver),
 			true);
@@ -1128,7 +1128,7 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	public static CacheQueryBuilderCombined<TDiscriminator, TExecutor, TLeftKey, TLeftValue,
 		Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-			JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TFilterArg>,
+			JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TFilterArg>,
 			KeySelectorWithArg<TLookupKey, TSelectorArg, TRightIndexKey>>>,
 		JoinResult<TLeftValue, QueryResults<TRightValue>>>
 		JoinMany<TDiscriminator, TExecutor, TResolverChain, TLeftKey, TLeftValue, TLookupKey, TSelectorArg, TRightIndexKey, TRightCache, TRightKey, TFilterArg, TRightValue>(
@@ -1139,9 +1139,9 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 			IDataCache<TRightCache, TRightKey, TRightValue> rightCache,
 			CacheKeyValueListIndex<TRightKey, TRightValue, TRightIndexKey> rightIndex,
 			Func<
-				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>,
+				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>,
 				TFilterArg,
-				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>> filter,
+				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>> filter,
 			TFilterArg arg)
 		where TExecutor : struct, ICandidatesExecutor<TLeftKey, TLeftValue>
 		where TDiscriminator : struct, IBaseJoinable
@@ -1154,18 +1154,18 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 		where TRightKey : notnull, IEquatable<TRightKey>
 		where TRightCache : IDataCache<TRightCache, TRightKey, TRightValue> {
 		var resolver = new JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-			JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TFilterArg>,
+			JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TFilterArg>,
 			KeySelectorWithArg<TLookupKey, TSelectorArg, TRightIndexKey>>(
 			leftSymIndex, (TRightCache)rightCache, rightIndex,
-			new JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TFilterArg>(filter, arg),
+			new JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TFilterArg>(filter, arg),
 			new KeySelectorWithArg<TLookupKey, TSelectorArg, TRightIndexKey>(keySelector, selectorArg));
 		return Unsafe.AsRef(in builder).AddResolver<
 			Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-				JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TFilterArg>,
+				JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TFilterArg>,
 				KeySelectorWithArg<TLookupKey, TSelectorArg, TRightIndexKey>>>,
 			JoinResult<TLeftValue, QueryResults<TRightValue>>>(
 			new Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-				JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TFilterArg>,
+				JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TFilterArg>,
 				KeySelectorWithArg<TLookupKey, TSelectorArg, TRightIndexKey>>>(
 				builder._resolverChain, resolver),
 			true);
@@ -1176,7 +1176,7 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	public static CacheQueryBuilderCombined<TDiscriminator, TExecutor, TLeftKey, TLeftValue,
 		Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-			NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+			NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 			KeySelectorWithArg<TLookupKey, TSelectorArg, TRightIndexKey>>>,
 		JoinResult<TLeftValue, QueryResults<TRightValue>>>
 		InnerJoinMany<TDiscriminator, TExecutor, TResolverChain, TLeftKey, TLeftValue, TLookupKey, TSelectorArg, TRightIndexKey, TRightCache, TRightKey, TRightValue>(
@@ -1197,16 +1197,16 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 		where TRightKey : notnull, IEquatable<TRightKey>
 		where TRightCache : IDataCache<TRightCache, TRightKey, TRightValue> {
 		var resolver = new JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-			NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+			NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 			KeySelectorWithArg<TLookupKey, TSelectorArg, TRightIndexKey>>(
 			leftSymIndex, (TRightCache)rightCache, rightIndex, default, new KeySelectorWithArg<TLookupKey, TSelectorArg, TRightIndexKey>(keySelector, selectorArg), isInner: true);
 		return Unsafe.AsRef(in builder).AddResolver<
 			Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-				NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+				NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 				KeySelectorWithArg<TLookupKey, TSelectorArg, TRightIndexKey>>>,
 			JoinResult<TLeftValue, QueryResults<TRightValue>>>(
 			new Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-				NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+				NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 				KeySelectorWithArg<TLookupKey, TSelectorArg, TRightIndexKey>>>(
 				builder._resolverChain, resolver),
 			true);
@@ -1217,7 +1217,7 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	public static CacheQueryBuilderCombined<TDiscriminator, TExecutor, TLeftKey, TLeftValue,
 		Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-			JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+			JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 			KeySelectorWithArg<TLookupKey, TSelectorArg, TRightIndexKey>>>,
 		JoinResult<TLeftValue, QueryResults<TRightValue>>>
 		InnerJoinMany<TDiscriminator, TExecutor, TResolverChain, TLeftKey, TLeftValue, TLookupKey, TSelectorArg, TRightIndexKey, TRightCache, TRightKey, TRightValue>(
@@ -1228,8 +1228,8 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 			IDataCache<TRightCache, TRightKey, TRightValue> rightCache,
 			CacheKeyValueListIndex<TRightKey, TRightValue, TRightIndexKey> rightIndex,
 			Func<
-				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>,
-				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>> filter)
+				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>,
+				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>> filter)
 		where TExecutor : struct, ICandidatesExecutor<TLeftKey, TLeftValue>
 		where TDiscriminator : struct, IBaseJoinable
 		where TResolverChain : struct, IResolvers
@@ -1241,18 +1241,18 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 		where TRightKey : notnull, IEquatable<TRightKey>
 		where TRightCache : IDataCache<TRightCache, TRightKey, TRightValue> {
 		var resolver = new JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-			JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+			JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 			KeySelectorWithArg<TLookupKey, TSelectorArg, TRightIndexKey>>(
 			leftSymIndex, (TRightCache)rightCache, rightIndex,
-			new JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>(filter),
+			new JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>(filter),
 			new KeySelectorWithArg<TLookupKey, TSelectorArg, TRightIndexKey>(keySelector, selectorArg), isInner: true);
 		return Unsafe.AsRef(in builder).AddResolver<
 			Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-				JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+				JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 				KeySelectorWithArg<TLookupKey, TSelectorArg, TRightIndexKey>>>,
 			JoinResult<TLeftValue, QueryResults<TRightValue>>>(
 			new Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-				JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
+				JoinFilter<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>,
 				KeySelectorWithArg<TLookupKey, TSelectorArg, TRightIndexKey>>>(
 				builder._resolverChain, resolver),
 			true);
@@ -1263,7 +1263,7 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	public static CacheQueryBuilderCombined<TDiscriminator, TExecutor, TLeftKey, TLeftValue,
 		Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-			JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TFilterArg>,
+			JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TFilterArg>,
 			KeySelectorWithArg<TLookupKey, TSelectorArg, TRightIndexKey>>>,
 		JoinResult<TLeftValue, QueryResults<TRightValue>>>
 		InnerJoinMany<TDiscriminator, TExecutor, TResolverChain, TLeftKey, TLeftValue, TLookupKey, TSelectorArg, TRightIndexKey, TRightCache, TRightKey, TFilterArg, TRightValue>(
@@ -1274,9 +1274,9 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 			IDataCache<TRightCache, TRightKey, TRightValue> rightCache,
 			CacheKeyValueListIndex<TRightKey, TRightValue, TRightIndexKey> rightIndex,
 			Func<
-				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>,
+				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>,
 				TFilterArg,
-				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>> filter,
+				CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>> filter,
 			TFilterArg arg)
 		where TExecutor : struct, ICandidatesExecutor<TLeftKey, TLeftValue>
 		where TDiscriminator : struct, IBaseJoinable
@@ -1289,18 +1289,18 @@ public static class CacheQueryBuilder_JoinMany_Extensions {
 		where TRightKey : notnull, IEquatable<TRightKey>
 		where TRightCache : IDataCache<TRightCache, TRightKey, TRightValue> {
 		var resolver = new JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-			JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TFilterArg>,
+			JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TFilterArg>,
 			KeySelectorWithArg<TLookupKey, TSelectorArg, TRightIndexKey>>(
 			leftSymIndex, (TRightCache)rightCache, rightIndex,
-			new JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TFilterArg>(filter, arg),
+			new JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TFilterArg>(filter, arg),
 			new KeySelectorWithArg<TLookupKey, TSelectorArg, TRightIndexKey>(keySelector, selectorArg), isInner: true);
 		return Unsafe.AsRef(in builder).AddResolver<
 			Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-				JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TFilterArg>,
+				JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TFilterArg>,
 				KeySelectorWithArg<TLookupKey, TSelectorArg, TRightIndexKey>>>,
 			JoinResult<TLeftValue, QueryResults<TRightValue>>>(
 			new Resolvers<TResolverChain, JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue,
-				JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TFilterArg>,
+				JoinFilterWithArg<CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>, TFilterArg>,
 				KeySelectorWithArg<TLookupKey, TSelectorArg, TRightIndexKey>>>(
 				builder._resolverChain, resolver),
 			true);
