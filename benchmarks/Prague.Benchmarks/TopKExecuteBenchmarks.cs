@@ -13,7 +13,10 @@ using Prague.Core;
 ///   sorts all N, then slices to `take`. Cost scales with N regardless of take.
 ///
 ///   Bounded: the base walk pushes each matched row through a heap of size K = skip+take,
-///   drains K rows ascending, and materializes only those. Cost scales with K.
+///   drains K rows ascending, and materializes only those. Cost scales with K. Once K reaches
+///   N / 4 every row is collected instead and the page is selected in place (introselect) and
+///   sorted alone: O(N + take log take), which the DeepPage / HalfPage rows compare against the
+///   classic full sort.
 ///
 ///   Both simple (no joins) and joined (InnerJoinOne) shapes are measured — the joined
 ///   shape is the expensive one, since the classic path also sizes a ValueDictionary of
@@ -67,6 +70,60 @@ public class TopKExecuteBenchmarks {
 	[Benchmark]
 	public int SortedInnerJoin_ExecutePooled() {
 		using var results = _left.Query().Sort(_comparer).InnerJoinOne(_right).ExecutePooled(0, Take);
+		return results.Count;
+	}
+
+	[Benchmark]
+	public int Sorted_FullPage_ExecutePooled() {
+		using var results = _left.Query().Sort(_comparer).ExecutePooled(0, N);
+		return results.Count;
+	}
+
+	[Benchmark]
+	public int Sorted_FullPage_ClassicCore() {
+		var q = _left.Query().Sort(_comparer);
+		using var results = q.ExecuteCoreSimple(ref q._resolverChain.Resolver, true, false, 0, N);
+		return results.Count;
+	}
+
+	[Benchmark]
+	public int SortedInnerJoin_FullPage_ExecutePooled() {
+		using var results = _left.Query().Sort(_comparer).InnerJoinOne(_right).ExecutePooled(0, N);
+		return results.Count;
+	}
+
+	[Benchmark]
+	public int SortedInnerJoin_FullPage_ClassicCore() {
+		var q = _left.Query().Sort(_comparer).InnerJoinOne(_right);
+		using var results = q.ExecuteCoreJoined<JoinResult<TkbLeft, TkbRight>>(true, false, 0, N);
+		return results.Count;
+	}
+
+	// Deep page: K = N, so every row is collected and the page is selected in place.
+	[Benchmark]
+	public int Sorted_DeepPage_ExecutePooled() {
+		using var results = _left.Query().Sort(_comparer).ExecutePooled(N - Take, Take);
+		return results.Count;
+	}
+
+	[Benchmark]
+	public int Sorted_DeepPage_ClassicCore() {
+		var q = _left.Query().Sort(_comparer);
+		using var results = q.ExecuteCoreSimple(ref q._resolverChain.Resolver, true, false, N - Take, Take);
+		return results.Count;
+	}
+
+	// Half page: K = N / 2, above the collect threshold with a page that still needs sorting.
+	[Benchmark]
+	public int Sorted_HalfPage_ExecutePooled() {
+		using var results = _left.Query().Sort(_comparer).ExecutePooled(0, N / 2);
+		return results.Count;
+	}
+
+	[Benchmark]
+	public int Sorted_HalfPage_ClassicCore() {
+		var q = _left.Query().Sort(_comparer);
+		using var results = q.ExecuteCoreSimple(ref q._resolverChain.Resolver, true, false, 0, N / 2);
 		return results.Count;
 	}
 }
