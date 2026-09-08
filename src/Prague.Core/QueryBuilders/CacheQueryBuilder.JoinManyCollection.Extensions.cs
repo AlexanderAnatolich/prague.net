@@ -14,8 +14,8 @@ public static class CacheQueryBuilder_JoinManyCollection_Extensions {
 	// Driving cache (left = element, e.g. Tag) → owners-of-an-element (right = owner,
 	// e.g. Book whose List<int> TagIds contains the tag). The symmetric collection
 	// index over the right cache exposes Forward (tagId → {bookKeys}) and Reverse
-	// (bookKey → {tagIds}); the resolver walks each left's bucket once and first-fits
-	// every (left, right) pair into JoinMany rounds — so a book shared by two tags
+	// (bookKey → {tagIds}); the resolver walks each left's bucket once and records
+	// every (left, right) pair into the JoinMany fan-out — so a book shared by two tags
 	// appears under BOTH. Identity element-key only (no key selector for v1).
 
 	// ── Shape C1: no filter ──────────────────────────────────────────────────

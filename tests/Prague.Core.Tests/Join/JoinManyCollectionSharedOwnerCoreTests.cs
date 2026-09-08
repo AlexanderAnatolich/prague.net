@@ -6,11 +6,11 @@ using Prague.Core;
 using Prague.Core.Tests.Infrastructure;
 using NUnit.Framework;
 
-// One owner referenced by thousands of elements is the worst case for the rounds engine: every
-// (element, owner) pair carries the same right key, so each pair needs its own round. The walk must
-// stay linear in the number of pairs and allocation-free on the pooled path — the first-fit probe that
-// restarted at round 0 and boxed the key on every rejected probe cost O(n²) time and 200 MB per query
-// at 4096 elements.
+// One owner referenced by thousands of elements is the maximal-multiplicity shape: every (element,
+// owner) pair carries the same right key, so the fan-out holds one pair and a chain of thousands of
+// lefts. The walk must stay linear in the number of pairs and allocation-free on the pooled path —
+// the former per-round first-fit that restarted at round 0 and boxed the key on every rejected probe
+// cost O(n²) time and 200 MB per query at 4096 elements.
 [TestFixture]
 [NonParallelizable]
 public class JoinManyCollectionSharedOwnerCoreTests {

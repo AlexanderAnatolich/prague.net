@@ -32,6 +32,8 @@ public struct CacheQueryBuilderCoreCombined<TKey, TValue>
 
 	void ICandidatesExecutor<TKey, TValue>.ExecuteBase<TContainer>(ref TContainer c) => Execute(ref c);
 	int ICandidatesExecutor<TKey, TValue>.CountBase() => Count();
+	// Exactly what Execute hands Init: the narrowed set's size, or the whole cache when nothing narrowed.
+	int ICandidatesExecutor<TKey, TValue>.MaxBaseCount => Candidates.IsInitlized ? Candidates.Count : _dataCache.Count;
 
 	public CacheQueryBuilderCoreCombined(InMemoryDataCache<TKey, TValue> dataCache) {
 		_dataCache = dataCache;
@@ -921,6 +923,7 @@ public struct PairedCacheQueryBuilderCoreCombined<TLeft, TKey, TValue>
 
 void ICandidatesExecutor<TKey, TValue>.ExecuteBase<TContainer>(ref TContainer c) => Execute(ref c);
 	int ICandidatesExecutor<TKey, TValue>.CountBase() => 0; // stub — not needed in Phase α
+	int ICandidatesExecutor<TKey, TValue>.MaxBaseCount => _candidates.IsInitlized ? _candidates.Count : 0;
 
 	/// <summary>
 	/// Constructs with a pre-seeded candidate set.  The caller (typically <c>UseIndexAsPairs</c>)
@@ -1590,6 +1593,27 @@ void ICandidatesExecutor<TKey, TValue>.ExecuteBase<TContainer>(ref TContainer c)
 		}
 	}
 
+	/// <summary>
+	/// <see cref="ExecutePaired{TContainer}"/> for a container that also wants the right key: the store
+	/// calls <c>Add(pair.JoinedKey, pair.Key, value)</c> per surviving pair. The JoinMany fan-out uses the
+	/// key to deliver one right to every left recorded for it. Auto-disposes after execution.
+	/// </summary>
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	internal void ExecutePairedJoined<TContainer>(scoped ref TContainer container)
+		where TContainer : struct, IJoinedResultContainer<TLeft, TKey, TValue>, allows ref struct {
+		if (_disposed)
+			throw new ObjectDisposedException(nameof(PairedCacheQueryBuilderCoreCombined<TLeft, TKey, TValue>));
+
+		try {
+			if (!_candidates.IsInitlized || _candidates.Count == 0)
+				return;
+
+			_ = _dataCache.TryGetJoined<TLeft, TContainer>(ref container, ref _candidates, _filter);
+		} finally {
+			Dispose();
+		}
+	}
+
 public void Dispose() {
 		if (_disposed) return;
 		_candidates.Dispose();
@@ -1768,6 +1792,8 @@ public struct CacheQueryBuilderCombined<TDiscriminator, TLeftQuery, TLeftKey, TL
 			container.PrepareIndexedInner(ref this);
 			container.ExecuteIndexedInner(ref this);
 			_leftQuery.ExecuteBase(ref container);
+			// Rows the base predicate rejected still own the slot the inner pre-pass opened for them.
+			container.DropUnfilledSlots();
 			container.ExecuteJoins();
 
 			return container.BuildResults();
@@ -1788,8 +1814,12 @@ public struct CacheQueryBuilderCombined<TDiscriminator, TLeftQuery, TLeftKey, TL
 		where TJoinResult : struct, IJoinResult<TLeftValue> {
 		// Cheap gates first: negative or unbounded paging keeps the classic core's historical
 		// behavior exactly (bounding is a pure optimization, never a gate), and bailing here skips
-		// the chain walk — which would otherwise box the sorter's comparer for nothing.
-		if (skip < 0 || take < 0 || take == int.MaxValue || (long)skip + take > int.MaxValue) {
+		// the chain walk — which would otherwise box the sorter's comparer for nothing. A page that
+		// holds every left row fills the same joins either way and sorts cheaper classically
+		// (TopKPlan.PageCoversResult); any smaller or skipped page keeps the top-K plan because it
+		// still saves the join fill of the rows it leaves out.
+		if (skip < 0 || take < 0 || take == int.MaxValue || (long)skip + take > int.MaxValue
+		    || TopKPlan.PageCoversResult(skip, take, _leftQuery.MaxBaseCount)) {
 			return ExecuteCoreJoined<TJoinResult>(pool, clone, skip, take);
 		}
 
@@ -1856,6 +1886,7 @@ public struct CacheQueryBuilderCombined<TDiscriminator, TLeftQuery, TLeftKey, TL
 			container.PrepareIndexedInner(ref this);
 			container.ExecuteIndexedInner(ref this);
 			_leftQuery.ExecuteBase(ref container);
+			container.DropUnfilledSlots();
 			container.ExecuteJoins();
 			container.ExtractKeyedResults(out results, out disposer);
 		} finally {
@@ -1895,11 +1926,16 @@ public struct CacheQueryBuilderCombined<TDiscriminator, TLeftQuery, TLeftKey, TL
 	internal QueryResults<TLeftValue> ExecuteCoreSimpleTop<TResolver>(ref TResolver resolver, bool pool, bool clone, int skip, int take)
 		where TResolver : struct, IJoinResolver {
 		// Negative or unbounded paging goes through the classic core so the public terminals keep
-		// their historical behavior exactly; bounding is a pure optimization, never a gate.
+		// their historical behavior exactly; bounding is a pure optimization, never a gate. So does
+		// a page that holds most of the result (TopKPlan.PageIsMostOfResult, by page length — a deep
+		// short page stays here): past that share the collect plan only re-sorts nearly everything
+		// through the slower tuple comparison, while the classic StableSort gives the same order for
+		// less.
 		if (skip < 0
 		    || take < 0
 		    || take == int.MaxValue
 		    || (long)skip + take > int.MaxValue
+		    || TopKPlan.PageIsMostOfResult(skip, take, _leftQuery.MaxBaseCount)
 		    || !TResolver.IsSorter
 		    || !resolver.TryGetLeftComparer<TLeftValue>(out var comparer)) {
 			return ExecuteCoreSimple(ref resolver, pool, clone, skip, take);
@@ -1927,6 +1963,8 @@ public struct CacheQueryBuilderCombined<TDiscriminator, TLeftQuery, TLeftKey, TL
 	}
 
 	int ICandidatesExecutor<TLeftKey, TLeftValue>.CountBase() => _leftQuery.CountBase();
+
+	int ICandidatesExecutor<TLeftKey, TLeftValue>.MaxBaseCount => _leftQuery.MaxBaseCount;
 
 	[UnscopedRef]
 	ref ValueSet<TLeftKey, DefaultKeyComparer<TLeftKey>> ICandidatesExecutor<TLeftKey, TLeftValue>.Candidates => ref _leftQuery.Candidates;
@@ -2499,7 +2537,7 @@ public static class CacheQueryBuilderCombinedExecuteJoinedExtensions {
 	// size skip+take for a small page, or collect-and-introselect when the page is a large share of
 	// the result — and only those rows get a dictionary slot and join fill (see ExecuteCoreJoinedTop).
 	// Rows and TotalCount match the classic full-sort pipeline, with two documented divergences:
-	// ties follow encounter order for all finite pages (the classic path is unstable), and where the
+	// ties follow encounter order on every path (the classic sort is stable too), and where the
 	// classic path emits a phantom row with a default Left — possible when UseIndex-seeded
 	// candidates are combined with Where and an inner join, since index-seeded candidates bypass
 	// the predicate — the bounded plan omits it. Chain shapes that cannot be bounded (comparer
@@ -2517,7 +2555,7 @@ public static class CacheQueryBuilderCombinedExecuteJoinedExtensions {
 	///   row; rows and <c>TotalCount</c> match the classic pipeline. Rows that compare equal are ordered by
 	///   encounter order, so consecutive pages of an unchanged result partition it without duplicates or
 	///   gaps. The unbounded default (<c>take = int.MaxValue</c>) runs the classic full sort, which is
-	///   unstable and may order equal rows differently from a finite page over the same rows.
+	///   stable as well, so the full result and any paging of it agree row for row.
 	/// </remarks>
 	public static QueryResults<TResult> Execute<TDiscriminator, TExecutor, TKey, TValue, TResolverChain, TResult>(
 		this in CacheQueryBuilderCombined<SortedQuery<TDiscriminator>, TExecutor, TKey, TValue, TResolverChain, TResult> builder,
@@ -2539,7 +2577,7 @@ public static class CacheQueryBuilderCombinedExecuteJoinedExtensions {
 	///   row; rows and <c>TotalCount</c> match the classic pipeline. Rows that compare equal are ordered by
 	///   encounter order, so consecutive pages of an unchanged result partition it without duplicates or
 	///   gaps. The unbounded default (<c>take = int.MaxValue</c>) runs the classic full sort, which is
-	///   unstable and may order equal rows differently from a finite page over the same rows.
+	///   stable as well, so the full result and any paging of it agree row for row.
 	/// </remarks>
 	public static QueryResults<TResult> ExecuteCloned<TDiscriminator, TExecutor, TKey, TValue, TResolverChain, TResult>(
 		this in CacheQueryBuilderCombined<SortedQuery<TDiscriminator>, TExecutor, TKey, TValue, TResolverChain, TResult> builder,
@@ -2561,7 +2599,7 @@ public static class CacheQueryBuilderCombinedExecuteJoinedExtensions {
 	///   row; rows and <c>TotalCount</c> match the classic pipeline. Rows that compare equal are ordered by
 	///   encounter order, so consecutive pages of an unchanged result partition it without duplicates or
 	///   gaps. The unbounded default (<c>take = int.MaxValue</c>) runs the classic full sort, which is
-	///   unstable and may order equal rows differently from a finite page over the same rows.
+	///   stable as well, so the full result and any paging of it agree row for row.
 	/// </remarks>
 	public static QueryResults<TResult> ExecutePooled<TDiscriminator, TExecutor, TKey, TValue, TResolverChain, TResult>(
 		this in CacheQueryBuilderCombined<SortedQuery<TDiscriminator>, TExecutor, TKey, TValue, TResolverChain, TResult> builder,
@@ -2583,7 +2621,7 @@ public static class CacheQueryBuilderCombinedExecuteJoinedExtensions {
 	///   row; rows and <c>TotalCount</c> match the classic pipeline. Rows that compare equal are ordered by
 	///   encounter order, so consecutive pages of an unchanged result partition it without duplicates or
 	///   gaps. The unbounded default (<c>take = int.MaxValue</c>) runs the classic full sort, which is
-	///   unstable and may order equal rows differently from a finite page over the same rows.
+	///   stable as well, so the full result and any paging of it agree row for row.
 	/// </remarks>
 	public static QueryResults<TResult> ExecutePooledCloned<TDiscriminator, TExecutor, TKey, TValue, TResolverChain, TResult>(
 		this in CacheQueryBuilderCombined<SortedQuery<TDiscriminator>, TExecutor, TKey, TValue, TResolverChain, TResult> builder,
@@ -2620,8 +2658,9 @@ public static class CacheQueryBuilderCombinedExecuteSimpleExtensions {
 	// ── Sorted simple terminals: transparently bounded ───────────────────────────
 	// With a bounded take, the [skip, skip+take) page is selected without a full sort — a heap of
 	// size skip+take for a small page, collect-and-introselect for a large one (see
-	// ExecuteCoreSimpleTop). Rows and TotalCount match the classic full-sort pipeline; finite pages
-	// break ties by encounter order. Unbounded take runs the classic pipeline unchanged.
+	// ExecuteCoreSimpleTop). Rows and TotalCount match the classic full-sort pipeline; every path
+	// breaks ties by encounter order (the classic sort is StableSort). Unbounded take runs the classic
+	// pipeline unchanged.
 
 	/// <summary>
 	///   Executes the sorted query and returns the rows of rank <c>[skip, skip + take)</c>
@@ -2632,7 +2671,7 @@ public static class CacheQueryBuilderCombinedExecuteSimpleExtensions {
 	///   row; rows and <c>TotalCount</c> match the classic pipeline. Rows that compare equal are ordered by
 	///   encounter order, so consecutive pages of an unchanged result partition it without duplicates or
 	///   gaps. The unbounded default (<c>take = int.MaxValue</c>) runs the classic full sort, which is
-	///   unstable and may order equal rows differently from a finite page over the same rows.
+	///   stable as well, so the full result and any paging of it agree row for row.
 	/// </remarks>
 	public static QueryResults<TValue> Execute<TDiscriminator, TExecutor, TKey, TValue, TResolver>(
 		this in CacheQueryBuilderCombined<SortedQuery<TDiscriminator>, TExecutor, TKey, TValue, Resolvers<TResolver>, TValue> builder,
@@ -2653,7 +2692,7 @@ public static class CacheQueryBuilderCombinedExecuteSimpleExtensions {
 	///   row; rows and <c>TotalCount</c> match the classic pipeline. Rows that compare equal are ordered by
 	///   encounter order, so consecutive pages of an unchanged result partition it without duplicates or
 	///   gaps. The unbounded default (<c>take = int.MaxValue</c>) runs the classic full sort, which is
-	///   unstable and may order equal rows differently from a finite page over the same rows.
+	///   stable as well, so the full result and any paging of it agree row for row.
 	/// </remarks>
 	public static QueryResults<TValue> ExecuteCloned<TDiscriminator, TExecutor, TKey, TValue, TResolver>(
 		this in CacheQueryBuilderCombined<SortedQuery<TDiscriminator>, TExecutor, TKey, TValue, Resolvers<TResolver>, TValue> builder,
@@ -2674,7 +2713,7 @@ public static class CacheQueryBuilderCombinedExecuteSimpleExtensions {
 	///   row; rows and <c>TotalCount</c> match the classic pipeline. Rows that compare equal are ordered by
 	///   encounter order, so consecutive pages of an unchanged result partition it without duplicates or
 	///   gaps. The unbounded default (<c>take = int.MaxValue</c>) runs the classic full sort, which is
-	///   unstable and may order equal rows differently from a finite page over the same rows.
+	///   stable as well, so the full result and any paging of it agree row for row.
 	/// </remarks>
 	public static QueryResults<TValue> ExecutePooled<TDiscriminator, TExecutor, TKey, TValue, TResolver>(
 		this in CacheQueryBuilderCombined<SortedQuery<TDiscriminator>, TExecutor, TKey, TValue, Resolvers<TResolver>, TValue> builder,
@@ -2695,7 +2734,7 @@ public static class CacheQueryBuilderCombinedExecuteSimpleExtensions {
 	///   row; rows and <c>TotalCount</c> match the classic pipeline. Rows that compare equal are ordered by
 	///   encounter order, so consecutive pages of an unchanged result partition it without duplicates or
 	///   gaps. The unbounded default (<c>take = int.MaxValue</c>) runs the classic full sort, which is
-	///   unstable and may order equal rows differently from a finite page over the same rows.
+	///   stable as well, so the full result and any paging of it agree row for row.
 	/// </remarks>
 	public static QueryResults<TValue> ExecutePooledCloned<TDiscriminator, TExecutor, TKey, TValue, TResolver>(
 		this in CacheQueryBuilderCombined<SortedQuery<TDiscriminator>, TExecutor, TKey, TValue, Resolvers<TResolver>, TValue> builder,

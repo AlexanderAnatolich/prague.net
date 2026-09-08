@@ -282,13 +282,65 @@ internal struct ValueDictionary<TKey, TValue, TKeyComparer> : IDisposable
 		Count = take;
 	}
 
+	/// <summary>
+	///   Drops every entry <paramref name="remove"/> accepts, keeps the rest in order and rebuilds the hash
+	///   metadata once; returns the number of entries dropped. For an unsliced dictionary only (before any
+	///   <see cref="Crop"/> / <see cref="SortAndCrop{TComparer}"/>).
+	/// </summary>
+	internal int RemoveWhere<TPredicate>(TPredicate remove) where TPredicate : struct, IPredicate<TValue> {
+		var count = Count;
+		if (count <= 0) return 0;
+		Debug.Assert(Offset == 0, "RemoveWhere runs before the dictionary is sliced");
+
+		var keys = _keys.Span.Slice(0, count);
+		var values = _values.Span.Slice(0, count);
+		var kept = 0;
+		for (var i = 0; i < count; i++) {
+			if (remove.Should(values[i])) continue;
+			if (kept != i) {
+				keys[kept] = keys[i];
+				values[kept] = values[i];
+			}
+
+			kept++;
+		}
+
+		var dropped = count - kept;
+		if (dropped == 0) return 0;
+
+		// The tail still holds stale copies of moved entries: clear them so a pooled values array does
+		// not keep rows alive past the query.
+		keys.Slice(kept).Clear();
+		values.Slice(kept).Clear();
+		Count = kept;
+
+		// Rebuild metadata once
+		var capacityMask = _capacityMask;
+		Array.Fill(_metadata, -1, 0, capacityMask + 1);
+		ref var metaRef = ref MemoryMarshal.GetArrayDataReference(_metadata);
+		ref var keysRef = ref MemoryMarshal.GetReference(keys);
+		for (var i = 0; i < kept; i++) {
+			var hashCode = GetHashCode(Unsafe.Add(ref keysRef, i));
+			var slot = hashCode & capacityMask;
+			while (Unsafe.Add(ref metaRef, slot) >= 0) {
+				slot = (slot + 1) & capacityMask;
+			}
+
+			Unsafe.Add(ref metaRef, slot) = i;
+		}
+
+		return dropped;
+	}
+
 	internal void SortAndCrop<TComparer>(TComparer comparer, int skip, int take) where TComparer : IComparer<TValue> {
 		var count = Count;
 		if (count <= 0) return;
 
 		var keysSpan = _keys.Span.Slice(0, count);
 		var valuesSpan = _values.Span.Slice(0, count);
-		valuesSpan.Sort(keysSpan, comparer);
+		// Stable: rows that compare equal keep their encounter order, the same tie rule the bounded
+		// paging plans apply, so unbounded and paged results agree.
+		StableSort.Sort(valuesSpan, keysSpan, comparer);
 
 		if (skip >= count) {
 			Count = 0;

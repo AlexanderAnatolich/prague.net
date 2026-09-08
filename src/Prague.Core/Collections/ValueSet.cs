@@ -145,12 +145,39 @@ internal struct ValueSet<T, TKeyComparer> : IDisposable
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	internal bool Add(T item, int hashCode) {
 		Debug.Assert(!IsInitlized || _size > 0, "ValueSet used after Dispose");
-		return AddIfNotPresent(item, hashCode);
+		return AddIfNotPresent(item, hashCode, out _);
 	}
 
 	/// <summary>Membership test with a hash obtained from <see cref="HashOf"/>.</summary>
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	internal bool Contains(T item, int hashCode) => InternalIndexOf(item, hashCode) >= 0;
+
+	/// <summary>
+	///   Adds <paramref name="item"/> unless an equal one is present and reports the slot holding the
+	///   stored item either way. Slots are handed out in order and stay put until an item is removed, so
+	///   a caller can keep per-item side data in arrays indexed by slot.
+	/// </summary>
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	internal bool AddOrFind(T item, out int slot) {
+		Debug.Assert(!IsInitlized || _size > 0, "ValueSet used after Dispose");
+		return AddIfNotPresent(item, InternalGetHashCode(item), out slot);
+	}
+
+	/// <summary>Slot of the stored item equal to <paramref name="item"/>, or -1.</summary>
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	internal int IndexOf(T item) => InternalIndexOf(item);
+
+	/// <summary>The stored item at <paramref name="slot"/> — a live slot reported by <see cref="AddOrFind"/>.</summary>
+	[UnscopedRef]
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	internal ref readonly T ValueAt(int slot) {
+		Debug.Assert((uint)slot < (uint)_lastIndex, "slot out of range");
+		var valuesArr = _valuesArray;
+		ref var valueStart = ref valuesArr is null
+			? ref Unsafe.AsRef(in _inlineValues.Value)
+			: ref MemoryMarshal.GetArrayDataReference(valuesArr);
+		return ref Unsafe.Add(ref valueStart, slot);
+	}
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
 	public bool Contains(T item) {
@@ -299,7 +326,7 @@ internal struct ValueSet<T, TKeyComparer> : IDisposable
 	public void UnionWith(PooledSet<T, DefaultKeyComparer<T>> other) {
 		using var enumerator = other.GetEnumerator();
 		while (enumerator.MoveNext())
-			AddIfNotPresent(enumerator.Current, enumerator.CurrentHashCode);
+			AddIfNotPresent(enumerator.Current, enumerator.CurrentHashCode, out _);
 	}
 
 	public void UnionWith(IEnumerable<T> other) {
@@ -623,7 +650,7 @@ internal struct ValueSet<T, TKeyComparer> : IDisposable
 	}
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
-	private bool AddIfNotPresent(T value, int hashCode) {
+	private bool AddIfNotPresent(T value, int hashCode, out int slot) {
 		var size = _size;
 		var fastModMultiplier = _fastModMultiplier;
 		var bucket = (int)HashHelpers.FastMod((uint)hashCode, (uint)size, fastModMultiplier);
@@ -645,8 +672,10 @@ internal struct ValueSet<T, TKeyComparer> : IDisposable
 		var i = Unsafe.Add(ref bucketStart, bucket) - 1;
 		while (i >= 0) {
 			ref var meta = ref Unsafe.Add(ref metaStart, i);
-			if (meta.HashCode == hashCode && comparer.Equals(Unsafe.Add(ref valueStart, i), value))
+			if (meta.HashCode == hashCode && comparer.Equals(Unsafe.Add(ref valueStart, i), value)) {
+				slot = i;
 				return false;
+			}
 			i = meta.Next;
 		}
 
@@ -676,6 +705,7 @@ internal struct ValueSet<T, TKeyComparer> : IDisposable
 			index = _lastIndex++;
 		}
 
+		slot = index;
 		ref var slotMeta = ref Unsafe.Add(ref metaStart, index);
 		slotMeta.HashCode = hashCode;
 		slotMeta.Next = Unsafe.Add(ref bucketStart, bucket) - 1;

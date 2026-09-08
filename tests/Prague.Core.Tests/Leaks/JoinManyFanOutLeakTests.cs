@@ -7,17 +7,16 @@ using Prague.Core.Tests.Infrastructure;
 using Prague.Core.Tests.Join;
 using NUnit.Framework;
 
-// Pool balance of the rounds-based JoinMany resolvers (LeftSym and collection, both directions).
-// Every scenario drives the multi-round shape — six lefts sharing sixty rights, or sixty owners
-// sharing six tags — so round 0 rents its arrays, the extra-rounds array is rented and grown, and
-// extra rounds rent as they grow. Each must come back to zero new outstanding arrays and zero
-// double-returns on the happy path, the Count path, and when the user filter or its predicate
-// throws on the first, a middle or the last round (rounds already handed to the paired core are
-// disposed there, the rest by JoinManyRounds.Dispose). Caches are built once per fixture so only
-// per-query rentals show up in the delta.
+// Pool balance of the fan-out JoinMany resolvers (LeftSym and collection, both directions).
+// Every scenario drives the shared-right shape — six lefts sharing sixty rights, or sixty owners
+// sharing six tags — so the pair set rents its arrays and the chain arrays grow. Each must come
+// back to zero new outstanding arrays and zero double-returns on the happy path, the Count path,
+// and when the user filter or its predicate throws (a set already handed to the paired core is
+// disposed there, everything else by JoinManyFanOut.Dispose). Caches are built once per fixture
+// so only per-query rentals show up in the delta.
 [TestFixture]
 [NonParallelizable]
-public class JoinManyRoundsLeakTests {
+public class JoinManyFanOutLeakTests {
 	private const int SharingLefts = 6;
 	private const int SharedRights = 60;
 
@@ -81,11 +80,9 @@ public class JoinManyRoundsLeakTests {
 		}
 	}
 
-	// Filter that lets the first (throwOn - 1) rounds through and throws on round throwOn.
-	private static Func<TBuilder, TBuilder> ThrowingOnRound<TBuilder>(int throwOn) {
-		var calls = 0;
-		return builder => ++calls == throwOn ? throw new InvalidOperationException($"hostile filter on round {throwOn}") : builder;
-	}
+	// Filter that throws when the resolver applies it (once per query).
+	private static Func<TBuilder, TBuilder> ThrowingFilter<TBuilder>() =>
+		_ => throw new InvalidOperationException("hostile filter");
 
 	private static void ExpectHostile(Action query) {
 		try {
@@ -98,7 +95,7 @@ public class JoinManyRoundsLeakTests {
 	// ── LeftSym ──────────────────────────────────────────────────────────────
 
 	[Test]
-	public void JoinManyLeftSymPooled_MultiRound_HappyPath_Balanced() =>
+	public void JoinManyLeftSymPooled_HappyPath_Balanced() =>
 		LeakAssert.Balanced(() => {
 			using var results = _authors.Query().JoinMany(_authorCountrySymIdx, _books, _bookCountryIdx).ExecutePooled();
 			Assert.That(results.Count, Is.EqualTo(8));
@@ -106,72 +103,68 @@ public class JoinManyRoundsLeakTests {
 		});
 
 	[Test]
-	public void InnerJoinManyLeftSymPooled_MultiRound_HappyPath_Balanced() =>
+	public void InnerJoinManyLeftSymPooled_HappyPath_Balanced() =>
 		LeakAssert.Balanced(() => {
 			using var results = _authors.Query().InnerJoinMany(_authorCountrySymIdx, _books, _bookCountryIdx).ExecutePooled();
 			Assert.That(results.Count, Is.EqualTo(7));
 		});
 
 	[Test]
-	public void InnerJoinManyLeftSym_MultiRound_Count_Balanced() =>
+	public void InnerJoinManyLeftSym_Count_Balanced() =>
 		LeakAssert.Balanced(() => {
 			var counted = _authors.Query().InnerJoinMany(_authorCountrySymIdx, _books, _bookCountryIdx).Count();
 			Assert.That(counted, Is.EqualTo(7));
 		});
 
 	[Test]
-	public void JoinManyLeftSymPooled_MultiRound_DoubleDispose_NoDoubleReturn() =>
+	public void JoinManyLeftSymPooled_DoubleDispose_NoDoubleReturn() =>
 		LeakAssert.Balanced(() => {
 			var results = _authors.Query().JoinMany(_authorCountrySymIdx, _books, _bookCountryIdx).ExecutePooled();
 			results.Dispose();
 			results.Dispose();
 		});
 
-	[TestCase(1)]
-	[TestCase(2)]
-	[TestCase(SharingLefts)]
-	public void JoinManyLeftSymPooled_FilterThrowsOnRound_DoesNotLeak(int round) =>
-		LeakAssert.Balanced(() => ExpectHostile(() =>
-			_authors.Query().JoinMany(_authorCountrySymIdx, _books, _bookCountryIdx, ThrowingOnRound<CacheQueryBuilderCombined<
-				Prague.Core.TypeSystem.NonExecutableQuery<InMemoryDataCache<int, MlsBook>>,
-				PairedCacheQueryBuilderCoreCombined<int, int, MlsBook>,
-				int, MlsBook, Resolvers<BaseResolver<int, MlsBook>>, MlsBook>>(round)).ExecutePooled()));
-
-	[TestCase(1)]
-	[TestCase(2)]
-	[TestCase(SharingLefts)]
-	public void InnerJoinManyLeftSymPooled_FilterThrowsOnRound_DoesNotLeak(int round) =>
-		LeakAssert.Balanced(() => ExpectHostile(() =>
-			_authors.Query().InnerJoinMany(_authorCountrySymIdx, _books, _bookCountryIdx, ThrowingOnRound<CacheQueryBuilderCombined<
-				Prague.Core.TypeSystem.NonExecutableQuery<InMemoryDataCache<int, MlsBook>>,
-				PairedCacheQueryBuilderCoreCombined<int, int, MlsBook>,
-				int, MlsBook, Resolvers<BaseResolver<int, MlsBook>>, MlsBook>>(round)).ExecutePooled()));
-
-	// The predicate throws inside the store walk of round 2 (pair 70 of 360): that round's set is
-	// already owned by the paired core, rounds 3..6 are still owned by JoinManyRounds.
 	[Test]
-	public void JoinManyLeftSymPooled_PredicateThrowsMidRound_DoesNotLeak() =>
+	public void JoinManyLeftSymPooled_FilterThrows_DoesNotLeak() =>
+		LeakAssert.Balanced(() => ExpectHostile(() =>
+			_authors.Query().JoinMany(_authorCountrySymIdx, _books, _bookCountryIdx, ThrowingFilter<CacheQueryBuilderCombined<
+				Prague.Core.TypeSystem.NonExecutableQuery<InMemoryDataCache<int, MlsBook>>,
+				PairedCacheQueryBuilderCoreCombined<int, int, MlsBook>,
+				int, MlsBook, Resolvers<BaseResolver<int, MlsBook>>, MlsBook>>()).ExecutePooled()));
+
+	[Test]
+	public void InnerJoinManyLeftSymPooled_FilterThrows_DoesNotLeak() =>
+		LeakAssert.Balanced(() => ExpectHostile(() =>
+			_authors.Query().InnerJoinMany(_authorCountrySymIdx, _books, _bookCountryIdx, ThrowingFilter<CacheQueryBuilderCombined<
+				Prague.Core.TypeSystem.NonExecutableQuery<InMemoryDataCache<int, MlsBook>>,
+				PairedCacheQueryBuilderCoreCombined<int, int, MlsBook>,
+				int, MlsBook, Resolvers<BaseResolver<int, MlsBook>>, MlsBook>>()).ExecutePooled()));
+
+	// The predicate throws inside the store walk (right 30 of 60): the pair set is already owned by
+	// the paired core, the chain arrays still by JoinManyFanOut.
+	[Test]
+	public void JoinManyLeftSymPooled_PredicateThrowsMidWalk_DoesNotLeak() =>
 		LeakAssert.Balanced(() => {
 			var seen = 0;
 			ExpectHostile(() =>
 				_authors.Query().JoinMany(_authorCountrySymIdx, _books, _bookCountryIdx,
-					q => q.Where(_ => ++seen == SharedRights + 10 ? throw new InvalidOperationException("hostile predicate") : true)).ExecutePooled());
-			Assert.That(seen, Is.EqualTo(SharedRights + 10));
+					q => q.Where(_ => ++seen == SharedRights / 2 ? throw new InvalidOperationException("hostile predicate") : true)).ExecutePooled());
+			Assert.That(seen, Is.EqualTo(SharedRights / 2));
 		});
 
 	[Test]
-	public void InnerJoinManyLeftSymPooled_PredicateThrowsMidRound_DoesNotLeak() =>
+	public void InnerJoinManyLeftSymPooled_PredicateThrowsMidWalk_DoesNotLeak() =>
 		LeakAssert.Balanced(() => {
 			var seen = 0;
 			ExpectHostile(() =>
 				_authors.Query().InnerJoinMany(_authorCountrySymIdx, _books, _bookCountryIdx,
-					q => q.Where(_ => ++seen == SharedRights + 10 ? throw new InvalidOperationException("hostile predicate") : true)).ExecutePooled());
+					q => q.Where(_ => ++seen == SharedRights / 2 ? throw new InvalidOperationException("hostile predicate") : true)).ExecutePooled());
 		});
 
-	// ── Collection, reverse (element → owners): six rounds of sixty ──────────
+	// ── Collection, reverse (element → owners): sixty rights shared by six tags ──
 
 	[Test]
-	public void JoinManyCollectionPooled_MultiRound_HappyPath_Balanced() =>
+	public void JoinManyCollectionPooled_HappyPath_Balanced() =>
 		LeakAssert.Balanced(() => {
 			using var results = _tags.Query().JoinManyCollection(_taggedBooks, _tagIndex).ExecutePooled();
 			Assert.That(results.Count, Is.EqualTo(SharingLefts + 1));
@@ -179,52 +172,48 @@ public class JoinManyRoundsLeakTests {
 		});
 
 	[Test]
-	public void InnerJoinManyCollectionPooled_MultiRound_HappyPath_Balanced() =>
+	public void InnerJoinManyCollectionPooled_HappyPath_Balanced() =>
 		LeakAssert.Balanced(() => {
 			using var results = _tags.Query().InnerJoinManyCollection(_taggedBooks, _tagIndex).ExecutePooled();
 			Assert.That(results.Count, Is.EqualTo(SharingLefts));
 		});
 
 	[Test]
-	public void InnerJoinManyCollection_MultiRound_Count_Balanced() =>
+	public void InnerJoinManyCollection_Count_Balanced() =>
 		LeakAssert.Balanced(() => {
 			var counted = _tags.Query().InnerJoinManyCollection(_taggedBooks, _tagIndex).Count();
 			Assert.That(counted, Is.EqualTo(SharingLefts));
 		});
 
-	[TestCase(1)]
-	[TestCase(2)]
-	[TestCase(SharingLefts)]
-	public void JoinManyCollectionPooled_FilterThrowsOnRound_DoesNotLeak(int round) =>
+	[Test]
+	public void JoinManyCollectionPooled_FilterThrows_DoesNotLeak() =>
 		LeakAssert.Balanced(() => ExpectHostile(() =>
-			_tags.Query().JoinManyCollection(_taggedBooks, _tagIndex, ThrowingOnRound<CacheQueryBuilderCombined<
+			_tags.Query().JoinManyCollection(_taggedBooks, _tagIndex, ThrowingFilter<CacheQueryBuilderCombined<
 				Prague.Core.TypeSystem.NonExecutableQuery<InMemoryDataCache<int, MnTaggedBook>>,
 				PairedCacheQueryBuilderCoreCombined<int, int, MnTaggedBook>,
-				int, MnTaggedBook, Resolvers<BaseResolver<int, MnTaggedBook>>, MnTaggedBook>>(round)).ExecutePooled()));
-
-	[TestCase(1)]
-	[TestCase(2)]
-	[TestCase(SharingLefts)]
-	public void InnerJoinManyCollectionPooled_FilterThrowsOnRound_DoesNotLeak(int round) =>
-		LeakAssert.Balanced(() => ExpectHostile(() =>
-			_tags.Query().InnerJoinManyCollection(_taggedBooks, _tagIndex, ThrowingOnRound<CacheQueryBuilderCombined<
-				Prague.Core.TypeSystem.NonExecutableQuery<InMemoryDataCache<int, MnTaggedBook>>,
-				PairedCacheQueryBuilderCoreCombined<int, int, MnTaggedBook>,
-				int, MnTaggedBook, Resolvers<BaseResolver<int, MnTaggedBook>>, MnTaggedBook>>(round)).ExecutePooled()));
+				int, MnTaggedBook, Resolvers<BaseResolver<int, MnTaggedBook>>, MnTaggedBook>>()).ExecutePooled()));
 
 	[Test]
-	public void JoinManyCollectionPooled_PredicateThrowsMidRound_DoesNotLeak() =>
+	public void InnerJoinManyCollectionPooled_FilterThrows_DoesNotLeak() =>
+		LeakAssert.Balanced(() => ExpectHostile(() =>
+			_tags.Query().InnerJoinManyCollection(_taggedBooks, _tagIndex, ThrowingFilter<CacheQueryBuilderCombined<
+				Prague.Core.TypeSystem.NonExecutableQuery<InMemoryDataCache<int, MnTaggedBook>>,
+				PairedCacheQueryBuilderCoreCombined<int, int, MnTaggedBook>,
+				int, MnTaggedBook, Resolvers<BaseResolver<int, MnTaggedBook>>, MnTaggedBook>>()).ExecutePooled()));
+
+	[Test]
+	public void JoinManyCollectionPooled_PredicateThrowsMidWalk_DoesNotLeak() =>
 		LeakAssert.Balanced(() => {
 			var seen = 0;
 			ExpectHostile(() =>
 				_tags.Query().JoinManyCollection(_taggedBooks, _tagIndex,
-					q => q.Where(_ => ++seen == SharedRights + 10 ? throw new InvalidOperationException("hostile predicate") : true)).ExecutePooled());
+					q => q.Where(_ => ++seen == SharedRights / 2 ? throw new InvalidOperationException("hostile predicate") : true)).ExecutePooled());
 		});
 
-	// ── Collection, forward (owner → referenced): sixty rounds of six ────────
+	// ── Collection, forward (owner → referenced): six tags shared by sixty owners ──
 
 	[Test]
-	public void JoinManyCollectionForwardPooled_ManyRounds_HappyPath_Balanced() =>
+	public void JoinManyCollectionForwardPooled_HappyPath_Balanced() =>
 		LeakAssert.Balanced(() => {
 			using var results = _taggedBooks.Query().JoinManyCollectionForward(_tags, _tagIndex).ExecutePooled();
 			Assert.That(results.Count, Is.EqualTo(SharedRights));
@@ -232,46 +221,41 @@ public class JoinManyRoundsLeakTests {
 		});
 
 	[Test]
-	public void InnerJoinManyCollectionForwardPooled_ManyRounds_HappyPath_Balanced() =>
+	public void InnerJoinManyCollectionForwardPooled_HappyPath_Balanced() =>
 		LeakAssert.Balanced(() => {
 			using var results = _taggedBooks.Query().InnerJoinManyCollectionForward(_tags, _tagIndex).ExecutePooled();
 			Assert.That(results.Count, Is.EqualTo(SharedRights));
 		});
 
-	[TestCase(1)]
-	[TestCase(20)]
-	[TestCase(SharedRights)]
-	public void JoinManyCollectionForwardPooled_FilterThrowsOnRound_DoesNotLeak(int round) =>
+	[Test]
+	public void JoinManyCollectionForwardPooled_FilterThrows_DoesNotLeak() =>
 		LeakAssert.Balanced(() => ExpectHostile(() =>
-			_taggedBooks.Query().JoinManyCollectionForward(_tags, _tagIndex, ThrowingOnRound<CacheQueryBuilderCombined<
+			_taggedBooks.Query().JoinManyCollectionForward(_tags, _tagIndex, ThrowingFilter<CacheQueryBuilderCombined<
 				Prague.Core.TypeSystem.NonExecutableQuery<InMemoryDataCache<int, MnTag>>,
 				PairedCacheQueryBuilderCoreCombined<int, int, MnTag>,
-				int, MnTag, Resolvers<BaseResolver<int, MnTag>>, MnTag>>(round)).ExecutePooled()));
+				int, MnTag, Resolvers<BaseResolver<int, MnTag>>, MnTag>>()).ExecutePooled()));
 
-	[TestCase(1)]
-	[TestCase(20)]
-	[TestCase(SharedRights)]
-	public void InnerJoinManyCollectionForwardPooled_FilterThrowsOnRound_DoesNotLeak(int round) =>
+	[Test]
+	public void InnerJoinManyCollectionForwardPooled_FilterThrows_DoesNotLeak() =>
 		LeakAssert.Balanced(() => ExpectHostile(() =>
-			_taggedBooks.Query().InnerJoinManyCollectionForward(_tags, _tagIndex, ThrowingOnRound<CacheQueryBuilderCombined<
+			_taggedBooks.Query().InnerJoinManyCollectionForward(_tags, _tagIndex, ThrowingFilter<CacheQueryBuilderCombined<
 				Prague.Core.TypeSystem.NonExecutableQuery<InMemoryDataCache<int, MnTag>>,
 				PairedCacheQueryBuilderCoreCombined<int, int, MnTag>,
-				int, MnTag, Resolvers<BaseResolver<int, MnTag>>, MnTag>>(round)).ExecutePooled()));
+				int, MnTag, Resolvers<BaseResolver<int, MnTag>>, MnTag>>()).ExecutePooled()));
 
 	// ── Throw inside the bucket walk (ProbeKey right keys) ───────────────────
 	//
-	// The right key's GetHashCode throws while the rounds are still being filled — after round 0
-	// rented its arrays, the extra-rounds array was rented and grown past its initial four slots and
-	// the extra rounds rented their own — so no round has reached a paired core yet and the user
-	// filter never runs: JoinManyRounds.Dispose alone must return everything.
+	// The right key's GetHashCode throws while the pairs are still being recorded — after the pair set
+	// rented its arrays and the chain arrays grew past their initial capacity — so nothing has reached
+	// a paired core yet and the user filter never runs: JoinManyFanOut.Dispose alone must return
+	// everything.
 
-	// LeftSym hashes one right per pair (the start-round hint makes every first probe succeed); the
-	// sixth sharing left opens round 5 — growing the extra-rounds array — at pair 301.
+	// The walk hashes one right per recorded pair; the sixth sharing left starts at pair 301, well
+	// after the set and the chains left their initial capacity.
 	private const int LeftSymWalkThrowAt = 5 * SharedRights + 30;
 
-	// The collection resolver has no hint, but its unhinted Add binary-searches the rounds with the
-	// pair hashed once, so it also hashes one right per pair: five lefts cost 300 hashes and the
-	// sixth opens round 5 — growing the extra-rounds array — at pair 301, like LeftSym.
+	// The collection walk hashes one right per recorded pair as well: five lefts cost 300 hashes
+	// and the sixth starts at pair 301, like LeftSym.
 	private const int CollectionWalkThrowAt = 5 * SharedRights + 30;
 
 	[Test]
@@ -288,7 +272,7 @@ public class JoinManyRoundsLeakTests {
 				ProbeKey.Disarm();
 			}
 
-			Assert.That(filterCalls, Is.Zero, "the throw must land in the bucket walk, before any round runs");
+			Assert.That(filterCalls, Is.Zero, "the throw must land in the bucket walk, before the paired execute runs");
 		});
 
 	[Test]
@@ -305,7 +289,7 @@ public class JoinManyRoundsLeakTests {
 				ProbeKey.Disarm();
 			}
 
-			Assert.That(filterCalls, Is.Zero, "the throw must land in the bucket walk, before any round runs");
+			Assert.That(filterCalls, Is.Zero, "the throw must land in the bucket walk, before the paired execute runs");
 		});
 
 	[Test]
@@ -322,7 +306,7 @@ public class JoinManyRoundsLeakTests {
 				ProbeKey.Disarm();
 			}
 
-			Assert.That(filterCalls, Is.Zero, "the throw must land in the bucket walk, before any round runs");
+			Assert.That(filterCalls, Is.Zero, "the throw must land in the bucket walk, before the paired execute runs");
 		});
 
 	[Test]
@@ -339,6 +323,6 @@ public class JoinManyRoundsLeakTests {
 				ProbeKey.Disarm();
 			}
 
-			Assert.That(filterCalls, Is.Zero, "the throw must land in the bucket walk, before any round runs");
+			Assert.That(filterCalls, Is.Zero, "the throw must land in the bucket walk, before the paired execute runs");
 		});
 }

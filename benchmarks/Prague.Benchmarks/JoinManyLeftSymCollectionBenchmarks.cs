@@ -156,8 +156,8 @@ public class JoinManyLeftSymCollectionBenchmarks {
 	}
 
 	// ── Collection: one owner shared by every element ─────────────────────────
-	//    Every pair carries the same right key, so the rounds engine needs one round per element: the
-	//    maximal-multiplicity shape where a linear first-fit restarting at round 0 went quadratic.
+	//    Every pair carries the same right key: one pair in the set and a chain of every element, the
+	//    maximal-multiplicity shape (one round per element under the former rounds engine).
 	[Benchmark]
 	[Arguments(256)]
 	[Arguments(4096)]

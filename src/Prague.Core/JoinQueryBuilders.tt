@@ -2795,7 +2795,7 @@ public static class CacheQueryBuilderCombinedJoinNewLevel<#= level #>Extensions 
 	var nextResultNested = $"JoinResult<TValue{extraTs}, QueryResults<TInnerResult>>";
 	var methodTypeParamsNested = $"<TDiscriminator, TExecutor, TResolverChain, TKey, TValue{extraTs}, TRightCache, TRightKey, TRightValue, TInnerDisc, TInnerExec, TInnerChain, TInnerResult>";
 
-	// LeftSym identity — paired-core's TLeft is TKey (rounds carry plain left keys); TLookupKey distinct.
+	// LeftSym identity — paired-core's TLeft is TKey (the fan-out records plain left keys); TLookupKey distinct.
 	var nonExecBuilderLsM = "CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>";
 	var noFilterLsM = $"NoFilter<{nonExecBuilderLsM}>";
 	var joinFilterLsM = $"JoinFilter<{nonExecBuilderLsM}>";

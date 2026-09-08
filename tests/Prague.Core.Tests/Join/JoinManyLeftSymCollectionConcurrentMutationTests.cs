@@ -30,7 +30,7 @@ using PkTbNoFilter = Prague.Core.NoFilter<Prague.Core.CacheQueryBuilderCombined<
 ///   <c>JoinManyCollectionResolver</c> (mirrors <see cref="JoinManyRightListIndexConcurrentMutationTests"/>).
 ///   Both resolvers record every (left, right) pair from ONE enumeration of the left's right bucket,
 ///   size the slot from exactly those pairs (<c>Init</c> fires after the walk) and deliver through
-///   rounds — so whatever the index writer does concurrently, a slot never receives more Adds than
+///   the fan-out — so whatever the index writer does concurrently, a slot never receives more Adds than
 ///   it reserved, and every recorded right that is still in the store at execution time is
 ///   delivered. Each test pins one writer interleaving deterministically through a container hook
 ///   (Init / PrepareSharedBuffer / Add), through the public join filter, which the store walk
@@ -91,7 +91,7 @@ public class JoinManyLeftSymCollectionConcurrentMutationTests {
 	// ═════════════════════════════════════════════════════════════════════════
 
 	// A right lands in the group's bucket after this left's pairs were recorded and its slot sized,
-	// before the rounds execute: it is in no pair set, so it is neither delivered nor overflowing.
+	// before the paired execute: it is in no pair set, so it is neither delivered nor overflowing.
 	[Test]
 	public void LeftSym_RightAddedAfterSlotSized_SlotReceivesExactlyTheRecordedRights() {
 		Author(1, "UK");
@@ -115,7 +115,7 @@ public class JoinManyLeftSymCollectionConcurrentMutationTests {
 	}
 
 	// Two lefts share one lookup group; a right is added after the second left's slot is sized.
-	// Each left's slot is sized from its own bucket walk (round 0 and round 1), so the earlier
+	// Each left's slot is sized from its own bucket walk (its own chain nodes), so the earlier
 	// left cannot be short-changed by the later one's larger bucket.
 	[Test]
 	public void LeftSym_RightAddedBetweenTwoLeftsOfOneGroup_BothSlotsReceiveExactlyTheirRecordedRights() {
@@ -173,7 +173,7 @@ public class JoinManyLeftSymCollectionConcurrentMutationTests {
 	}
 
 	// A left sized for group DE (1 right) is moved to group UK (2 rights) after UK's left is sized
-	// and before the rounds execute. Pairs are per left, not per group: the moved left keeps the
+	// and before the paired execute. Pairs are per left, not per group: the moved left keeps the
 	// DE right it recorded and never sees UK's.
 	[Test]
 	public void LeftSym_LeftMovedToBiggerGroupAfterInit_SlotReceivesExactlyTheRecordedRights() {
@@ -204,7 +204,7 @@ public class JoinManyLeftSymCollectionConcurrentMutationTests {
 	// A right recorded under group UK is moved to group DE after UK's left was walked and before
 	// DE's left is walked. Every left reflects its own bucket snapshot: UK's left still receives the
 	// right it recorded (a consistent stale read — no Add-time re-validation, same as the right-list
-	// resolver), and DE's left receives ALL three rights it recorded, the shared one via round 1.
+	// resolver), and DE's left receives ALL three rights it recorded, the shared one through its chain.
 	[Test]
 	public void LeftSym_RightMovedBetweenGroups_BothGroupsReceiveTheirOwnSnapshots() {
 		Author(1, "UK");
@@ -237,7 +237,7 @@ public class JoinManyLeftSymCollectionConcurrentMutationTests {
 	}
 
 	// No writer. A many-to-one selector folds two lookup groups onto one right-index key, so both
-	// lefts record the same two rights; the second left's pairs land in round 1 and it receives
+	// lefts record the same two rights; the second left joins the chains of both and receives
 	// every right it reserved.
 	[Test]
 	public void LeftSym_ManyToOneSelector_SecondGroupReceivesEveryReservedRight() {
@@ -260,14 +260,78 @@ public class JoinManyLeftSymCollectionConcurrentMutationTests {
 			"no writer involved: every right reserved for author 2 must be delivered to it");
 	}
 
+	// No right is shared, so the resolver skips the fan-out delivery and runs the plain paired execute:
+	// every right key is hashed exactly twice — once by the walk recording its pair, once by the store
+	// lookup — and never a third time for a slot lookup. Every left still receives exactly its rights.
+	[Test]
+	public void LeftSym_NoSharedRights_DeliversWithoutSlotLookups() {
+		var books = new InMemoryDataCache<ProbeKey, PkBook>();
+		var bookCountryIdx = books.CacheKeyValueListIndex<string>((_, v) => v.Country);
+		var countries = new[] { "UK", "DE", "FR" };
+		for (var a = 0; a < countries.Length; a++) {
+			Author(1 + a, countries[a]);
+			for (var b = 0; b < 2; b++) {
+				var id = 100 + 10 * a + b;
+				books.AddOrUpdate(new ProbeKey(id), new PkBook { Id = id, Country = countries[a], Title = "Book" + id });
+			}
+		}
+
+		var resolver = new JoinManyLeftSymResolver<int, MlsAuthor, InMemoryDataCache<ProbeKey, PkBook>, string, string, ProbeKey, PkBook, PkNoFilter, IdentitySelector<string>>(
+			_authorCountrySymIdx, books, bookCountryIdx, default, default);
+		var log = new SlotLog<PkBook>();
+		var container = new RecordingContainer<PkBook>(log);
+
+		var hashes = 0;
+		ProbeKey.Arm(_ => hashes++);
+		try {
+			((IJoinManyResolver<int, MlsAuthor, PkBook>)resolver).ExecuteReverseMany(ref container, new[] { 1, 2, 3 });
+		} finally {
+			ProbeKey.Disarm();
+		}
+
+		Assert.That(hashes, Is.EqualTo(2 * 6), "one hash per pair for the walk, one per pair for the store lookup, none for slots");
+		Assert.That(Ids(log, 1, b => b.Id), Is.EquivalentTo(new[] { 100, 101 }));
+		Assert.That(Ids(log, 2, b => b.Id), Is.EquivalentTo(new[] { 110, 111 }));
+		Assert.That(Ids(log, 3, b => b.Id), Is.EquivalentTo(new[] { 120, 121 }));
+	}
+
+	// One shared right turns the fan-out delivery on: the walk hashes every pair, the store looks each
+	// distinct right up once and the delivery hashes it once more to find its chain.
+	[Test]
+	public void LeftSym_SharedRights_DeliverThroughTheFanOut_OneSlotLookupPerDistinctRight() {
+		var books = new InMemoryDataCache<ProbeKey, PkBook>();
+		var bookCountryIdx = books.CacheKeyValueListIndex<string>((_, v) => v.Country);
+		Author(1, "UK");
+		Author(2, "UK");
+		for (var i = 100; i < 103; i++) {
+			books.AddOrUpdate(new ProbeKey(i), new PkBook { Id = i, Country = "UK", Title = "Book" + i });
+		}
+
+		var resolver = new JoinManyLeftSymResolver<int, MlsAuthor, InMemoryDataCache<ProbeKey, PkBook>, string, string, ProbeKey, PkBook, PkNoFilter, IdentitySelector<string>>(
+			_authorCountrySymIdx, books, bookCountryIdx, default, default);
+		var log = new SlotLog<PkBook>();
+		var container = new RecordingContainer<PkBook>(log);
+
+		var hashes = 0;
+		ProbeKey.Arm(_ => hashes++);
+		try {
+			((IJoinManyResolver<int, MlsAuthor, PkBook>)resolver).ExecuteReverseMany(ref container, new[] { 1, 2 });
+		} finally {
+			ProbeKey.Disarm();
+		}
+
+		Assert.That(hashes, Is.EqualTo(6 + 2 * 3), "six pairs walked, three distinct rights looked up in the store and in the pair set");
+		Assert.That(Ids(log, 1, b => b.Id), Is.EquivalentTo(new[] { 100, 101, 102 }));
+		Assert.That(Ids(log, 2, b => b.Id), Is.EquivalentTo(new[] { 100, 101, 102 }));
+	}
+
 	// The bucket enumerator yields a right twice when the writer removes it while the walk sits on
 	// it, hands its slot to another right and re-adds it into a slot freed earlier that the walk has
-	// not reached yet. Both sightings become pairs (the second lands in round 1), the slot reserves
-	// both and the right is delivered twice: rounds do not dedup within a left, the exactness
-	// invariant (Adds == Capacity) still holds. Pinned as the accepted consequence documented on
-	// the resolver and in context/joins.md.
+	// not reached yet. The fan-out sees the second sighting as a repeat for the same left (the
+	// right's chain head is this left), records nothing, and the slot reserves and receives the
+	// right once: the exactness invariant (Adds == Capacity) holds with no duplicate.
 	[Test]
-	public void LeftSym_RightRemovedAndReaddedMidWalk_IsRecordedAndDeliveredTwice() {
+	public void LeftSym_RightRemovedAndReaddedMidWalk_IsRecordedAndDeliveredOnce() {
 		var books = new InMemoryDataCache<ProbeKey, PkBook>();
 		var bookCountryIdx = books.CacheKeyValueListIndex<string>((_, v) => v.Country);
 		Author(1, "UK");
@@ -300,10 +364,10 @@ public class JoinManyLeftSymCollectionConcurrentMutationTests {
 			ProbeKey.Disarm();
 		}
 
-		Assert.That(log.Capacity.GetValueOrDefault(1), Is.EqualTo(5), "100, 101, 102, 101 again, 104");
-		Assert.That(log.Adds.GetValueOrDefault(1), Is.EqualTo(5), "the slot receives exactly what it reserved");
-		Assert.That(Ids(log, 1, b => b.Id), Is.EquivalentTo(new[] { 100, 101, 101, 102, 104 }),
-			"101 twice; 999 was never walked, 103 left before the walk");
+		Assert.That(log.Capacity.GetValueOrDefault(1), Is.EqualTo(4), "100, 101, 102, 104: the second 101 is a repeat");
+		Assert.That(log.Adds.GetValueOrDefault(1), Is.EqualTo(4), "the slot receives exactly what it reserved");
+		Assert.That(Ids(log, 1, b => b.Id), Is.EquivalentTo(new[] { 100, 101, 102, 104 }),
+			"101 once; 999 was never walked, 103 left before the walk");
 	}
 
 	// ═════════════════════════════════════════════════════════════════════════
@@ -311,7 +375,7 @@ public class JoinManyLeftSymCollectionConcurrentMutationTests {
 	// store walk immediately before each Add, after all slots are sized and partitioned)
 	// ═════════════════════════════════════════════════════════════════════════
 
-	// A candidate left sized for DE (1 right) is moved into UK (2 rights) while the rounds execute;
+	// A candidate left sized for DE (1 right) is moved into UK (2 rights) while the paired execute runs;
 	// the moved left's pairs were recorded from DE, so the real container never overflows.
 	[Test]
 	public void InnerJoinMany_LeftSym_LeftMovedToBiggerGroupDuringExecution_DoesNotOverflow() {
@@ -414,7 +478,7 @@ public class JoinManyLeftSymCollectionConcurrentMutationTests {
 	}
 
 	// A left with NO owners at walk time is skipped (capacity stays 0); an owner already in the pair
-	// set gains it before the rounds execute. The zero-capacity slot never receives an Add.
+	// set gains it before the paired execute. The zero-capacity slot never receives an Add.
 	[Test]
 	public void Collection_LeftWithoutOwnersGainsOneBeforeExecution_ZeroCapacitySlotNeverReceivesAdds() {
 		Tag(10);
@@ -439,9 +503,9 @@ public class JoinManyLeftSymCollectionConcurrentMutationTests {
 		Assert.That(Ids(log, 20, b => b.Id), Is.EqualTo(new[] { 1 }));
 	}
 
-	// While round 0 delivers (10, book 1), the writer removes this left from the owner and re-adds
+	// While the delivery adds (10, book 1), the writer removes this left from the owner and re-adds
 	// it. Pairs are fixed at record time, so the owner reaches slot 10 exactly once and slot 20
-	// (round 1) still receives the owner it recorded.
+	// (next in the owner's chain) still receives the owner it recorded.
 	[Test]
 	public void Collection_LeftRemovedAndReaddedDuringExecution_OwnerIsDeliveredOncePerLeft() {
 		Tag(10);
@@ -499,11 +563,70 @@ public class JoinManyLeftSymCollectionConcurrentMutationTests {
 			"book 1 is in the store at execution time yet was not delivered to tag 10");
 	}
 
-	// Collection twin of LeftSym_RightRemovedAndReaddedMidWalk_IsRecordedAndDeliveredTwice: an
-	// owner removed and re-added under the walk of its tag's Forward bucket is recorded twice and
-	// delivered twice to that tag (the slot reserved both).
+	// Collection twin of LeftSym_NoSharedRights_DeliversWithoutSlotLookups: owners referenced by one
+	// tag each are delivered through the plain paired execute — two hashes per pair, none for slots.
 	[Test]
-	public void Collection_OwnerRemovedAndReaddedMidWalk_IsRecordedAndDeliveredTwice() {
+	public void Collection_NoSharedOwners_DeliversWithoutSlotLookups() {
+		var owners = new InMemoryDataCache<ProbeKey, PkTaggedBook>();
+		var index = owners.CacheCollectionSymmetricKeyValueListIndex<int>((_, b) => b.TagIds);
+		Tag(10);
+		Tag(20);
+		for (var i = 100; i < 102; i++) {
+			owners.AddOrUpdate(new ProbeKey(i), new PkTaggedBook { Id = i, Title = "Book" + i, TagIds = new List<int> { 10 } });
+			owners.AddOrUpdate(new ProbeKey(i + 100), new PkTaggedBook { Id = i + 100, Title = "Book" + (i + 100), TagIds = new List<int> { 20 } });
+		}
+
+		var resolver = new JoinManyCollectionResolver<int, MnTag, InMemoryDataCache<ProbeKey, PkTaggedBook>, ProbeKey, PkTaggedBook, PkTaggedBook, PkTbNoFilter>(
+			index.Forward, owners, default);
+		var log = new SlotLog<PkTaggedBook>();
+		var container = new RecordingContainer<PkTaggedBook>(log);
+
+		var hashes = 0;
+		ProbeKey.Arm(_ => hashes++);
+		try {
+			((IJoinManyResolver<int, MnTag, PkTaggedBook>)resolver).ExecuteReverseMany(ref container, new[] { 10, 20 });
+		} finally {
+			ProbeKey.Disarm();
+		}
+
+		Assert.That(hashes, Is.EqualTo(2 * 4), "one hash per pair for the walk, one per pair for the store lookup, none for slots");
+		Assert.That(Ids(log, 10, b => b.Id), Is.EquivalentTo(new[] { 100, 101 }));
+		Assert.That(Ids(log, 20, b => b.Id), Is.EquivalentTo(new[] { 200, 201 }));
+	}
+
+	// One owner carrying both tags turns the fan-out delivery on: two pairs walked, one distinct owner
+	// looked up in the store and once more in the pair set, delivered to both tags.
+	[Test]
+	public void Collection_SharedOwner_DeliversThroughTheFanOut_OneSlotLookupPerDistinctOwner() {
+		var owners = new InMemoryDataCache<ProbeKey, PkTaggedBook>();
+		var index = owners.CacheCollectionSymmetricKeyValueListIndex<int>((_, b) => b.TagIds);
+		Tag(10);
+		Tag(20);
+		owners.AddOrUpdate(new ProbeKey(100), new PkTaggedBook { Id = 100, Title = "Both", TagIds = new List<int> { 10, 20 } });
+
+		var resolver = new JoinManyCollectionResolver<int, MnTag, InMemoryDataCache<ProbeKey, PkTaggedBook>, ProbeKey, PkTaggedBook, PkTaggedBook, PkTbNoFilter>(
+			index.Forward, owners, default);
+		var log = new SlotLog<PkTaggedBook>();
+		var container = new RecordingContainer<PkTaggedBook>(log);
+
+		var hashes = 0;
+		ProbeKey.Arm(_ => hashes++);
+		try {
+			((IJoinManyResolver<int, MnTag, PkTaggedBook>)resolver).ExecuteReverseMany(ref container, new[] { 10, 20 });
+		} finally {
+			ProbeKey.Disarm();
+		}
+
+		Assert.That(hashes, Is.EqualTo(2 + 2 * 1), "two pairs walked, one distinct owner looked up in the store and in the pair set");
+		Assert.That(Ids(log, 10, b => b.Id), Is.EqualTo(new[] { 100 }));
+		Assert.That(Ids(log, 20, b => b.Id), Is.EqualTo(new[] { 100 }));
+	}
+
+	// Collection twin of LeftSym_RightRemovedAndReaddedMidWalk_IsRecordedAndDeliveredOnce: an
+	// owner removed and re-added under the walk of its tag's Forward bucket is a repeat sighting for
+	// that tag — recorded once, delivered once, the slot reserved one.
+	[Test]
+	public void Collection_OwnerRemovedAndReaddedMidWalk_IsRecordedAndDeliveredOnce() {
 		var owners = new InMemoryDataCache<ProbeKey, PkTaggedBook>();
 		var index = owners.CacheCollectionSymmetricKeyValueListIndex<int>((_, b) => b.TagIds);
 		Tag(10);
@@ -534,9 +657,9 @@ public class JoinManyLeftSymCollectionConcurrentMutationTests {
 			ProbeKey.Disarm();
 		}
 
-		Assert.That(log.Capacity.GetValueOrDefault(10), Is.EqualTo(5));
-		Assert.That(log.Adds.GetValueOrDefault(10), Is.EqualTo(5));
-		Assert.That(Ids(log, 10, b => b.Id), Is.EquivalentTo(new[] { 100, 101, 101, 102, 104 }));
+		Assert.That(log.Capacity.GetValueOrDefault(10), Is.EqualTo(4));
+		Assert.That(log.Adds.GetValueOrDefault(10), Is.EqualTo(4));
+		Assert.That(Ids(log, 10, b => b.Id), Is.EquivalentTo(new[] { 100, 101, 102, 104 }));
 	}
 
 	// The writer publishes Forward (element -> owners) before Reverse (owner -> elements); the walk
@@ -582,7 +705,7 @@ public class JoinManyLeftSymCollectionConcurrentMutationTests {
 	// filter predicate runs inside the store walk right before each Add
 	// ═════════════════════════════════════════════════════════════════════════
 
-	// Outer: an owner gains an already-sized tag while the rounds execute; the real container must
+	// Outer: an owner gains an already-sized tag while the paired execute runs; the real container must
 	// not overflow because the new membership was never recorded as a pair.
 	[Test]
 	public void JoinManyCollection_OwnerGainsSizedTagDuringExecution_DoesNotOverflow() {

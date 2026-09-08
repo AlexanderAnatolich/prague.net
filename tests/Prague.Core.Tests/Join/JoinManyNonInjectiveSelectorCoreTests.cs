@@ -8,9 +8,8 @@ using NUnit.Framework;
 // ── Non-injective key selectors ──────────────────────────────────────────────
 // A JoinMany key selector that maps several lookup keys onto ONE right-index key makes distinct
 // lefts share the same right bucket. Pair identity is the right key alone, so a single pair set
-// cannot carry (L1, r) and (L2, r) — the LeftSym and collection resolvers spread such pairs over
-// rounds and every left receives the full bucket; the right-list resolver still runs one pair set
-// and the behaviour it has today is pinned here so a change shows up.
+// cannot carry (L1, r) and (L2, r) — every JoinMany resolver chains such lefts behind one pair per
+// right (the fan-out) and every left receives the full bucket.
 //
 //   LeftSym:   MlsAuthor.Country is a region-qualified code ("UK-A", "UK-B"); the selector keeps
 //              the two-letter prefix, so both regions fold onto MlsBook.Country == "UK".
@@ -66,7 +65,7 @@ public class JoinManyNonInjectiveSelectorCoreTests {
 
 	private static int[] RightIds(JoinResult<MlsAuthor, QueryResults<MlsBook>> row) => row.Right.Select(b => b.Id).OrderBy(i => i).ToArray();
 
-	// ── LeftSym: rounds deliver the shared bucket to every folded group ─────
+	// ── LeftSym: the fan-out delivers the shared bucket to every folded group ─────
 
 	[Test]
 	public void JoinMany_LeftSym_NonInjectiveSelector_EveryLeftGetsItsRights() {
@@ -91,7 +90,7 @@ public class JoinManyNonInjectiveSelectorCoreTests {
 
 		var byId = results.ToDictionary(r => r.Left.Id);
 		Assert.That(RightIds(byId[1]), Is.EqualTo(new[] { 102 }));
-		Assert.That(RightIds(byId[2]), Is.EqualTo(new[] { 102 }), "the filter runs per round and must keep Narnia for the second group too");
+		Assert.That(RightIds(byId[2]), Is.EqualTo(new[] { 102 }), "the filter's predicate keeps Narnia for every left chained behind it");
 		Assert.That(byId[3].Right.Count, Is.Zero);
 	}
 
@@ -136,16 +135,15 @@ public class JoinManyNonInjectiveSelectorCoreTests {
 		}
 	}
 
-	// ── RightList: one pair set, current behaviour pinned ───────────────────
+	// ── RightList: a shared bucket reaches every left of the group ─────────
 	//
-	// JoinManyRightListIndexResolver records every left's bucket into ONE pair set and sizes the slot
-	// from the pairs that walk added. With a non-injective selector the second left of a group adds
-	// nothing (its right keys are already paired with the first left), so its slot is sized 0 and it
-	// receives no rights; the inner join then drops it. This is the resolver's behaviour today, not
-	// the desired contract — the LeftSym and collection resolvers handle the same shape via rounds.
+	// JoinManyRightListIndexResolver records every left's bucket into the fan-out. With a non-injective
+	// selector the second left of a group finds its right keys already paired with the first left; it
+	// joins their chains, its slot is sized from the pairs it recorded and the single execute delivers
+	// the bucket to it as well. Before the fan-out its slot was sized 0 and it silently received nothing.
 
 	[Test]
-	public void JoinMany_RightList_NonInjectiveSelector_SecondLeftOfGroupGetsNoRights_PinsCurrentBehaviour() {
+	public void JoinMany_RightList_NonInjectiveSelector_SecondLeftOfGroupReceivesTheFullBucket() {
 		var results = _employees.Query()
 			.JoinMany(static k => DeptOf(k), _tasks, _taskDeptIdx)
 			.Execute();
@@ -153,18 +151,17 @@ public class JoinManyNonInjectiveSelectorCoreTests {
 		Assert.That(results.Count, Is.EqualTo(3));
 		var byId = results.ToDictionary(r => r.Left.Id);
 		Assert.That(byId[1].Right.Select(t => t.Id).OrderBy(i => i), Is.EqualTo(new[] { 101, 102 }), "employee 1 (dept 10, walked first)");
-		Assert.That(byId[2].Right.Count, Is.Zero,
-			"employee 2 (same dept 10) — the right-list resolver's single pair set dedups its rights away; update this pin if the resolver moves to rounds");
+		Assert.That(byId[2].Right.Select(t => t.Id).OrderBy(i => i), Is.EqualTo(new[] { 101, 102 }),
+			"employee 2 (same dept 10, walked second) receives the shared bucket through the fan-out");
 		Assert.That(byId[3].Right.Select(t => t.Id), Is.EqualTo(new[] { 201 }), "employee 3 (dept 20)");
 	}
 
 	// A collection-backed right index (one book in several tag buckets) reaches the same shape
-	// through identity keys: buckets of DIFFERENT index keys overlap. Through the plain right-list
-	// JoinMany the shared right reaches only whichever left the store walk records first (walk
-	// order is hash order, so the test does not assume which); the supported M:N path is
-	// JoinManyCollection over the symmetric collection index, which delivers it to every left.
+	// through identity keys: buckets of DIFFERENT index keys overlap. The plain right-list JoinMany
+	// delivers the shared right to every tag whose bucket holds it, exactly like JoinManyCollection
+	// over the symmetric collection index does.
 	[Test]
-	public void JoinMany_RightList_OverlappingCollectionBuckets_SharedRightReachesOnlyOneLeft_PinsCurrentBehaviour() {
+	public void JoinMany_RightList_OverlappingCollectionBuckets_SharedRightReachesEveryLeft() {
 		var tags = new InMemoryDataCache<int, MnTag>();
 		var books = new InMemoryDataCache<int, MnTaggedBook>();
 		var tagListIdx = books.CacheCollectionKeyValueListIndex<int>((_, b) => b.TagIds);
@@ -177,9 +174,9 @@ public class JoinManyNonInjectiveSelectorCoreTests {
 
 		var viaRightList = tags.Query().JoinMany(books, tagListIdx).Execute().ToDictionary(r => r.Left.Id);
 		Assert.That(viaRightList[10].Right.Select(b => b.Id), Does.Contain(2), "book 2 is in tag 10's bucket only and always reaches it");
-		var tagsReceivingSharedBook = viaRightList.Values.Count(r => r.Right.Any(b => b.Id == 1));
-		Assert.That(tagsReceivingSharedBook, Is.EqualTo(1),
-			"right-list JoinMany over overlapping buckets delivers the shared book to exactly one of its two tags; update this pin if the resolver moves to rounds");
+		Assert.That(viaRightList[10].Right.Select(b => b.Id).OrderBy(i => i), Is.EqualTo(new[] { 1, 2 }));
+		Assert.That(viaRightList[20].Right.Select(b => b.Id), Is.EqualTo(new[] { 1 }),
+			"right-list JoinMany over overlapping buckets delivers the shared book to both of its tags");
 
 		var viaCollection = tags.Query().JoinManyCollection(books, tagSymIdx).Execute().ToDictionary(r => r.Left.Id);
 		Assert.That(viaCollection[10].Right.Select(b => b.Id).OrderBy(i => i), Is.EqualTo(new[] { 1, 2 }));

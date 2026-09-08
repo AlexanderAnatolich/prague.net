@@ -153,6 +153,13 @@ public interface ICandidatesExecutor<TLeftKey, TLeftValue> : IUnsafeCandidatesEx
 
 	internal int CountBase();
 
+	/// <summary>
+	/// Upper bound of the rows <see cref="ExecuteBase"/> can hand its container — the narrowed candidate
+	/// count, or the cache size when nothing narrowed. Cheap and side-effect free (never runs the filter);
+	/// bounded sorted paging reads it to decide whether a page still pays for the top-K plan.
+	/// </summary>
+	internal int MaxBaseCount { get; }
+
 	[UnscopedRef]
 	internal ref ValueSet<TLeftKey, DefaultKeyComparer<TLeftKey>> Candidates { get; }
 }

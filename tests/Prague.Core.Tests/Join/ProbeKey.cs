@@ -5,15 +5,16 @@ using System.Linq;
 
 // ── Probe right-key fixture ─────────────────────────────────────────────────
 // A cache key whose GetHashCode reports every call to a test-installed probe. During a JoinMany
-// bucket walk the rounds hash a right key exactly once per first-fit probe and nothing else hashes
+// bucket walk the fan-out hashes a right key exactly once per recorded pair and nothing else hashes
 // it, so the probe lets a test act at a chosen position of that walk: stand in for the index writer
-// (remove / re-add rights under the enumerator) or throw to drive the rounds' exception path after
+// (remove / re-add rights under the enumerator) or throw to drive the fan-out's exception path after
 // every rent site is live. The probe is thread-local and disarmed by default; a callback that writes
 // to a cache must Disarm() first, since the write hashes the key again.
 
 internal readonly struct ProbeKey : IEquatable<ProbeKey> {
 	[ThreadStatic] private static Action<int>? _onHash;
 	[ThreadStatic] private static int _calls;
+	[ThreadStatic] private static int _equalsCalls;
 
 	public readonly int Id;
 
@@ -27,6 +28,16 @@ internal readonly struct ProbeKey : IEquatable<ProbeKey> {
 
 	public static void Disarm() => _onHash = null;
 
+	/// <summary>
+	/// Equality comparisons on this thread since <see cref="ResetEqualsCalls"/>. A hash-set probe that
+	/// meets a stored key with the same hash costs exactly one, so the count exposes how many stored
+	/// pairs a walk really inspected — a hash count alone cannot tell a direct slot hit from a linear
+	/// scan that hashed once up front.
+	/// </summary>
+	public static int EqualsCalls => _equalsCalls;
+
+	public static void ResetEqualsCalls() => _equalsCalls = 0;
+
 	/// <summary>Arms a probe that disarms itself and throws on the <paramref name="call"/>-th hash.</summary>
 	public static void ThrowOnHashCall(int call) =>
 		Arm(n => {
@@ -36,7 +47,10 @@ internal readonly struct ProbeKey : IEquatable<ProbeKey> {
 			}
 		});
 
-	public bool Equals(ProbeKey other) => other.Id == Id;
+	public bool Equals(ProbeKey other) {
+		_equalsCalls++;
+		return other.Id == Id;
+	}
 
 	public override bool Equals(object? obj) => obj is ProbeKey other && Equals(other);
 

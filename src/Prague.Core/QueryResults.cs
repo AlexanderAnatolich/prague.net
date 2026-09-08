@@ -242,9 +242,10 @@ public readonly struct QueryResults<T> : IList<T>, IReadOnlyList<T>, IDisposable
 		Unsafe.AsRef(in _count) = count;
 	}
 
+	/// <summary>Sorts the results ascending; stable, so items that compare equal keep their order.</summary>
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	public void Sort<TComparer>(TComparer comparer) where TComparer : IComparer<T> {
-		AsSpan().Sort(comparer);
+		StableSort.Sort(AsSpan(), comparer);
 	}
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]

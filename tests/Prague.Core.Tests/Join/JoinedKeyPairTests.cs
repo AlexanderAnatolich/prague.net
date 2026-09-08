@@ -4,9 +4,9 @@ using Prague.Core;
 using Prague.Core.Collections;
 using NUnit.Framework;
 
-// JoinedKeyPair is the element type of every paired core and of the JoinMany rounds: its identity is
+// JoinedKeyPair is the element type of every paired core and of the JoinMany fan-out: its identity is
 // the right key alone, and a pair set probes it on every hash hit. The comparison must therefore stay
-// allocation-free for value-type keys — a boxed int per probe turns a rounds walk over a shared right
+// allocation-free for value-type keys — a boxed int per probe turns a fan-out walk over a shared right
 // into hundreds of megabytes.
 [TestFixture]
 public class JoinedKeyPairTests {

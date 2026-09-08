@@ -180,6 +180,26 @@ internal ref struct JoinedResultContaier<TLeftKey, TLeftValue, TResolverChain, T
 
 	public readonly ReadOnlySpan<TLeftKey> Keys => _results.Keys;
 
+	/// <summary>
+	///   Drops the slots the base walk never filled. The inner-join pre-pass opens a slot for every
+	///   candidate that has a right BEFORE the base walk applies the query's predicate, so a row the
+	///   predicate rejects would otherwise surface with an empty Left while TotalCount, sealed from the
+	///   walk, does not count it. Nothing to do when every slot was filled — the common case, and every
+	///   query without an inner join. Cache values are reference types; for a value-type Left an
+	///   all-default value cannot be told from an unfilled slot, so those slots are left alone.
+	/// </summary>
+	public void DropUnfilledSlots() {
+		if (_results.Count == _totalCont || typeof(TLeftValue).IsValueType) {
+			return;
+		}
+
+		_results.RemoveWhere(new UnfilledLeft());
+	}
+
+	private readonly struct UnfilledLeft : IPredicate<TResult> {
+		public bool Should(TResult row) => row.Left is null;
+	}
+
 	/// <summary>Execute joins for resolver 1 (reverse joins only — forward joins resolved in Add when active).</summary>
 	public void ExecuteJoins() {
 		var p = new ExecuteWithAccessorProcessor<TLeftKey, TResult>(

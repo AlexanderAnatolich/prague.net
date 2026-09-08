@@ -15,7 +15,7 @@ public static class CacheQueryBuilder_JoinManyCollectionForward_Extensions {
 	// referenced elements (right = element, e.g. Tag). The symmetric collection index
 	// over the LEFT cache exposes Forward (tagId → {bookKeys}) and Reverse
 	// (bookKey → {tagIds}); the resolver walks each left's Reverse bucket once and
-	// first-fits every (owner, element) pair into JoinMany rounds — so a tag referenced
+	// records every (owner, element) pair into the JoinMany fan-out — so a tag referenced
 	// by two books appears under BOTH. Identity element-key only (no key selector for v1).
 
 	// ── Shape C1: no filter ──────────────────────────────────────────────────
