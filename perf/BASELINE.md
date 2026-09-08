@@ -1,5 +1,5 @@
 # Prague performance baseline
-_Generated 2026-07-21T19:08:27Z_
+_Generated 2026-09-08T23:50:19Z_
 
 ## apple-m4pro-darwin
 
@@ -28,6 +28,20 @@ _Generated 2026-07-21T19:08:27Z_
 | query.joinMany.alloc | 65.00 | bytes |
 | query.multiJoin.p50 | 109515.32 | ns |
 | query.multiJoin.alloc | 65.00 | bytes |
+
+### core-sort  
+`cpu` · `Darwin 25.2.0 Darwin Kernel Version 25.2.0: Tue Nov 18 21:09:56 PST 2025; root:xnu-12377.61.12~1/RELEASE_ARM64_T6041` · `.NET 9.0.19` · commit `5d5a794`
+| metric | value | unit |
+|---|---:|---|
+| query.sortDistinct.p50 | 18912.30 | ns |
+| query.sortDistinct.alloc | 88.00 | bytes |
+| query.sortTied.p50 | 16050.10 | ns |
+| query.sortTied.alloc | 88.00 | bytes |
+| query.sortTiedJoined.p50 | 218185.44 | ns |
+| query.sortBoundedPage.p50 | 7950.49 | ns |
+| query.sortBoundedPage.alloc | 0.00 | bytes |
+| query.sortBoundedFullPage.p50 | 34954.20 | ns |
+| query.sortBoundedFullPage.alloc | 1.00 | bytes |
 
 ### full-sim  
 `Apple M4 Pro` · `Darwin 25.2.0 Darwin Kernel Version 25.2.0: Tue Nov 18 21:09:56 PST 2025; root:xnu-12377.61.12~1/RELEASE_ARM64_T6041` · `.NET 9.0.17` · commit `420d77b`

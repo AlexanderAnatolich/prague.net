@@ -28,18 +28,27 @@ internal static class BdnResultExport {
 					// core-only (BDN) has no percentile: `.p50` carries BDN's Mean as a
 					// stable per-op proxy; true percentiles come from the harness config.
 					metrics.Add(new Metric($"query.{type}.p50", "ns", meanNs, false));
-					metrics.Add(new Metric($"query.{type}.alloc", "bytes", allocBytes, false));
+					// A joined shape's allocation is not reproducible across runs in this harness —
+					// measured 64 B and 268 B for the same code on consecutive runs — so gating it
+					// would fail the tripwire at random. p50 for that shape is stable to ~1%.
+					// query.joinMany.alloc and query.multiJoin.alloc predate this and have the same
+					// problem; they are left as they are rather than silently dropped.
+					if (!SkipAllocMetric(name))
+						metrics.Add(new Metric($"query.{type}.alloc", "bytes", allocBytes, false));
 				}
 			}
 		}
 
 		var result = new BaselineResult(
-			EnvCapture.MachineClass(), "core-only",
+			EnvCapture.MachineClass(),
+			Environment.GetEnvironmentVariable("PRAGUE_PERF_CONFIG") ?? "core-only",
 			Environment.GetEnvironmentVariable("PRAGUE_PERF_COMMIT") ?? "local",
 			DateTime.UtcNow.ToString("O"), EnvCapture.Current(), metrics);
 		ResultWriter.Write(outPath, result);
 		Console.WriteLine($"[baseline] wrote {outPath} ({metrics.Count} metrics)");
 	}
+
+	private static bool SkipAllocMetric(string method) => method == "SortTiedJoined";
 
 	private static string MapQueryType(string method) => method switch {
 		"UniqueLookup" => "uniqueLookup",
@@ -47,6 +56,11 @@ internal static class BdnResultExport {
 		"JoinOne" => "joinOne",
 		"JoinMany" => "joinMany",
 		"MultiJoin" => "multiJoin",
+		"SortDistinct" => "sortDistinct",
+		"SortTied" => "sortTied",
+		"SortTiedJoined" => "sortTiedJoined",
+		"SortBoundedPage" => "sortBoundedPage",
+		"SortBoundedFullPage" => "sortBoundedFullPage",
 		_ => method,
 	};
 }
