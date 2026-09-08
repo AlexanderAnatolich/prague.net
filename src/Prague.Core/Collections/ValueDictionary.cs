@@ -288,7 +288,7 @@ internal struct ValueDictionary<TKey, TValue, TKeyComparer> : IDisposable
 
 		var keysSpan = _keys.Span.Slice(0, count);
 		var valuesSpan = _values.Span.Slice(0, count);
-		SortStable(keysSpan, valuesSpan, comparer);
+		valuesSpan.Sort(keysSpan, comparer);
 
 		if (skip >= count) {
 			Count = 0;
@@ -360,78 +360,6 @@ internal struct ValueDictionary<TKey, TValue, TKeyComparer> : IDisposable
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
 	private readonly bool KeyEquals(TKey a, TKey b) => _comparer.Equals(a, b);
-
-	/// <summary>
-	///   Stable sort of the working window, keys carried with their values. Rows the comparer calls
-	///   equal keep insertion order — which is the encounter order the bounded top-K plan tiebreaks
-	///   on, so the joined terminals return the same order whether or not `take` is finite.
-	///   Sorts a pooled index array with the ordinal as the final tiebreak, then applies the
-	///   permutation to both spans by cycle-following: one pooled int per row, no copies beyond
-	///   the cycles themselves.
-	/// </summary>
-	private void SortStable<TComparer>(Span<TKey> keys, Span<TValue> values, TComparer comparer)
-		where TComparer : IComparer<TValue> {
-		if (values.Length < 2)
-			return;
-
-		// The comparer indexes the backing array (a struct comparer cannot hold a Span), so it needs
-		// the window's real start — Crop may already have moved it.
-		_ = MemoryMarshal.TryGetArray<TValue>(_values, out var window);
-		var rented = PragueArrayPool<int>.Pool.Rent(values.Length);
-		try {
-			var order = rented.AsSpan(0, values.Length);
-			for (var i = 0; i < order.Length; i++)
-				order[i] = i;
-
-			order.Sort(new OrdinalTiebreakComparer<TComparer>(window.Array!, window.Offset, comparer));
-
-			for (var i = 0; i < order.Length; i++) {
-				if (order[i] == i)
-					continue;
-
-				var liftedKey = keys[i];
-				var liftedValue = values[i];
-				var j = i;
-				while (true) {
-					var k = order[j];
-					order[j] = j;
-					if (k == i)
-						break;
-
-					keys[j] = keys[k];
-					values[j] = values[k];
-					j = k;
-				}
-
-				keys[j] = liftedKey;
-				values[j] = liftedValue;
-			}
-		} finally {
-			PragueArrayPool<int>.Pool.Return(rented);
-		}
-	}
-
-	// Orders indices by the user comparer over the rows they point at, then by the index itself —
-	// the row's encounter ordinal. A total order, so the underlying unstable sort cannot reorder
-	// equal rows.
-	private readonly struct OrdinalTiebreakComparer<TComparer> : IComparer<int>
-		where TComparer : IComparer<TValue> {
-		private readonly TValue[] _items;
-		private readonly int _offset;
-		private readonly TComparer _comparer;
-
-		public OrdinalTiebreakComparer(TValue[] items, int offset, TComparer comparer) {
-			_items = items;
-			_offset = offset;
-			_comparer = comparer;
-		}
-
-		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public int Compare(int x, int y) {
-			var order = _comparer.Compare(_items[_offset + x], _items[_offset + y]);
-			return order != 0 ? order : x.CompareTo(y);
-		}
-	}
 
 	// The working window is exactly expectedCount wide while the rented arrays are usually longer, so an
 	// overrun would silently write into pool slack. Every insert path checks in every build configuration;

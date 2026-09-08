@@ -56,11 +56,11 @@ public class TopKJoinedCoreTests {
 	[TestCase(4, 5)]   // skip == inner-narrowed total
 	[TestCase(9, 5)]   // skip past total
 	public void Sorted_InnerJoinOne_Paged_MatchesFullClassicOrder(int skip, int take) {
-		using var full = _authors.Query().Sort(new AuthorByIdDesc()).InnerJoinOne(_profiles).ExecutePooled();
+		using var full = _authors.Query().SortBounded(new AuthorByIdDesc()).InnerJoinOne(_profiles).ExecutePooled();
 		var expectedIds = full.Select(r => r.Left.Id).Skip(skip).Take(take).ToArray();
 		var expectedBios = full.Select(r => r.Right!.Bio).Skip(skip).Take(take).ToArray();
 
-		using var paged = _authors.Query().Sort(new AuthorByIdDesc()).InnerJoinOne(_profiles).ExecutePooled(skip, take);
+		using var paged = _authors.Query().SortBounded(new AuthorByIdDesc()).InnerJoinOne(_profiles).ExecutePooled(skip, take);
 
 		// Authors 5 and 6 have no profile: inner narrowing drops them everywhere.
 		Assert.That(full.Count, Is.EqualTo(4), "fixture sanity: inner join narrows to 4 authors");
@@ -77,7 +77,7 @@ public class TopKJoinedCoreTests {
 	[TestCase(2, 10)]
 	public void Sorted_InnerJoin_JoinOne_JoinMany_Paged_MatchesFullClassicOrder(int skip, int take) {
 		using var full = _authors.Query()
-			.Sort(new AuthorByIdDesc())
+			.SortBounded(new AuthorByIdDesc())
 			.InnerJoinOne(_profiles)
 			.JoinOne(_infos, _infoAuthorIdUniqueIdx)
 			.JoinMany(_books, _bookAuthorIdx)
@@ -89,7 +89,7 @@ public class TopKJoinedCoreTests {
 			.Skip(skip).Take(take).ToArray();
 
 		using var paged = _authors.Query()
-			.Sort(new AuthorByIdDesc())
+			.SortBounded(new AuthorByIdDesc())
 			.InnerJoinOne(_profiles)
 			.JoinOne(_infos, _infoAuthorIdUniqueIdx)
 			.JoinMany(_books, _bookAuthorIdx)
@@ -110,12 +110,12 @@ public class TopKJoinedCoreTests {
 
 	[Test]
 	public void Sorted_JoinManyOnly_Paged_MatchesFullClassicOrder() {
-		using var full = _authors.Query().Sort(new AuthorByIdDesc()).JoinMany(_books, _bookAuthorIdx).ExecutePooled();
+		using var full = _authors.Query().SortBounded(new AuthorByIdDesc()).JoinMany(_books, _bookAuthorIdx).ExecutePooled();
 		var expectedIds = full.Select(r => r.Left.Id).Skip(1).Take(3).ToArray();
 		var expectedBooks = full.Select(r => r.Right.Select(b => b.Id).OrderBy(id => id).ToArray())
 			.Skip(1).Take(3).ToArray();
 
-		using var paged = _authors.Query().Sort(new AuthorByIdDesc()).JoinMany(_books, _bookAuthorIdx).ExecutePooled(1, 3);
+		using var paged = _authors.Query().SortBounded(new AuthorByIdDesc()).JoinMany(_books, _bookAuthorIdx).ExecutePooled(1, 3);
 
 		Assert.That(paged.TotalCount, Is.EqualTo(full.Count));
 		Assert.That(paged.Select(r => r.Left.Id).ToArray(), Is.EqualTo(expectedIds));
@@ -129,14 +129,14 @@ public class TopKJoinedCoreTests {
 	public void Sorted_Where_InnerJoin_Paged_TotalCountIsFilteredNarrowedTotal() {
 		using var full = _authors.Query()
 			.Where(static a => a.Id <= 3)
-			.Sort(new AuthorByIdDesc())
+			.SortBounded(new AuthorByIdDesc())
 			.InnerJoinOne(_profiles)
 			.ExecutePooled();
 		var expectedIds = full.Select(r => r.Left.Id).Take(2).ToArray();
 
 		using var paged = _authors.Query()
 			.Where(static a => a.Id <= 3)
-			.Sort(new AuthorByIdDesc())
+			.SortBounded(new AuthorByIdDesc())
 			.InnerJoinOne(_profiles)
 			.ExecutePooled(0, 2);
 
@@ -153,13 +153,13 @@ public class TopKJoinedCoreTests {
 		// classic pipeline runs; paging must still match the full order.
 		using var full = _authors.Query()
 			.JoinMany(_books, _bookAuthorIdx)
-			.Sort(new JoinedByLeftIdDesc<QueryResults<SnBook>>())
+			.SortBounded(new JoinedByLeftIdDesc<QueryResults<SnBook>>())
 			.ExecutePooled();
 		var expectedIds = full.Select(r => r.Left.Id).Skip(1).Take(2).ToArray();
 
 		using var paged = _authors.Query()
 			.JoinMany(_books, _bookAuthorIdx)
-			.Sort(new JoinedByLeftIdDesc<QueryResults<SnBook>>())
+			.SortBounded(new JoinedByLeftIdDesc<QueryResults<SnBook>>())
 			.ExecutePooled(1, 2);
 
 		Assert.That(paged.TotalCount, Is.EqualTo(full.Count));
@@ -171,14 +171,14 @@ public class TopKJoinedCoreTests {
 	[Test]
 	public void FilteredInnerJoin_Paged_MatchesFullClassicOrder() {
 		using var full = _authors.Query()
-			.Sort(new AuthorByIdDesc())
+			.SortBounded(new AuthorByIdDesc())
 			.InnerJoinOne(_profiles, q => q.Where(static p => p.Id != 2))
 			.ExecutePooled();
 		var expectedIds = full.Select(r => r.Left.Id).Take(3).ToArray();
 		var expectedRights = full.Select(r => r.Right!.Id).Take(3).ToArray();
 
 		using var paged = _authors.Query()
-			.Sort(new AuthorByIdDesc())
+			.SortBounded(new AuthorByIdDesc())
 			.InnerJoinOne(_profiles, q => q.Where(static p => p.Id != 2))
 			.ExecutePooled(0, 3);
 
@@ -195,7 +195,7 @@ public class TopKJoinedCoreTests {
 		// charged twice per query. The unbounded call is the classic single-pass baseline.
 		var pagedCalls = 0;
 		using (var paged = _authors.Query()
-			       .Sort(new AuthorByIdDesc())
+			       .SortBounded(new AuthorByIdDesc())
 			       .InnerJoinOne(_profiles, q => q.Where(p => { pagedCalls++; return p.Id != 2; }))
 			       .ExecutePooled(0, 3)) {
 			Assert.That(paged.Count, Is.EqualTo(3));
@@ -203,7 +203,7 @@ public class TopKJoinedCoreTests {
 
 		var classicCalls = 0;
 		using (var full = _authors.Query()
-			       .Sort(new AuthorByIdDesc())
+			       .SortBounded(new AuthorByIdDesc())
 			       .InnerJoinOne(_profiles, q => q.Where(p => { classicCalls++; return p.Id != 2; }))
 			       .ExecutePooled()) {
 			Assert.That(full.Count, Is.EqualTo(3));
@@ -218,7 +218,7 @@ public class TopKJoinedCoreTests {
 		// Inner-join invariant: a surviving row always carries its right value. The bounded plan
 		// resolves the right side in a second pass, so this pins the post-fill prune.
 		using var paged = _authors.Query()
-			.Sort(new AuthorByIdDesc())
+			.SortBounded(new AuthorByIdDesc())
 			.InnerJoinOne(_profiles)
 			.ExecutePooled(0, 10);
 
@@ -232,11 +232,11 @@ public class TopKJoinedCoreTests {
 	[Test]
 	public void PagedPooledCloned_SurvivorsAreClones_JoinSlotsIntact() {
 		using var cloned = _authors.Query()
-			.Sort(new AuthorByIdDesc())
+			.SortBounded(new AuthorByIdDesc())
 			.InnerJoinOne(_profiles)
 			.ExecutePooledCloned(0, 2);
 		using var live = _authors.Query()
-			.Sort(new AuthorByIdDesc())
+			.SortBounded(new AuthorByIdDesc())
 			.InnerJoinOne(_profiles)
 			.ExecutePooled(0, 2);
 
@@ -257,8 +257,8 @@ public class TopKJoinedCoreTests {
 
 	[Test]
 	public void Ties_PagedResultIsValidTopK() {
-		using var paged = _authors.Query().Sort(new AllEqual()).InnerJoinOne(_profiles).ExecutePooled(0, 2);
-		using var full = _authors.Query().Sort(new AllEqual()).InnerJoinOne(_profiles).ExecutePooled();
+		using var paged = _authors.Query().SortBounded(new AllEqual()).InnerJoinOne(_profiles).ExecutePooled(0, 2);
+		using var full = _authors.Query().SortBounded(new AllEqual()).InnerJoinOne(_profiles).ExecutePooled();
 
 		Assert.That(paged.Count, Is.EqualTo(2));
 		Assert.That(paged.TotalCount, Is.EqualTo(full.Count));

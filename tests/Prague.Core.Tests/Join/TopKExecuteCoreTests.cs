@@ -84,10 +84,10 @@ public class TopKExecuteCoreTests {
 	[TestCase(600, 10)]   // skip past total
 	[TestCase(0, 0)]      // empty page
 	public void PagedExecutePooled_MatchesFullClassicOrder(int skip, int take) {
-		using var full = _cache.Query().Sort(new TkByOrderAsc()).ExecutePooled();
+		using var full = _cache.Query().SortBounded(new TkByOrderAsc()).ExecutePooled();
 		var expected = full.Select(r => r.Id).Skip(skip).Take(take).ToArray();
 
-		using var paged = _cache.Query().Sort(new TkByOrderAsc()).ExecutePooled(skip, take);
+		using var paged = _cache.Query().SortBounded(new TkByOrderAsc()).ExecutePooled(skip, take);
 
 		Assert.That(paged.TotalCount, Is.EqualTo(full.Count));
 		Assert.That(paged.Count, Is.EqualTo(expected.Length));
@@ -96,22 +96,22 @@ public class TopKExecuteCoreTests {
 
 	[Test]
 	public void PagedExecute_WithWhere_TotalCountIsFilteredTotal() {
-		using var paged = _cache.Query().Where(static v => v.Id < 100).Sort(new TkByOrderAsc()).Execute(0, 10);
+		using var paged = _cache.Query().Where(static v => v.Id < 100).SortBounded(new TkByOrderAsc()).Execute(0, 10);
 		Assert.That(paged.TotalCount, Is.EqualTo(100));
 		Assert.That(paged.Count, Is.EqualTo(10));
 	}
 
 	[Test]
 	public void UnboundedTake_ReturnsEverything() {
-		using var full = _cache.Query().Sort(new TkByOrderAsc()).Execute(0, int.MaxValue);
+		using var full = _cache.Query().SortBounded(new TkByOrderAsc()).Execute(0, int.MaxValue);
 		Assert.That(full.Count, Is.EqualTo(500));
 		Assert.That(full.TotalCount, Is.EqualTo(500));
 	}
 
 	[Test]
 	public void PagedExecutePooledCloned_RowsAreIndependentClones() {
-		using var cloned = _cache.Query().Sort(new TkByOrderAsc()).ExecutePooledCloned(0, 3);
-		var cached = _cache.Query().Sort(new TkByOrderAsc()).Execute(0, 3);
+		using var cloned = _cache.Query().SortBounded(new TkByOrderAsc()).ExecutePooledCloned(0, 3);
+		var cached = _cache.Query().SortBounded(new TkByOrderAsc()).Execute(0, 3);
 		for (var i = 0; i < 3; i++) {
 			Assert.That(ReferenceEquals(cloned[i], cached[i]), Is.False, "cloned row must not alias the cache instance");
 			Assert.That(cloned[i].CacheEquals(cached[i]), Is.True);

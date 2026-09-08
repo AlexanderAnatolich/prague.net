@@ -19,19 +19,19 @@ public class TopKRegressionTests {
 		var actual = new List<int>();
 		int[] expected;
 		if (joined) {
-			using var full = left.Query().Sort(comparer).InnerJoinOne(right).ExecutePooled(0, 96);
+			using var full = left.Query().SortBounded(comparer).InnerJoinOne(right).ExecutePooled(0, 96);
 			expected = full.Select(x => x.Left.Id).ToArray();
 		} else {
-			using var full = left.Query().Sort(comparer).ExecutePooled(0, 96);
+			using var full = left.Query().SortBounded(comparer).ExecutePooled(0, 96);
 			expected = full.Select(x => x.Id).ToArray();
 		}
 		for (var skip = 0; skip < 96; skip += pageSize) {
 			if (joined) {
-				using var page = left.Query().Sort(comparer).InnerJoinOne(right).ExecutePooled(skip, pageSize);
+				using var page = left.Query().SortBounded(comparer).InnerJoinOne(right).ExecutePooled(skip, pageSize);
 				actual.AddRange(page.Select(x => x.Left.Id));
 				Assert.That(page.Count, Is.EqualTo(Math.Min(pageSize, 96 - skip)));
 			} else {
-				using var page = left.Query().Sort(comparer).ExecutePooled(skip, pageSize);
+				using var page = left.Query().SortBounded(comparer).ExecutePooled(skip, pageSize);
 				actual.AddRange(page.Select(x => x.Id));
 				Assert.That(page.Count, Is.EqualTo(Math.Min(pageSize, 96 - skip)));
 			}
@@ -61,7 +61,7 @@ public class TopKRegressionTests {
 			}
 			return a.Id.CompareTo(b.Id);
 		});
-		var query = left.Query().Sort(comparer).InnerJoinOne(right, q => q.Where(x => {
+		var query = left.Query().SortBounded(comparer).InnerJoinOne(right, q => q.Where(x => {
 			calls++;
 			return x.Order == 1;
 		}));
@@ -79,7 +79,7 @@ public class TopKRegressionTests {
 		var right = CreateCache();
 		LeakAssert.Balanced(() => {
 			Assert.Throws<InvalidOperationException>(() => {
-				using var result = left.Query().Sort(new TkByOrderAsc())
+				using var result = left.Query().SortBounded(new TkByOrderAsc())
 					.InnerJoinOne(right)
 					.InnerJoinOne(right, q => q.Where(static _ => throw new InvalidOperationException("filter")))
 					.ExecutePooled(0, 5);
@@ -94,7 +94,7 @@ public class TopKRegressionTests {
 		var comparer = Comparer<TkItem>.Create(static (_, _) => throw new InvalidOperationException("sort"));
 		LeakAssert.Balanced(() => {
 			Assert.Throws<InvalidOperationException>(() => {
-				using var result = left.Query().Sort(comparer).InnerJoinOne(right).ExecutePooled(0, 96);
+				using var result = left.Query().SortBounded(comparer).InnerJoinOne(right).ExecutePooled(0, 96);
 			});
 		});
 	}

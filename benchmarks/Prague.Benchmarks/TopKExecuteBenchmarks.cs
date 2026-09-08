@@ -56,7 +56,7 @@ public class TopKExecuteBenchmarks {
 
 	[Benchmark]
 	public int Sorted_ExecutePooled() {
-		using var results = _left.Query().Sort(_comparer).ExecutePooled(0, Take);
+		using var results = _left.Query().SortBounded(_comparer).ExecutePooled(0, Take);
 		return results.Count;
 	}
 
@@ -69,13 +69,13 @@ public class TopKExecuteBenchmarks {
 
 	[Benchmark]
 	public int SortedInnerJoin_ExecutePooled() {
-		using var results = _left.Query().Sort(_comparer).InnerJoinOne(_right).ExecutePooled(0, Take);
+		using var results = _left.Query().SortBounded(_comparer).InnerJoinOne(_right).ExecutePooled(0, Take);
 		return results.Count;
 	}
 
 	[Benchmark]
 	public int Sorted_FullPage_ExecutePooled() {
-		using var results = _left.Query().Sort(_comparer).ExecutePooled(0, N);
+		using var results = _left.Query().SortBounded(_comparer).ExecutePooled(0, N);
 		return results.Count;
 	}
 
@@ -88,7 +88,7 @@ public class TopKExecuteBenchmarks {
 
 	[Benchmark]
 	public int SortedInnerJoin_FullPage_ExecutePooled() {
-		using var results = _left.Query().Sort(_comparer).InnerJoinOne(_right).ExecutePooled(0, N);
+		using var results = _left.Query().SortBounded(_comparer).InnerJoinOne(_right).ExecutePooled(0, N);
 		return results.Count;
 	}
 
@@ -102,7 +102,7 @@ public class TopKExecuteBenchmarks {
 	// Deep page: K = N, so every row is collected and the page is selected in place.
 	[Benchmark]
 	public int Sorted_DeepPage_ExecutePooled() {
-		using var results = _left.Query().Sort(_comparer).ExecutePooled(N - Take, Take);
+		using var results = _left.Query().SortBounded(_comparer).ExecutePooled(N - Take, Take);
 		return results.Count;
 	}
 
@@ -116,7 +116,7 @@ public class TopKExecuteBenchmarks {
 	// Half page: K = N / 2, above the collect threshold with a page that still needs sorting.
 	[Benchmark]
 	public int Sorted_HalfPage_ExecutePooled() {
-		using var results = _left.Query().Sort(_comparer).ExecutePooled(0, N / 2);
+		using var results = _left.Query().SortBounded(_comparer).ExecutePooled(0, N / 2);
 		return results.Count;
 	}
 

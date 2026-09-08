@@ -1831,6 +1831,7 @@ public struct CacheQueryBuilderCombined<TDiscriminator, TLeftQuery, TLeftKey, TL
 		_resolverChain.Execute(ref probe);
 		var canBound = probe.SorterCount == 1
 		               && probe.SorterInnermost
+		               && probe.SorterAllowsBounded
 		               && probe.LeftComparer is not null
 		               && probe.AllInnerNarrowable;
 		if (!canBound)
@@ -1950,6 +1951,7 @@ public struct CacheQueryBuilderCombined<TDiscriminator, TLeftQuery, TLeftKey, TL
 		    || take == int.MaxValue
 		    || (long)skip + take > int.MaxValue
 		    || !TResolver.IsSorter
+		    || !resolver.AllowsBounded
 		    || !resolver.TryGetLeftComparer<TLeftValue>(out var comparer)) {
 			return ExecuteCoreSimple(ref resolver, pool, clone, skip, take);
 		}
@@ -2471,6 +2473,71 @@ public static class CacheQueryBuilderCombinedSortExtensions {
 		where TComparer : IComparer<TResult>
 		where TKey : IEquatable<TKey> {
 		var resolver = new SortResolver<TKey, TValue, TResult, TComparer>(comparer);
+		return Unsafe.AsRef(in builder).AddResolver(
+			new SortedQuery<TDiscriminator>(builder._discriminator),
+			new Resolvers<TResolverChain, SortResolver<TKey, TValue, TResult, TComparer>>(builder._resolverChain, resolver));
+	}
+
+	/// <summary>
+	///   Sort, opting in to the <b>bounded top-K plan</b> for the paged terminals: with a finite
+	///   <c>take</c>, <c>Execute*(skip, take)</c> selects the [skip, skip+take) page with a heap of
+	///   size skip+take (or introselect over the collected candidates) instead of materializing and
+	///   full-sorting every matched row. Deep and narrow pages are dramatically cheaper — measured
+	///   16-29× on a 10k-500k cache.
+	///   <para>
+	///   Differences from <see cref="Sort{TDiscriminator,TExecutor,TResult,TKey,TValue,TComparer}"/>,
+	///   which is why this is a separate call and never inferred:
+	///   </para>
+	///   <list type="bullet">
+	///     <item>
+	///       <b>Ties resolve by encounter order</b>, so consecutive pages of an unchanged result
+	///       partition it with no duplicates and no gaps. The classic sort leaves comparer-equal rows
+	///       in an unspecified order, so paging it can repeat or drop a row across pages. If your
+	///       comparer is <i>total</i> (never returns 0 for two distinct rows — e.g. it falls back to
+	///       the primary key) the two plans return identical output and this difference vanishes.
+	///     </item>
+	///     <item>
+	///       <b>A full-size page is slower</b> than the classic full sort (measured ~1.7×): the plan
+	///       collects every candidate and still sorts the whole tail. Use this when you page; not to
+	///       fetch everything.
+	///     </item>
+	///     <item>
+	///       Unbounded <c>Execute*()</c> and chain shapes the plan cannot bound (a comparer over
+	///       joined fields, a post-join sorter, an inner resolver without narrow-only support) fall
+	///       back to the classic pipeline, unchanged.
+	///     </item>
+	///   </list>
+	/// </summary>
+	public static
+		CacheQueryBuilderCombined<SortedQuery<TDiscriminator>, TExecutor, TKey, TValue, Resolvers<SortResolver<TKey, TValue, TResult, TComparer>>, TResult>
+		SortBounded<TDiscriminator, TExecutor, TResult, TKey, TValue, TComparer>(
+			this in CacheQueryBuilderCombined<TDiscriminator, TExecutor, TKey, TValue, Resolvers<BaseResolver<TKey, TValue>>, TResult> builder,
+			TComparer comparer)
+		where TExecutor : struct, ICandidatesExecutor<TKey, TValue>, ICandidatesFilterer<TKey, TValue>
+		where TDiscriminator : struct, IBaseFilterable
+		where TValue : ICacheEquatable<TValue>, ICacheClonable<TValue>
+		where TComparer : IComparer<TResult>
+		where TKey : IEquatable<TKey> {
+		var resolver = new SortResolver<TKey, TValue, TResult, TComparer>(comparer, allowBounded: true);
+		return Unsafe.AsRef(in builder).AddResolver(
+			new SortedQuery<TDiscriminator>(builder._discriminator),
+			new Resolvers<SortResolver<TKey, TValue, TResult, TComparer>>(resolver));
+	}
+
+	/// <inheritdoc cref="SortBounded{TDiscriminator,TExecutor,TResult,TKey,TValue,TComparer}"/>
+	public static
+		CacheQueryBuilderCombined<SortedQuery<TDiscriminator>, TExecutor, TKey, TValue, Resolvers<TResolverChain, SortResolver<TKey, TValue, TResult, TComparer>>, TResult>
+		SortBounded<TDiscriminator, TExecutor, TResolverChain, TResult, TKey, TValue, TComparer>(
+			this in CacheQueryBuilderCombined<TDiscriminator, TExecutor, TKey, TValue, TResolverChain, TResult> builder,
+			TComparer comparer)
+		where TExecutor : struct, ICandidatesExecutor<TKey, TValue>, ICandidatesFilterer<TKey, TValue>
+		where TDiscriminator : struct, IBaseFilterable
+		where TResolverChain : struct, IResolvers
+		where TValue : ICacheEquatable<TValue>, ICacheClonable<TValue>
+		where TResult : struct, IJoinResult<TValue>
+		where TComparer : IComparer<TResult>
+		where TKey : IEquatable<TKey> {
+		var resolver = new SortResolver<TKey, TValue, TResult, TComparer>(comparer, allowBounded: true);
 		return Unsafe.AsRef(in builder).AddResolver(
 			new SortedQuery<TDiscriminator>(builder._discriminator),
 			new Resolvers<TResolverChain, SortResolver<TKey, TValue, TResult, TComparer>>(builder._resolverChain, resolver));

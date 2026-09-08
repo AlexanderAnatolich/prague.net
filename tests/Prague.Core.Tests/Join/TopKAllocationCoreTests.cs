@@ -76,13 +76,13 @@ public class TopKAllocationCoreTests {
 	// The classic pipeline, reached through the internal cores (the public sorted terminals now
 	// route bounded-eligible shapes to the top-K plan).
 	private static int ClassicSimple(InMemoryDataCache<int, TaItem> cache, int take) {
-		var q = cache.Query().Sort(new TaByOrderAsc());
+		var q = cache.Query().SortBounded(new TaByOrderAsc());
 		var results = q.ExecuteCoreSimple(ref q._resolverChain.Resolver, false, false, 0, take);
 		return results.Count;
 	}
 
 	private static int ClassicJoined(InMemoryDataCache<int, TaItem> cache, InMemoryDataCache<int, TaRight> right, int take) {
-		var q = cache.Query().Sort(new TaByOrderAsc()).InnerJoinOne(right);
+		var q = cache.Query().SortBounded(new TaByOrderAsc()).InnerJoinOne(right);
 		var results = q.ExecuteCoreJoined<JoinResult<TaItem, TaRight>>(false, false, 0, take);
 		return results.Count;
 	}
@@ -113,8 +113,8 @@ public class TopKAllocationCoreTests {
 
 	[Test]
 	public void PagedExecute_AllocationBoundedByK_NotByN() {
-		var smallAlloc = AllocPerOp(() => _small.Query().Sort(new TaByOrderAsc()).Execute(0, Take).Count);
-		var bigAlloc = AllocPerOp(() => _big.Query().Sort(new TaByOrderAsc()).Execute(0, Take).Count);
+		var smallAlloc = AllocPerOp(() => _small.Query().SortBounded(new TaByOrderAsc()).Execute(0, Take).Count);
+		var bigAlloc = AllocPerOp(() => _big.Query().SortBounded(new TaByOrderAsc()).Execute(0, Take).Count);
 
 		// 16x the rows must NOT multiply allocation; allow 2x slack for incidental noise.
 		Assert.That(bigAlloc, Is.LessThan(Math.Max(smallAlloc, 512) * 2),
@@ -124,7 +124,7 @@ public class TopKAllocationCoreTests {
 	[Test]
 	public void PagedExecute_AllocatesFarLessThanClassic_OnBigStore() {
 		var classic = AllocPerOp(() => ClassicSimple(_big, Take));
-		var bounded = AllocPerOp(() => _big.Query().Sort(new TaByOrderAsc()).Execute(0, Take).Count);
+		var bounded = AllocPerOp(() => _big.Query().SortBounded(new TaByOrderAsc()).Execute(0, Take).Count);
 
 		Assert.That(bounded, Is.LessThan(classic / 10),
 			$"classic={classic} B/op, bounded={bounded} B/op at N={BigN}, take={Take}");
@@ -133,9 +133,9 @@ public class TopKAllocationCoreTests {
 	[Test]
 	public void PagedJoinedExecute_AllocationBoundedByK_NotByN() {
 		var smallAlloc = AllocPerOp(() =>
-			_small.Query().Sort(new TaByOrderAsc()).InnerJoinOne(_smallRight).Execute(0, Take).Count);
+			_small.Query().SortBounded(new TaByOrderAsc()).InnerJoinOne(_smallRight).Execute(0, Take).Count);
 		var bigAlloc = AllocPerOp(() =>
-			_big.Query().Sort(new TaByOrderAsc()).InnerJoinOne(_bigRight).Execute(0, Take).Count);
+			_big.Query().SortBounded(new TaByOrderAsc()).InnerJoinOne(_bigRight).Execute(0, Take).Count);
 
 		Assert.That(bigAlloc, Is.LessThan(Math.Max(smallAlloc, 512) * 2),
 			$"expected O(K) joined materialization: N={SmallN} -> {smallAlloc} B/op, N={BigN} -> {bigAlloc} B/op");
@@ -145,7 +145,7 @@ public class TopKAllocationCoreTests {
 	public void PagedJoinedExecute_AllocatesFarLessThanClassic_OnBigStore() {
 		var classic = AllocPerOp(() => ClassicJoined(_big, _bigRight, Take));
 		var bounded = AllocPerOp(() =>
-			_big.Query().Sort(new TaByOrderAsc()).InnerJoinOne(_bigRight).Execute(0, Take).Count);
+			_big.Query().SortBounded(new TaByOrderAsc()).InnerJoinOne(_bigRight).Execute(0, Take).Count);
 
 		Assert.That(bounded, Is.LessThan(classic / 10),
 			$"classic={classic} B/op, bounded={bounded} B/op at N={BigN}, take={Take}");

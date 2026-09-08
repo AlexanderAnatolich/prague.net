@@ -14,11 +14,15 @@ public struct SortResolver<TLeftKey, TLeftValue, TResult, TComparer> : IJoinReso
 
 	private readonly TComparer _comparer;
 	private readonly bool _isLeftValue;
+	private readonly bool _allowBounded;
 
-	public SortResolver(TComparer comparer) {
+	public SortResolver(TComparer comparer, bool allowBounded = false) {
 		_comparer = comparer;
 		_isLeftValue = typeof(TResult) == typeof(TLeftValue);
+		_allowBounded = allowBounded;
 	}
+
+	public bool AllowsBounded => _allowBounded;
 
 
 	public void UnsafeExecuteIndexedInner<TAccessor, TExecutor>(ref TAccessor accessor, ref TExecutor executor, bool cloneOnAdd, bool isFirst,
@@ -39,8 +43,7 @@ public struct SortResolver<TLeftKey, TLeftValue, TResult, TComparer> : IJoinReso
 
 	void IJoinResolver.UnsafeSortResults<TFullResult>(ref QueryResults<TFullResult> results, int skip, int take) {
 		ref var res = ref Unsafe.As<QueryResults<TFullResult>, QueryResults<TResult>>(ref results);
-		// Stable: must agree with the bounded plan's (value, ordinal) order — see SortStable.
-		res.SortStable(_comparer);
+		res.Sort(_comparer);
 		if (skip > 0 || take < int.MaxValue)
 			results.SliceLeaveTotalCount(skip, Math.Min(take, results.Count - skip));
 

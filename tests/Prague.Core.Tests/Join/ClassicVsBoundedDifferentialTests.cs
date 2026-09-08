@@ -2,19 +2,22 @@ namespace Prague.Core.Tests.Join;
 
 using Prague.Core;
 
-// The bounded top-K plan and the classic full-sort pipeline serve the same public terminals —
-// which one runs depends only on whether `take` is finite. They must therefore agree on every
-// observable: which rows come back, in which order, and what TotalCount says. These are the
-// two shapes where they historically did not.
+// Sort and SortBounded are two deliberately different plans, chosen by the caller. What must hold:
+//   - neither may invent rows (the phantom-row shape);
+//   - with a TOTAL comparer they are indistinguishable — a total order has exactly one sorted
+//     permutation, so there is nothing left for the plans to disagree about;
+//   - SortBounded's tie guarantee (encounter order) is what makes consecutive pages partition the
+//     result, and that is the reason to opt in.
+// With a non-total comparer, classic page boundaries are unspecified — asserted here only as far as
+// the contract goes: right count, real rows, no phantoms.
 [TestFixture]
 public class ClassicVsBoundedDifferentialTests {
-	private InMemoryDataCache<int, SnAuthor> _authors = null!;
-	private InMemoryDataCache<int, SnProfile> _profiles = null!;
-
-	// Span.Sort falls back to insertion sort — which is stable — below 16 elements, so a tie
-	// divergence only shows once introsort actually runs. TieCount is comfortably past that.
+	// Span.Sort falls back to insertion sort — which is stable — below 16 elements, so tie behaviour
+	// only shows once introsort actually runs. TieCount is comfortably past that.
 	private const int TieCount = 64;
 
+	private InMemoryDataCache<int, SnAuthor> _authors = null!;
+	private InMemoryDataCache<int, SnProfile> _profiles = null!;
 	private InMemoryDataCache<int, SnAuthor> _many = null!;
 	private InMemoryDataCache<int, SnProfile> _manyProfiles = null!;
 
@@ -23,121 +26,112 @@ public class ClassicVsBoundedDifferentialTests {
 		_authors = new InMemoryDataCache<int, SnAuthor>();
 		_profiles = new InMemoryDataCache<int, SnProfile>();
 		_many = new InMemoryDataCache<int, SnAuthor>();
+		_manyProfiles = new InMemoryDataCache<int, SnProfile>();
 
 		for (var i = 1; i <= 6; i++)
 			_authors.AddOrUpdate(i, new SnAuthor { Id = i, Name = $"Author {i}" });
 
-		// Every author has a profile, so the inner join narrows nothing: the only thing that
-		// can drop a row here is the Where.
+		// Every author has a profile, so the inner join narrows nothing: the only thing that can drop
+		// a row here is the Where.
 		for (var i = 1; i <= 6; i++)
 			_profiles.AddOrUpdate(i, new SnProfile { Id = i, Bio = $"Bio {i}" });
 
-		for (var i = 1; i <= TieCount; i++)
+		for (var i = 1; i <= TieCount; i++) {
 			_many.AddOrUpdate(i, new SnAuthor { Id = i, Name = $"Author {i}" });
-
-		_manyProfiles = new InMemoryDataCache<int, SnProfile>();
-		for (var i = 1; i <= TieCount; i++)
 			_manyProfiles.AddOrUpdate(i, new SnProfile { Id = i, Bio = $"Bio {i}" });
+		}
 	}
 
-	// Index-seeded candidates skip the seed-time filter pass, so the classic joined-inner
-	// pipeline used to retain a dictionary slot for every candidate with a right match —
-	// including the ones the Where rejects. Their Left was never written, leaving rows with a
-	// default Left, and Count > TotalCount. The bounded plan materializes only rows the base
-	// walk emitted, so it never produced them.
-	[TestCase(0, 100)]
-	[TestCase(0, 2)]
-	[TestCase(1, 2)]
-	public void IndexSeeded_Where_InnerJoin_HasNoPhantomRows(int skip, int take) {
-		var keys = new[] { 1, 2, 3, 4, 5, 6 };
+	// ── Phantom rows: neither plan may invent a row ──────────────────────────
 
-		using var classic = _authors.Query()
-			.UseIndex(_authors.KeyIndex, keys)
+	// Index-seeded candidates used to skip the seed-time filter pass, so the joined-inner pipeline
+	// retained a dictionary slot for every candidate with a right match — including the ones the
+	// Where rejects. Their Left was never written, leaving rows with a default Left and
+	// Count > TotalCount. Reachable through plain Execute() with no paging at all.
+	[Test]
+	public void IndexSeeded_Where_InnerJoin_Classic_HasNoPhantomRows() {
+		using var results = _authors.Query()
+			.UseIndex(_authors.KeyIndex, new[] { 1, 2, 3, 4, 5, 6 })
 			.Where(a => a.Id <= 3)
 			.Sort(new AuthorByIdDesc())
 			.InnerJoinOne(_profiles)
 			.ExecutePooled();
 
-		using var bounded = _authors.Query()
-			.UseIndex(_authors.KeyIndex, keys)
-			.Where(a => a.Id <= 3)
-			.Sort(new AuthorByIdDesc())
-			.InnerJoinOne(_profiles)
-			.ExecutePooled(skip, take);
-
-		Assert.That(classic.TotalCount, Is.EqualTo(3), "Where keeps authors 1..3, all of which have a profile");
-		Assert.That(classic.Count, Is.LessThanOrEqualTo(classic.TotalCount), "a page can never hold more rows than the total");
-		foreach (var row in classic)
-			Assert.That(row.Left, Is.Not.Null, "classic path emitted a row whose Left was never written");
-
-		var expected = classic.Select(r => r.Left.Id).Skip(skip).Take(take).ToArray();
-
-		Assert.That(bounded.TotalCount, Is.EqualTo(classic.TotalCount));
-		Assert.That(bounded.Select(r => r.Left.Id).ToArray(), Is.EqualTo(expected));
-		foreach (var row in bounded)
-			Assert.That(row.Left, Is.Not.Null);
+		Assert.That(results.TotalCount, Is.EqualTo(3));
+		Assert.That(results.Count, Is.EqualTo(3), "Count must not exceed TotalCount");
+		foreach (var row in results)
+			Assert.That(row.Left, Is.Not.Null, "a row's Left was never written");
 	}
 
-	// Same shape without the Sort: the phantom is a property of index-seeded candidates plus a
-	// Where plus an inner join, so it is reachable with no sorter at all — a shape the bounded
-	// plan never handles.
 	[Test]
 	public void IndexSeeded_Where_InnerJoin_Unsorted_HasNoPhantomRows() {
-		var keys = new[] { 1, 2, 3, 4, 5, 6 };
-
 		using var results = _authors.Query()
-			.UseIndex(_authors.KeyIndex, keys)
+			.UseIndex(_authors.KeyIndex, new[] { 1, 2, 3, 4, 5, 6 })
 			.Where(a => a.Id <= 3)
 			.InnerJoinOne(_profiles)
 			.ExecutePooled();
 
 		Assert.That(results.TotalCount, Is.EqualTo(3));
-		Assert.That(results.Count, Is.EqualTo(3));
+		Assert.That(results.Count, Is.EqualTo(3), "Count must not exceed TotalCount");
+		foreach (var row in results)
+			Assert.That(row.Left, Is.Not.Null, "a row's Left was never written");
+	}
+
+	[TestCase(0, 100)]
+	[TestCase(0, 2)]
+	[TestCase(1, 2)]
+	public void IndexSeeded_Where_InnerJoin_Bounded_HasNoPhantomRows(int skip, int take) {
+		using var results = _authors.Query()
+			.UseIndex(_authors.KeyIndex, new[] { 1, 2, 3, 4, 5, 6 })
+			.Where(a => a.Id <= 3)
+			.SortBounded(new AuthorByIdDesc())
+			.InnerJoinOne(_profiles)
+			.ExecutePooled(skip, take);
+
+		Assert.That(results.TotalCount, Is.EqualTo(3));
+		Assert.That(results.Count, Is.EqualTo(Math.Clamp(3 - skip, 0, take)));
 		foreach (var row in results)
 			Assert.That(row.Left, Is.Not.Null);
 	}
 
-	// Ties: the bounded plan carries an encounter ordinal so consecutive pages partition the
-	// result. The classic sort has to break ties the same way, or Execute() and Execute(0, N)
-	// disagree on the order of equal rows over identical data.
+	// ── A total comparer makes the two plans indistinguishable ───────────────
+
 	[TestCase(0, TieCount)]
 	[TestCase(0, 8)]
 	[TestCase(8, 8)]
 	[TestCase(TieCount - 4, 4)]
 	[TestCase(TieCount / 2, 1)]
-	public void TieOrder_AgreesBetweenClassicAndBounded(int skip, int take) {
-		using var classic = _many.Query().Sort(new AuthorByParity()).ExecutePooled();
+	[TestCase(TieCount + 10, 4)]
+	public void TotalComparer_BothPlansReturnTheSamePage(int skip, int take) {
+		using var classic = _many.Query().Sort(new AuthorByParityThenId()).ExecutePooled();
 		var expected = classic.Select(a => a.Id).Skip(skip).Take(take).ToArray();
 
-		using var bounded = _many.Query().Sort(new AuthorByParity()).ExecutePooled(skip, take);
+		using var bounded = _many.Query().SortBounded(new AuthorByParityThenId()).ExecutePooled(skip, take);
 
 		Assert.That(bounded.TotalCount, Is.EqualTo(classic.Count));
 		Assert.That(bounded.Select(a => a.Id).ToArray(), Is.EqualTo(expected));
 	}
 
-	// The joined classic path sorts through ValueDictionary.SortAndCrop rather than
-	// QueryResults.Sort, so it needs the same tiebreak or the joined terminals diverge the same way.
 	[TestCase(0, TieCount)]
-	[TestCase(0, 8)]
 	[TestCase(8, 8)]
 	[TestCase(TieCount - 4, 4)]
-	public void JoinedTieOrder_AgreesBetweenClassicAndBounded(int skip, int take) {
-		using var classic = _many.Query().Sort(new AuthorByParity()).InnerJoinOne(_manyProfiles).ExecutePooled();
+	public void TotalComparer_BothPlansReturnTheSameJoinedPage(int skip, int take) {
+		using var classic = _many.Query().Sort(new AuthorByParityThenId()).InnerJoinOne(_manyProfiles).ExecutePooled();
 		var expected = classic.Select(r => r.Left.Id).Skip(skip).Take(take).ToArray();
 
-		using var bounded = _many.Query().Sort(new AuthorByParity()).InnerJoinOne(_manyProfiles).ExecutePooled(skip, take);
+		using var bounded = _many.Query().SortBounded(new AuthorByParityThenId()).InnerJoinOne(_manyProfiles).ExecutePooled(skip, take);
 
 		Assert.That(bounded.TotalCount, Is.EqualTo(classic.Count));
 		Assert.That(bounded.Select(r => r.Left.Id).ToArray(), Is.EqualTo(expected));
 	}
 
-	// Consecutive bounded pages must partition the result exactly — no duplicates, no gaps —
-	// which is the property the ordinal tiebreak exists to provide.
+	// ── SortBounded's tie guarantee: the reason to opt in ────────────────────
+
 	[Test]
-	public void TiedPages_PartitionTheResult() {
+	public void SortBounded_TiedPages_PartitionTheResult() {
 		var seen = new List<int>();
 		for (var skip = 0; skip < TieCount; skip += 8) {
-			using var page = _many.Query().Sort(new AuthorByParity()).ExecutePooled(skip, 8);
+			using var page = _many.Query().SortBounded(new AuthorByParity()).ExecutePooled(skip, 8);
 			seen.AddRange(page.Select(a => a.Id));
 		}
 
@@ -145,9 +139,70 @@ public class ClassicVsBoundedDifferentialTests {
 		Assert.That(seen.Distinct().Count(), Is.EqualTo(TieCount), "pages overlapped");
 		Assert.That(seen.OrderBy(id => id).ToArray(), Is.EqualTo(Enumerable.Range(1, TieCount).ToArray()));
 	}
+
+	// The classic plan makes no such promise with a non-total comparer, and this pins only what it
+	// does promise: the right number of real rows drawn from the result. Deliberately no assertion
+	// about which rows — that is the difference SortBounded exists to remove.
+	[TestCase(0, 8)]
+	[TestCase(8, 8)]
+	public void Sort_TiedPage_IsWellFormedEvenThoughOrderIsUnspecified(int skip, int take) {
+		using var page = _many.Query().Sort(new AuthorByParity()).ExecutePooled(skip, take);
+
+		Assert.That(page.TotalCount, Is.EqualTo(TieCount));
+		Assert.That(page.Count, Is.EqualTo(take));
+		foreach (var author in page)
+			Assert.That(author.Id, Is.InRange(1, TieCount));
+	}
+
+	// ── Opt-in is required: Sort must not silently take the bounded plan ─────
+
+	// The plans differ on ties, so a query that only said Sort has to keep the classic behaviour.
+	// Both must honour the comparer — every even Id before every odd one — but only the bounded plan
+	// pins the order *within* a tie group. The inequality is an implementation-detail guard: it works
+	// because the framework sort visibly reorders a tie-heavy comparer. If a future runtime made the
+	// two coincide, the assertion fails and tells us the guard lost its power.
+	[Test]
+	public void Sort_DoesNotAdoptTheBoundedTieOrder() {
+		using var boundedResults = _many.Query().SortBounded(new AuthorByParity()).ExecutePooled(0, TieCount);
+		using var classicResults = _many.Query().Sort(new AuthorByParity()).ExecutePooled(0, TieCount);
+		var bounded = boundedResults.Select(a => a.Id).ToArray();
+		var classic = classicResults.Select(a => a.Id).ToArray();
+
+		Assert.That(bounded.Take(TieCount / 2).All(id => id % 2 == 0), Is.True, "bounded broke the comparer");
+		Assert.That(classic.Take(TieCount / 2).All(id => id % 2 == 0), Is.True, "classic broke the comparer");
+		Assert.That(classic, Is.Not.EqualTo(bounded),
+			"either Sort has silently adopted the bounded plan, or the framework sort became stable "
+			+ "and this guard can no longer detect that");
+	}
+
+	// The strong, deterministic promise of the bounded plan: the page boundaries do not depend on how
+	// you slice them. Encounter order itself is the store's iteration order and deliberately not
+	// asserted — only that it is consistent.
+	[Test]
+	public void SortBounded_PagesConcatenateToTheWholeResult() {
+		using var whole = _many.Query().SortBounded(new AuthorByParity()).ExecutePooled(0, TieCount);
+		var expected = whole.Select(a => a.Id).ToArray();
+
+		var paged = new List<int>();
+		for (var skip = 0; skip < TieCount; skip += 8) {
+			using var page = _many.Query().SortBounded(new AuthorByParity()).ExecutePooled(skip, 8);
+			paged.AddRange(page.Select(a => a.Id));
+		}
+
+		Assert.That(paged.ToArray(), Is.EqualTo(expected));
+	}
 }
 
-// Every even Id ties with every other even Id, and likewise for odd — six rows, two tie groups.
+// Every even Id ties with every other even Id, and likewise for odd — two tie groups.
 internal sealed class AuthorByParity : IComparer<SnAuthor> {
 	public int Compare(SnAuthor? x, SnAuthor? y) => (x?.Id % 2 ?? 0).CompareTo(y?.Id % 2 ?? 0);
+}
+
+// The same ordering made total by falling back to the primary key, which is what a caller who wants
+// deterministic pages out of the classic plan should supply.
+internal sealed class AuthorByParityThenId : IComparer<SnAuthor> {
+	public int Compare(SnAuthor? x, SnAuthor? y) {
+		var order = (x?.Id % 2 ?? 0).CompareTo(y?.Id % 2 ?? 0);
+		return order != 0 ? order : (x?.Id ?? 0).CompareTo(y?.Id ?? 0);
+	}
 }

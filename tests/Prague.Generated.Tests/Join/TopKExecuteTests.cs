@@ -49,10 +49,10 @@ public class TopKExecuteTests {
 
 	[Test]
 	public void Sorted_Simple_PagedPooled_MatchesFullClassicOrder() {
-		using var full = _authors.Query().Sort(new AuthorByIdDesc()).ExecutePooled();
+		using var full = _authors.Query().SortBounded(new AuthorByIdDesc()).ExecutePooled();
 		var expected = full.Select(a => a.Id).Skip(1).Take(2).ToArray();
 
-		using var paged = _authors.Query().Sort(new AuthorByIdDesc()).ExecutePooled(1, 2);
+		using var paged = _authors.Query().SortBounded(new AuthorByIdDesc()).ExecutePooled(1, 2);
 
 		Assert.That(paged.TotalCount, Is.EqualTo(full.Count));
 		Assert.That(paged.Select(a => a.Id).ToArray(), Is.EqualTo(expected));
@@ -60,11 +60,11 @@ public class TopKExecuteTests {
 
 	[Test]
 	public void Sorted_JoinWithBook_PagedPooled_MatchesFullClassicOrder() {
-		using var full = _authors.Query().Sort(new AuthorByIdDesc()).JoinWithBook().ExecutePooled();
+		using var full = _authors.Query().SortBounded(new AuthorByIdDesc()).JoinWithBook().ExecutePooled();
 		var expectedIds = full.Select(r => r.Left.Id).Take(2).ToArray();
 		var expectedBooks = full.Select(r => r.Right.Select(b => b.Id).OrderBy(id => id).ToArray()).Take(2).ToArray();
 
-		using var paged = _authors.Query().Sort(new AuthorByIdDesc()).JoinWithBook().ExecutePooled(0, 2);
+		using var paged = _authors.Query().SortBounded(new AuthorByIdDesc()).JoinWithBook().ExecutePooled(0, 2);
 
 		Assert.That(paged.TotalCount, Is.EqualTo(full.Count));
 		Assert.That(paged.Select(r => r.Left.Id).ToArray(), Is.EqualTo(expectedIds));
@@ -74,11 +74,11 @@ public class TopKExecuteTests {
 
 	[Test]
 	public void Sorted_JoinWithAuthorProfile_PagedPooled_MatchesFullClassicOrder() {
-		using var full = _authors.Query().Sort(new AuthorByIdDesc()).JoinWithAuthorProfile().ExecutePooled();
+		using var full = _authors.Query().SortBounded(new AuthorByIdDesc()).JoinWithAuthorProfile().ExecutePooled();
 		var expectedIds = full.Select(r => r.Left.Id).Skip(1).Take(2).ToArray();
 		var expectedBios = full.Select(r => r.Right?.Bio).Skip(1).Take(2).ToArray();
 
-		using var paged = _authors.Query().Sort(new AuthorByIdDesc()).JoinWithAuthorProfile().ExecutePooled(1, 2);
+		using var paged = _authors.Query().SortBounded(new AuthorByIdDesc()).JoinWithAuthorProfile().ExecutePooled(1, 2);
 
 		Assert.That(paged.TotalCount, Is.EqualTo(full.Count));
 		Assert.That(paged.Select(r => r.Left.Id).ToArray(), Is.EqualTo(expectedIds));
@@ -89,10 +89,10 @@ public class TopKExecuteTests {
 	[Test]
 	public void Sorted_WithKeyFilter_Paged_MatchesFullClassicOrder() {
 		var ids = new List<int> { 1, 2, 4 };
-		using var full = _authors.Query().WithId(ids).Sort(new AuthorByIdDesc()).ExecutePooled();
+		using var full = _authors.Query().WithId(ids).SortBounded(new AuthorByIdDesc()).ExecutePooled();
 		var expected = full.Select(a => a.Id).Take(2).ToArray();
 
-		using var paged = _authors.Query().WithId(ids).Sort(new AuthorByIdDesc()).ExecutePooled(0, 2);
+		using var paged = _authors.Query().WithId(ids).SortBounded(new AuthorByIdDesc()).ExecutePooled(0, 2);
 
 		Assert.That(full.Count, Is.EqualTo(3), "fixture sanity: key filter narrows to 3 authors");
 		Assert.That(paged.TotalCount, Is.EqualTo(full.Count));
@@ -101,10 +101,10 @@ public class TopKExecuteTests {
 
 	[Test]
 	public void Sorted_Where_Paged_MatchesFullClassicOrder() {
-		using var full = _authors.Query().Where(static a => a.Country == "UK").Sort(new AuthorByIdDesc()).ExecutePooled();
+		using var full = _authors.Query().Where(static a => a.Country == "UK").SortBounded(new AuthorByIdDesc()).ExecutePooled();
 		var expected = full.Select(a => a.Id).Take(1).ToArray();
 
-		using var paged = _authors.Query().Where(static a => a.Country == "UK").Sort(new AuthorByIdDesc()).ExecutePooled(0, 1);
+		using var paged = _authors.Query().Where(static a => a.Country == "UK").SortBounded(new AuthorByIdDesc()).ExecutePooled(0, 1);
 
 		Assert.That(paged.TotalCount, Is.EqualTo(full.Count));
 		Assert.That(paged.Select(a => a.Id).ToArray(), Is.EqualTo(expected));

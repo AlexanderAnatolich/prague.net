@@ -28,6 +28,14 @@ public interface IJoinResolver {
 	static abstract bool IsSorter { get; }
 	bool Inner { get; }
 
+	/// <summary>
+	/// Sorter-only: did the caller ask for the bounded top-K plan (<c>SortBounded</c>) rather than the
+	/// classic full sort (<c>Sort</c>)? The two plans order comparer-equal rows differently — bounded
+	/// breaks ties by encounter order so consecutive pages partition the result, classic leaves them
+	/// unspecified — so the choice is the caller's, never inferred. Default: no.
+	/// </summary>
+	bool AllowsBounded => false;
+
 	internal void UnsafeExecuteWithAccessor<TAccessor>(ref TAccessor accessor, bool cloneOnAdd, bool shouldPool,
 		ref QueryResultsDisposer disposer)
 		where TAccessor : struct, IUnsafeValueAccessor, allows ref struct;

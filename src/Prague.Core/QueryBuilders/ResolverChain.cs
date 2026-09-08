@@ -589,6 +589,7 @@ internal ref struct TopKJoinedBaseContainer<TKey, TValue>
 internal ref struct TopKProbeProcessor<TLeftValue> : IResolverExecutor {
 	internal int SorterCount;
 	internal bool SorterInnermost;
+	internal bool SorterAllowsBounded;
 	internal bool AllInnerNarrowable;
 	internal IComparer<TLeftValue>? LeftComparer;
 
@@ -598,7 +599,10 @@ internal ref struct TopKProbeProcessor<TLeftValue> : IResolverExecutor {
 		if (TResolver.IsSorter) {
 			SorterCount++;
 			SorterInnermost = position == 0;
-			if (resolver.TryGetLeftComparer<TLeftValue>(out var cmp))
+			SorterAllowsBounded = resolver.AllowsBounded;
+			// Gate the comparer fetch on the opt-in: extracting it erases a struct comparer to an
+			// interface, which boxes. A query that never wanted the bounded plan must not pay for it.
+			if (resolver.AllowsBounded && resolver.TryGetLeftComparer<TLeftValue>(out var cmp))
 				LeftComparer = cmp;
 
 			return;

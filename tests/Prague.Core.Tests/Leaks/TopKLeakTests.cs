@@ -21,14 +21,14 @@ public class TopKLeakTests {
 	[Test]
 	public void TopPooled_HappyPath_DisposeReturnsBuffers() =>
 		LeakAssert.Balanced(() => {
-			using var results = _cache.Query().Sort(new TopKExecuteCoreTests.TkByOrderAsc()).ExecutePooled(5, 20);
+			using var results = _cache.Query().SortBounded(new TopKExecuteCoreTests.TkByOrderAsc()).ExecutePooled(5, 20);
 			Assert.That(results.Count, Is.EqualTo(20));
 		});
 
 	[Test]
 	public void TopPooled_DoubleDispose_NoDoubleReturn() =>
 		LeakAssert.Balanced(() => {
-			var results = _cache.Query().Sort(new TopKExecuteCoreTests.TkByOrderAsc()).ExecutePooled(0, 10);
+			var results = _cache.Query().SortBounded(new TopKExecuteCoreTests.TkByOrderAsc()).ExecutePooled(0, 10);
 			results.Dispose();
 			results.Dispose();
 		});
@@ -48,7 +48,7 @@ public class TopKLeakTests {
 	public void TopPooled_ComparerThrowsMidWalk_HeapBufferStillReturned() =>
 		LeakAssert.Balanced(() => {
 			try {
-				using var results = _cache.Query().Sort(new ThrowingComparer()).ExecutePooled(0, 10);
+				using var results = _cache.Query().SortBounded(new ThrowingComparer()).ExecutePooled(0, 10);
 			} catch (InvalidOperationException) {
 				// Expected: the comparer blows up mid-selection; buffers must still be returned.
 			}
@@ -80,7 +80,7 @@ public class TopKLeakTests {
 	public void JoinedTopPooled_HappyPath_DisposeReturnsBuffers() =>
 		LeakAssert.Balanced(() => {
 			using var results = _authors.Query()
-				.Sort(new AuthorByIdDesc())
+				.SortBounded(new AuthorByIdDesc())
 				.InnerJoinOne(_profiles)
 				.JoinMany(_books, _bookAuthorIdx)
 				.ExecutePooled(2, 5);
@@ -91,7 +91,7 @@ public class TopKLeakTests {
 	public void JoinedTopPooled_DoubleDispose_NoDoubleReturn() =>
 		LeakAssert.Balanced(() => {
 			var results = _authors.Query()
-				.Sort(new AuthorByIdDesc())
+				.SortBounded(new AuthorByIdDesc())
 				.InnerJoinOne(_profiles)
 				.JoinMany(_books, _bookAuthorIdx)
 				.ExecutePooled(0, 5);
@@ -118,7 +118,7 @@ public class TopKLeakTests {
 		LeakAssert.Balanced(() => {
 			try {
 				using var results = _authors.Query()
-					.Sort(new AuthorByIdDesc())
+					.SortBounded(new AuthorByIdDesc())
 					.InnerJoinOne(_profiles, q => q.Where(static _ => throw new InvalidOperationException("boom")))
 					.ExecutePooled(0, 5);
 			} catch (InvalidOperationException) {
@@ -131,7 +131,7 @@ public class TopKLeakTests {
 		LeakAssert.Balanced(() => {
 			try {
 				using var results = _authors.Query()
-					.Sort(new ThrowingAuthorComparer())
+					.SortBounded(new ThrowingAuthorComparer())
 					.InnerJoinOne(_profiles)
 					.JoinMany(_books, _bookAuthorIdx)
 					.ExecutePooled(0, 5);
