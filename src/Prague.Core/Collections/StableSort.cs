@@ -24,9 +24,10 @@ using System.Runtime.InteropServices;
 ///   The keyed overload — the joined pipeline's row dictionary, arrays of result structs several
 ///   megabytes long — sorts the values IN PLACE with the framework introsort, moving a pooled ordinal
 ///   per row as the sort's items, then restores encounter order inside every run of equal values by
-///   sorting the run's ordinals (the values follow); the caller's items follow the ordinals through one
-///   permutation pass. Sorting indices there cost half again the framework sort: every comparison took
-///   an extra random hop into the struct rows, which the in-place sort reads sequentially.
+///   sorting the runs' ordinals — integers only — and gathering the rows into that order once; the
+///   caller's items follow the ordinals through one more permutation pass. Sorting indices there cost
+///   half again the framework sort: every comparison took an extra random hop into the struct rows,
+///   which the in-place sort reads sequentially.
 ///   </para>
 ///   A comparison that throws leaves the rows in an unspecified permutation like the framework sort
 ///   (the single-span overload leaves them untouched unless it throws inside the final permutation).
@@ -88,27 +89,57 @@ internal static class StableSort {
 		}
 	}
 
-	// After an unstable sort every run of values the comparer calls equal is contiguous; ordering each
-	// run by its ordinals (the rows' encounter positions) restores the stable order, and the values
-	// follow the ordinals as that sort's items. Runs of one — every row on distinct keys — cost the
-	// single adjacent comparison that finds them.
+	// After the unstable in-place sort every run of values the comparer calls equal is contiguous, and
+	// order[i] is the encounter position of the row now at i. Within a run the stable order is ascending
+	// encounter position: sort each run's positions — integers, no user comparisons, no row moves — and,
+	// once any run longer than one row exists, gather the rows into the corrected order in one pass.
+	// Distinct keys make every run one row long and cost only the adjacent comparison that finds them.
 	private static void RestoreEncounterOrder<T, TComparer>(Span<T> values, Span<int> order, TComparer comparer)
 		where TComparer : IComparer<T> {
-		var runStart = 0;
-		for (var i = 1; i < values.Length; i++) {
-			if (comparer.Compare(values[i - 1], values[i]) != 0) {
-				FinishRun(values, order, runStart, i);
+		var n = values.Length;
+		int[]? unstable = null; // unstable[encounter position] = index the row holds after the in-place sort
+		try {
+			var runStart = 0;
+			for (var i = 1; i <= n; i++) {
+				if (i < n && comparer.Compare(values[i - 1], values[i]) == 0) {
+					continue;
+				}
+
+				var length = i - runStart;
+				if (length > 1) {
+					if (unstable is null) {
+						// First tie: remember where every row sits before any run is re-ordered.
+						unstable = PragueArrayPool<int>.Pool.Rent(n);
+						for (var k = 0; k < n; k++) {
+							unstable[order[k]] = k;
+						}
+					}
+
+					order.Slice(runStart, length).Sort();
+				}
+
 				runStart = i;
 			}
-		}
 
-		FinishRun(values, order, runStart, values.Length);
-	}
+			if (unstable is null) {
+				return;
+			}
 
-	private static void FinishRun<T>(Span<T> values, Span<int> order, int start, int end) {
-		var length = end - start;
-		if (length > 1) {
-			order.Slice(start, length).Sort(values.Slice(start, length));
+			var buffer = PragueArrayPool<T>.Pool.Rent(n);
+			try {
+				var gathered = buffer.AsSpan(0, n);
+				for (var k = 0; k < n; k++) {
+					gathered[k] = values[unstable[order[k]]];
+				}
+
+				gathered.CopyTo(values);
+			} finally {
+				PragueArrayPool<T>.Pool.Return(buffer, RuntimeHelpers.IsReferenceOrContainsReferences<T>());
+			}
+		} finally {
+			if (unstable is not null) {
+				PragueArrayPool<int>.Pool.Return(unstable);
+			}
 		}
 	}
 

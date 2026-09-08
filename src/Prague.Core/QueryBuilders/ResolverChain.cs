@@ -113,6 +113,10 @@ internal ref struct JoinedResultContaier<TLeftKey, TLeftValue, TResolverChain, T
 	private int _totalCont;
 	private bool _handedOff;
 	private ValueDictionary<TLeftKey, TResult, DefaultKeyComparer<TLeftKey>> _results;
+	// Bit i marks the entry at index i as filled by the base walk. Rented only when the inner-join
+	// pre-pass opened slots before the walk; otherwise every slot is created by Add and none can stay
+	// unfilled.
+	private ulong[]? _filled;
 	private QueryResultsDisposer _disposer;
 	private ref TResolverChain _chainedResolvers;
 	public int TotalCount => _totalCont;
@@ -165,15 +169,23 @@ internal ref struct JoinedResultContaier<TLeftKey, TLeftValue, TResolverChain, T
 	}
 
 	public void Init(int maxCount) {
-		if (!_results.IsInitialized)
+		if (!_results.IsInitialized) {
 			_results = new ValueDictionary<TLeftKey, TResult, DefaultKeyComparer<TLeftKey>>(_shouldPool, maxCount);
+		} else if (_results.Count > 0 && _filled is null) {
+			// Slots already exist (inner-join pre-pass): remember which ones the walk fills. Every walked
+			// row lands in one of them or in a new entry, so Count + maxCount bounds the indices.
+			var words = (_results.Count + maxCount + 63) >> 6;
+			_filled = PragueArrayPool<ulong>.Pool.Rent(words);
+			Array.Clear(_filled, 0, words);
+		}
 	}
 
 	public void Seal(int actualCount) => _totalCont = actualCount;
 
 	public int Add(TLeftKey foreignKey, TLeftValue result) {
-		ref var v = ref _results.GetValueRefOrAddDefault(foreignKey, out var exists);
+		ref var v = ref _results.GetValueRefOrAddDefault(foreignKey, out var exists, out var index);
 		if (!exists) _totalCont++;
+		if (_filled is not null) _filled[index >> 6] |= 1UL << (index & 63);
 		Unsafe.AsRef(in v.Left) = _cloneOnAdd ? result.Clone() : result;
 		return 0;
 	}
@@ -184,20 +196,16 @@ internal ref struct JoinedResultContaier<TLeftKey, TLeftValue, TResolverChain, T
 	///   Drops the slots the base walk never filled. The inner-join pre-pass opens a slot for every
 	///   candidate that has a right BEFORE the base walk applies the query's predicate, so a row the
 	///   predicate rejects would otherwise surface with an empty Left while TotalCount, sealed from the
-	///   walk, does not count it. Nothing to do when every slot was filled — the common case, and every
-	///   query without an inner join. Cache values are reference types; for a value-type Left an
-	///   all-default value cannot be told from an unfilled slot, so those slots are left alone.
+	///   walk, does not count it. Filled slots are tracked by index in a bitmap, never read off the
+	///   value: a value-type Left equal to default is real data. Nothing to do when every slot was
+	///   filled — the common case, and every query without an inner join.
 	/// </summary>
 	public void DropUnfilledSlots() {
-		if (_results.Count == _totalCont || typeof(TLeftValue).IsValueType) {
+		if (_filled is null || _results.Count == _totalCont) {
 			return;
 		}
 
-		_results.RemoveWhere(new UnfilledLeft());
-	}
-
-	private readonly struct UnfilledLeft : IPredicate<TResult> {
-		public bool Should(TResult row) => row.Left is null;
+		_results.RetainMarked(_filled);
 	}
 
 	/// <summary>Execute joins for resolver 1 (reverse joins only — forward joins resolved in Add when active).</summary>
@@ -301,6 +309,10 @@ internal ref struct JoinedResultContaier<TLeftKey, TLeftValue, TResolverChain, T
 		if (!_handedOff)
 			_disposer.Dispose();
 		_results.Dispose(withValues: !_handedOff);
+		if (_filled is not null) {
+			PragueArrayPool<ulong>.Pool.Return(_filled);
+			_filled = null;
+		}
 	}
 }
 

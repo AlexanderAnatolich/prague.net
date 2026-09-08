@@ -106,7 +106,15 @@ internal struct ValueDictionary<TKey, TValue, TKeyComparer> : IDisposable
 	}
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
-	public ref TValue GetValueRefOrAddDefault(TKey key, out bool exists) {
+	public ref TValue GetValueRefOrAddDefault(TKey key, out bool exists) => ref GetValueRefOrAddDefault(key, out exists, out _);
+
+	/// <summary>
+	///   <see cref="GetValueRefOrAddDefault(TKey, out bool)"/> that also reports the entry's
+	///   <paramref name="index"/> — its insertion position, stable until an entry is removed — so a caller
+	///   can keep per-entry side data such as a filled-slot mark.
+	/// </summary>
+	[MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+	public ref TValue GetValueRefOrAddDefault(TKey key, out bool exists, out int index) {
 		var hashCode = GetHashCode(key);
 		var capacityMask = _capacityMask;
 		var slot = hashCode & capacityMask;
@@ -117,13 +125,14 @@ internal struct ValueDictionary<TKey, TValue, TKeyComparer> : IDisposable
 		ref var keysRef = ref MemoryMarshal.GetReference(keysSpan);
 		ref var valuesRef = ref MemoryMarshal.GetReference(valuesSpan);
 		while (true) {
-			var index = Unsafe.Add(ref metaRef, slot);
-			if (index < 0)
+			var entry = Unsafe.Add(ref metaRef, slot);
+			if (entry < 0)
 				break;
 
-			if (KeyEquals(Unsafe.Add(ref keysRef, index), key)) {
+			if (KeyEquals(Unsafe.Add(ref keysRef, entry), key)) {
 				exists = true;
-				return ref Unsafe.Add(ref valuesRef, index);
+				index = entry;
+				return ref Unsafe.Add(ref valuesRef, entry);
 			}
 
 			slot = (slot + 1) & capacityMask;
@@ -139,6 +148,7 @@ internal struct ValueDictionary<TKey, TValue, TKeyComparer> : IDisposable
 		Unsafe.Add(ref metaRef, slot) = count;
 		Count = count + 1;
 		exists = false;
+		index = count;
 		return ref Unsafe.Add(ref valuesRef, count);
 	}
 
@@ -283,20 +293,22 @@ internal struct ValueDictionary<TKey, TValue, TKeyComparer> : IDisposable
 	}
 
 	/// <summary>
-	///   Drops every entry <paramref name="remove"/> accepts, keeps the rest in order and rebuilds the hash
-	///   metadata once; returns the number of entries dropped. For an unsliced dictionary only (before any
-	///   <see cref="Crop"/> / <see cref="SortAndCrop{TComparer}"/>).
+	///   Keeps the entries whose bit is set in <paramref name="marks"/> (bit i for the entry at index i,
+	///   the index <see cref="GetValueRefOrAddDefault(TKey, out bool, out int)"/> reports), drops the rest
+	///   in order and rebuilds the hash metadata once; returns the number dropped. For an unsliced
+	///   dictionary only (before any <see cref="Crop"/> / <see cref="SortAndCrop{TComparer}"/>).
 	/// </summary>
-	internal int RemoveWhere<TPredicate>(TPredicate remove) where TPredicate : struct, IPredicate<TValue> {
+	internal int RetainMarked(ReadOnlySpan<ulong> marks) {
 		var count = Count;
 		if (count <= 0) return 0;
-		Debug.Assert(Offset == 0, "RemoveWhere runs before the dictionary is sliced");
+		Debug.Assert(Offset == 0, "RetainMarked runs before the dictionary is sliced");
+		Debug.Assert((long)marks.Length * 64 >= count, "marks must cover every entry");
 
 		var keys = _keys.Span.Slice(0, count);
 		var values = _values.Span.Slice(0, count);
 		var kept = 0;
 		for (var i = 0; i < count; i++) {
-			if (remove.Should(values[i])) continue;
+			if ((marks[i >> 6] & (1UL << (i & 63))) == 0) continue;
 			if (kept != i) {
 				keys[kept] = keys[i];
 				values[kept] = values[i];
