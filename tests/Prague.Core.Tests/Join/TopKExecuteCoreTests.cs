@@ -76,6 +76,8 @@ public class TopKExecuteCoreTests {
 
 	[TestCase(0, 10)]
 	[TestCase(5, 10)]
+	[TestCase(50, 20)]    // heap plan: K = 70 stays below N / 4
+	[TestCase(100, 50)]   // collect plan: K = 150 reaches N / 4, page selected in place
 	[TestCase(490, 20)]   // page crossing the end: take clamps
 	[TestCase(499, 10)]   // page starting at the last row
 	[TestCase(500, 10)]   // skip == total

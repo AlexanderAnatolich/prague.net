@@ -158,6 +158,7 @@ public struct JoinOneResolver<TLeftKey, TLeftValue, TRightCache, TRightKey, TRig
 	internal TFilter Filter;
 	internal TSelector Selector;
 	private readonly bool _isInner;
+	private ValueDictionary<TLeftKey, TRightValue, DefaultKeyComparer<TLeftKey>> _narrowedValues;
 
 	internal JoinOneResolver(TRightCache cache, TFilter filter, TSelector selector, bool isInner = false) {
 		Cache = cache;
@@ -212,7 +213,7 @@ public struct JoinOneResolver<TLeftKey, TLeftValue, TRightCache, TRightKey, TRig
 	// ── Core execution loop ──────────────────────────────────────────────────
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	private void ExecuteReverse<TContainer>(ref TContainer container, ReadOnlySpan<TLeftKey> leftKeys, bool applyFilter = true)
+	private void ExecuteReverse<TContainer>(ref TContainer container, ReadOnlySpan<TLeftKey> leftKeys)
 		where TContainer : struct, IJoinedResultContainer<TLeftKey, TRightValue>, allows ref struct {
 
 		if (leftKeys.IsEmpty)
@@ -255,10 +256,7 @@ public struct JoinOneResolver<TLeftKey, TLeftValue, TRightCache, TRightKey, TRig
 				0);
 
 			// ── Apply filter (executor-agnostic) and execute paired ────────────────
-			// The bounded fill pass passes applyFilter: false — membership was already decided by
-			// the narrow pass, and the filter can only narrow, never remap a left to another right.
-			if (applyFilter)
-				builder = Filter.Apply(builder);
+			builder = Filter.Apply(builder);
 			handedOff = true;
 			Unsafe.AsRef(in builder._leftQuery).ExecutePaired(ref container);
 		}
@@ -277,16 +275,18 @@ public struct JoinOneResolver<TLeftKey, TLeftValue, TRightCache, TRightKey, TRig
 	void IJoinResolver.UnsafeFillNarrowedInner<TAccessor>(
 		ref TAccessor accessor, bool cloneOnAdd, bool shouldPool, ref QueryResultsDisposer disposer) {
 		var container = new UnsafeResolverContainer<TAccessor>(accessor, cloneOnAdd);
-		// Filter already applied by the narrow pass — running it again would invoke the user's
-		// lambda a second time per query and could diverge for a non-deterministic predicate.
-		ExecuteReverse(ref container, accessor.GetKeys<TLeftKey>(), applyFilter: false);
+		// Use the actual value that passed the filter, just as the classic single-pass plan does.
+		// Re-reading the cache here could attach a replacement that never passed the predicate.
+		foreach (var key in accessor.GetKeys<TLeftKey>()) {
+			if (_narrowedValues.IsInitialized && _narrowedValues.TryGetValue(key, out var value))
+				container.Add(key, value);
+		}
+	}
 
-		// A right row retired between the narrow pass and this fill leaves the slot null. Inner-join
-		// semantics forbid surfacing such a row, so drop it — mirroring what the single-pass
-		// UnsafeExecuteIndexedInner achieves through RetainNonNullSlots. The candidate set is spent
-		// by now; a default (empty) one makes the accessor's IntersectWith a no-op.
-		var spentCandidates = default(ValueSet<TLeftKey, DefaultKeyComparer<TLeftKey>>);
-		accessor.RetainNonNullSlots<TLeftKey, TRightValue>(ref spentCandidates);
+	void IJoinResolver.ReleaseNarrowedInner() {
+		if (_narrowedValues.IsInitialized)
+			_narrowedValues.Dispose(withValues: true);
+		_narrowedValues = default;
 	}
 
 	// ── IndexedInner: single-pass right-attach + narrow ──────────────────────
@@ -393,18 +393,18 @@ public struct JoinOneResolver<TLeftKey, TLeftValue, TRightCache, TRightKey, TRig
 
 	static bool IJoinResolver.SupportsNarrowOnly => true;
 
-	// Narrow-only container: records surviving left keys; writes nothing into any results map.
-	private ref struct SurvivorSetContainer : IJoinedResultContainer<TLeftKey, TRightValue> {
-		private ref ValueSet<TLeftKey, DefaultKeyComparer<TLeftKey>> _survivors;
+	// Retain checked values separately from the page-sized joined result map.
+	private ref struct RetainedValuesContainer : IJoinedResultContainer<TLeftKey, TRightValue> {
+		private ref ValueDictionary<TLeftKey, TRightValue, DefaultKeyComparer<TLeftKey>> _values;
 		public int TotalCount => 1;
 
-		public SurvivorSetContainer(ref ValueSet<TLeftKey, DefaultKeyComparer<TLeftKey>> survivors) {
-			_survivors = ref survivors;
+		public RetainedValuesContainer(ref ValueDictionary<TLeftKey, TRightValue, DefaultKeyComparer<TLeftKey>> values) {
+			_values = ref values;
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public int Add(TLeftKey foreignKey, TRightValue result) {
-			_survivors.Add(foreignKey);
+			_values.GetValueRefOrAddDefault(foreignKey, out _) = result;
 			return 0;
 		}
 	}
@@ -412,9 +412,8 @@ public struct JoinOneResolver<TLeftKey, TLeftValue, TRightCache, TRightKey, TRig
 	/// <summary>
 	/// Narrow-only twin of <see cref="UnsafeExecuteIndexedInner"/>: phases 1-3 (pair seeding via
 	/// KeyIndex, empty-intersect early-out, filter application) are identical; the terminal phase
-	/// collects surviving left keys into a scratch set and intersects the candidates with it,
-	/// instead of writing rights into a results map. Used by the bounded top-K path, which fills
-	/// rights later — only for the selected page rows — via the reverse fill.
+	/// collects surviving left keys and retains the checked values in a pooled map. Fill copies
+	/// those values to page rows without a second cache lookup, selector call or predicate call.
 	/// </summary>
 	void IJoinResolver.UnsafeNarrowIndexedInner<TExecutor>(ref TExecutor leftQuery) {
 		ref var candidates = ref leftQuery.GetCandidates<TLeftKey>();
@@ -458,15 +457,11 @@ public struct JoinOneResolver<TLeftKey, TLeftValue, TRightCache, TRightKey, TRig
 
 			builder = Filter.Apply(builder);
 
-			var survivors = new ValueSet<TLeftKey, DefaultKeyComparer<TLeftKey>>(pairs.Count);
-			try {
-				var container = new SurvivorSetContainer(ref survivors);
-				handedOff = true;
-				Unsafe.AsRef(in builder._leftQuery).ExecutePaired(ref container);
-				candidates.IntersectWith(ref survivors);
-			} finally {
-				survivors.Dispose();
-			}
+			_narrowedValues = new ValueDictionary<TLeftKey, TRightValue, DefaultKeyComparer<TLeftKey>>(true, pairs.Count);
+			var container = new RetainedValuesContainer(ref _narrowedValues);
+			handedOff = true;
+			Unsafe.AsRef(in builder._leftQuery).ExecutePaired(ref container);
+			candidates.IntersectWith(_narrowedValues.Keys);
 		}
 		finally {
 			if (!handedOff && pairs.IsInitlized)

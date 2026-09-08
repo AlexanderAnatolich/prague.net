@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -51,7 +52,10 @@ internal struct ValueDictionary<TKey, TValue, TKeyComparer> : IDisposable
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
 	public void Add(TKey key, TValue value) {
-		Debug.Assert(Count < _values.Length, "ValueDictionary capacity exceeded");
+		if (Count >= _values.Length) {
+			ThrowCapacityExceeded();
+		}
+
 		Debug.Assert(_metadata != null, "ValueDictionary used after Dispose");
 		var hashCode = GetHashCode(key);
 		var capacityMask = _capacityMask;
@@ -125,7 +129,10 @@ internal struct ValueDictionary<TKey, TValue, TKeyComparer> : IDisposable
 			slot = (slot + 1) & capacityMask;
 		}
 
-		Debug.Assert(Count < valuesSpan.Length, "ValueDictionary capacity exceeded");
+		if (Count >= valuesSpan.Length) {
+			ThrowCapacityExceeded();
+		}
+
 		var count = Count;
 		Unsafe.Add(ref keysRef, count) = key;
 		Unsafe.Add(ref valuesRef, count) = default!;
@@ -353,6 +360,13 @@ internal struct ValueDictionary<TKey, TValue, TKeyComparer> : IDisposable
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
 	private readonly bool KeyEquals(TKey a, TKey b) => _comparer.Equals(a, b);
+
+	// The working window is exactly expectedCount wide while the rented arrays are usually longer, so an
+	// overrun would silently write into pool slack. Every insert path checks in every build configuration;
+	// the branch is predictable and the throw lives out of line to keep the callers small.
+	[DoesNotReturn]
+	private static void ThrowCapacityExceeded() =>
+		throw new InvalidOperationException("ValueDictionary capacity exceeded: more entries than the expected count it was sized for.");
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	private static int GetPowerOf2Capacity(int expectedCount) {
