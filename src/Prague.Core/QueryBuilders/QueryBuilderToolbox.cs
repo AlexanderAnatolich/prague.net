@@ -57,9 +57,13 @@ public interface IJoinResolver {
 	/// </summary>
 	static virtual bool SupportsNarrowOnly => false;
 
+	/// <summary>Returns any values retained by a bounded inner pass, including on failure.</summary>
+	internal void ReleaseNarrowedInner() { }
+
 	/// <summary>
 	/// Narrow-only inner execution: intersects the outer query's candidate set with the lefts
-	/// that have a (filter-passing) right match, WITHOUT writing anything into a results map.
+	/// that have a (filter-passing) right match, without materializing full joined rows.
+	/// The resolver retains the checked values until fill and releases them via ReleaseNarrowedInner.
 	/// Only invoked by the bounded top-K path, and only on resolvers whose
 	/// <see cref="SupportsNarrowOnly"/> is true.
 	/// </summary>
@@ -69,10 +73,8 @@ public interface IJoinResolver {
 
 	/// <summary>
 	/// Bounded-path fill for an inner resolver whose membership was already decided by
-	/// <see cref="UnsafeNarrowIndexedInner{TExecutor}"/>: fetches the right values for the selected
-	/// page rows WITHOUT re-applying the join filter (membership is settled; re-applying it would
-	/// invoke the user's lambda a second time), then drops any page row whose slot came back empty
-	/// — a right row retired between the two passes must not surface on an inner join.
+	/// <see cref="UnsafeNarrowIndexedInner{TExecutor}"/>: attaches the retained, checked values to
+	/// the selected page rows without re-reading the cache or re-applying the join filter.
 	/// Only invoked on resolvers whose <see cref="SupportsNarrowOnly"/> is true.
 	/// </summary>
 	internal void UnsafeFillNarrowedInner<TAccessor>(ref TAccessor accessor, bool cloneOnAdd, bool shouldPool,
