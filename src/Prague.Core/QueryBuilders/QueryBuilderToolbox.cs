@@ -36,6 +36,23 @@ public interface IJoinResolver {
 	/// </summary>
 	bool AllowsBounded => false;
 
+	/// <summary>
+	/// Sorter-only: does this sorter order by the LEFT value itself (TResult == TLeftValue), so the
+	/// bounded plan can drive it? Answers the question without handing
+	/// the comparer out — erasing it to <see cref="IComparer{T}"/> boxes a struct
+	/// comparer, and the gate has to be free for queries that then fall back. Default: no.
+	/// </summary>
+	bool OrdersByLeftValues<TLeft>() => false;
+
+	/// <summary>
+	/// Sorter-only: compare two LEFT values with the caller's comparer. Callers must have gated on
+	/// <see cref="OrdersByLeftValues{TLeft}"/>. Keeping the comparison behind the resolver — which
+	/// reaches the bounded containers as a struct type parameter — is what makes the bounded plan
+	/// allocation-free: no <see cref="Comparison{T}"/> delegate, no box, and both the resolver call
+	/// and the user comparer devirtualize per closed generic.
+	/// </summary>
+	int CompareLeftValues<TLeft>(TLeft a, TLeft b) => throw new InvalidOperationException("Join resolver is not sortable");
+
 	internal void UnsafeExecuteWithAccessor<TAccessor>(ref TAccessor accessor, bool cloneOnAdd, bool shouldPool,
 		ref QueryResultsDisposer disposer)
 		where TAccessor : struct, IUnsafeValueAccessor, allows ref struct;
@@ -47,16 +64,6 @@ public interface IJoinResolver {
 		where TFullResult: struct, IJoinResult
 		where TKey : notnull, IEquatable<TKey> => throw new InvalidOperationException("Join resolver is not sortable");
 
-	/// <summary>
-	/// Sorter-only seam: exposes the user comparer as an <see cref="IComparer{TLeft}"/> over the
-	/// LEFT value when this sorter orders by the left value itself (TResult == TLeftValue).
-	/// Default: not a sorter / not left-ordered. Callers must gate on the JIT-folded
-	/// <see cref="IsSorter"/> so this default is never constrained-called on join resolver structs.
-	/// </summary>
-	internal bool TryGetLeftComparer<TLeft>(out IComparer<TLeft>? comparer) {
-		comparer = null;
-		return false;
-	}
 
 	/// <summary>
 	/// Whether this resolver supports narrow-only inner execution

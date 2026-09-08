@@ -1832,14 +1832,14 @@ public struct CacheQueryBuilderCombined<TDiscriminator, TLeftQuery, TLeftKey, TL
 		var canBound = probe.SorterCount == 1
 		               && probe.SorterInnermost
 		               && probe.SorterAllowsBounded
-		               && probe.LeftComparer is not null
+		               && probe.SorterOrdersByLeftValues
 		               && probe.AllInnerNarrowable;
 		if (!canBound)
 			return ExecuteCoreJoined<TJoinResult>(pool, clone, skip, take);
 
 		var container = new JoinedResultContaier<TLeftKey, TLeftValue, TResolverChain, TJoinResult>(
 			ref _resolverChain, pool, clone, _manyCount, bounded: true);
-		var topK = new TopKJoinedBaseContainer<TLeftKey, TLeftValue>(probe.LeftComparer!, skip, take);
+		var topK = new TopKJoinedBaseContainer<TLeftKey, TLeftValue, TResolverChain>(ref _resolverChain, skip, take);
 		try {
 			container.PrepareIndexedInnerBounded(ref this);
 			container.NarrowIndexedInner(ref this);
@@ -1952,11 +1952,13 @@ public struct CacheQueryBuilderCombined<TDiscriminator, TLeftQuery, TLeftKey, TL
 		    || (long)skip + take > int.MaxValue
 		    || !TResolver.IsSorter
 		    || !resolver.AllowsBounded
-		    || !resolver.TryGetLeftComparer<TLeftValue>(out var comparer)) {
+		    || !resolver.OrdersByLeftValues<TLeftValue>()) {
 			return ExecuteCoreSimple(ref resolver, pool, clone, skip, take);
 		}
 
-		var container = new TopKSimpleResultContainer<TLeftKey, TLeftValue>(comparer!, pool, clone, skip, take);
+		// The resolver itself carries the comparison into the container as a struct type parameter —
+		// nothing is erased to IComparer<T>, so the bounded plan allocates nothing per query.
+		var container = new TopKSimpleResultContainer<TLeftKey, TLeftValue, TResolver>(resolver, pool, clone, skip, take);
 		try {
 			_leftQuery.ExecuteBase(ref container);
 			return container.BuildResults();

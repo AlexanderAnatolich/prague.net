@@ -58,6 +58,62 @@ public class TopKAllocationCoreTests {
 		}
 	}
 
+	internal readonly struct TaByOrderAscStruct : IComparer<TaItem> {
+		public int Compare(TaItem? x, TaItem? y) => (x?.Order ?? 0).CompareTo(y?.Order ?? 0);
+	}
+
+	// The bounded plan must not add a single byte to whatever the query shape already costs: the
+	// comparison reaches the containers through the resolver / resolver chain as a struct type
+	// parameter, so there is no Comparison<T> delegate and no boxed IComparer<T>. Measured against
+	// the same query with no sort at all, which is the floor for that shape.
+	[Test]
+	public void BoundedPooled_AddsNoAllocationOverTheUnsortedQuery() {
+		var unsorted = AllocPerOp(() => {
+			using var r = _small.Query().ExecutePooled();
+			return r.Count;
+		});
+		var bounded = AllocPerOp(() => {
+			using var r = _small.Query().SortBounded(_cachedStruct).ExecutePooled(0, Take);
+			return r.Count;
+		});
+
+		Assert.That(unsorted, Is.Zero, "fixture sanity: a pooled unsorted query allocates nothing");
+		Assert.That(bounded, Is.Zero, "the bounded simple plan must stay allocation-free");
+	}
+
+	[Test]
+	public void BoundedJoinedPooled_AddsNoAllocationOverTheUnsortedJoin() {
+		var unsortedJoin = AllocPerOp(() => {
+			using var r = _small.Query().InnerJoinOne(_smallRight).ExecutePooled();
+			return r.Count;
+		});
+		var boundedJoin = AllocPerOp(() => {
+			using var r = _small.Query().SortBounded(_cachedStruct).InnerJoinOne(_smallRight).ExecutePooled(0, Take);
+			return r.Count;
+		});
+
+		// The joined pipeline has a pre-existing per-query cost with no sort involved; what this pins
+		// is that opting into the bounded plan adds nothing on top of it.
+		Assert.That(boundedJoin, Is.LessThanOrEqualTo(unsortedJoin),
+			$"bounded joined plan added allocation: {boundedJoin} B/op vs {unsortedJoin} B/op unsorted");
+	}
+
+	// A class comparer allocates nothing library-side either — only the caller's own `new`, which is
+	// why this pins a cached instance.
+	[Test]
+	public void BoundedPooled_WithClassComparer_IsAlsoAllocationFree() {
+		var bounded = AllocPerOp(() => {
+			using var r = _small.Query().SortBounded(_cachedClass).ExecutePooled(0, Take);
+			return r.Count;
+		});
+
+		Assert.That(bounded, Is.Zero);
+	}
+
+	private static readonly TaByOrderAsc _cachedClass = new();
+
+	private static readonly TaByOrderAscStruct _cachedStruct = new();
+
 	private static long AllocPerOp(Func<int> run) {
 		// Warm up JIT and pools, then measure.
 		for (var i = 0; i < 5; i++)

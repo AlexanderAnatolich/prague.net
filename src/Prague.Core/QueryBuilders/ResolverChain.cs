@@ -24,6 +24,16 @@ public interface IResolvers {
 
 	static abstract int Clone<TFullResult>(ref TFullResult fullResult)
 		where TFullResult : struct, IJoinResult;
+
+	/// <summary>
+	/// Forwards a LEFT-value comparison to the chain's sorter. The dispatch is a JIT-folded
+	/// TResolver.IsSorter test per link, so the whole hop collapses to the user comparer's Compare —
+	/// which is how the bounded joined plan compares without erasing the comparer to
+	/// <see cref="IComparer{T}"/> (a box for a struct comparer) or wrapping it in a delegate.
+	/// Callers must have probed that the chain has exactly one sorter and that it orders by the left
+	/// value.
+	/// </summary>
+	int CompareLeftValues<TLeft>(TLeft a, TLeft b);
 }
 
 public interface IResolverExecutor {
@@ -54,6 +64,9 @@ public struct Resolvers<TResolver> : IResolvers, IFlippedResolvers
 	// index 0). Return 1 so subsequent chain links clone slot 1 (the first Right).
 	public static int Clone<TFullResult>(ref TFullResult fullResult) where TFullResult : struct, IJoinResult
 		=> 1;
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public int CompareLeftValues<TLeft>(TLeft a, TLeft b) => _resolver.CompareLeftValues(a, b);
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -84,6 +97,10 @@ public struct Resolvers<TPrev, TResolver> : IResolvers, IFlippedResolvers
 			TResolver.Clone(pos++, ref fullResult);
 		return pos;
 	}
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public int CompareLeftValues<TLeft>(TLeft a, TLeft b)
+		=> TResolver.IsSorter ? _resolver.CompareLeftValues(a, b) : _prev.CompareLeftValues(a, b);
 }
 
 internal struct ResolveChainCloner<TResolvers, TLeftValue, TResult> : ICloner<TResult>
@@ -356,16 +373,17 @@ internal ref struct SimpleResultContainer<TKey, TValue, TResolver>
 ///   The heap buffer never transfers ownership — Dispose always returns it; the page rows are
 ///   copied into the result's own buffer.
 /// </summary>
-internal ref struct TopKSimpleResultContainer<TKey, TValue>
+internal ref struct TopKSimpleResultContainer<TKey, TValue, TResolver>
 	: IResultContainerInitializer<TKey, TValue>
 	where TKey : notnull, IEquatable<TKey>
+	where TResolver : struct, IJoinResolver
 	where TValue : ICacheEquatable<TValue>, ICacheClonable<TValue> {
 	private readonly bool _shouldPool;
 	private readonly bool _clone;
 	private readonly int _skip;
 	private readonly int _take;
 	private readonly int _k;
-	private readonly TopKValueComparer<TValue> _comparer;
+	private readonly TopKValueComparer<TValue, TResolver> _comparer;
 	private (TValue Left, int Ordinal)[]? _heap;
 	private int _seen;
 	private bool _collectAll;
@@ -375,8 +393,8 @@ internal ref struct TopKSimpleResultContainer<TKey, TValue>
 
 	public int TotalCount => _totalCount;
 
-	public TopKSimpleResultContainer(IComparer<TValue> comparer, bool pool, bool clone, int skip, int take) {
-		_comparer = new TopKValueComparer<TValue>(comparer);
+	public TopKSimpleResultContainer(TResolver resolver, bool pool, bool clone, int skip, int take) {
+		_comparer = new TopKValueComparer<TValue, TResolver>(resolver);
 		_shouldPool = pool;
 		// Bounded selection always slices, so cloning is always deferred to the survivors.
 		_clone = clone;
@@ -465,31 +483,36 @@ internal ref struct TopKSimpleResultContainer<TKey, TValue>
 ///   the heap loop for a class comparer. One 64-byte delegate per bounded query is the price, the same
 ///   allocation the classic full-sort path pays inside the framework sort.
 /// </summary>
-internal readonly struct TopKValueComparer<TValue> : IComparer<(TValue Left, int Ordinal)> {
-	private readonly Comparison<TValue> _inner;
-	public TopKValueComparer(IComparer<TValue> inner) => _inner = inner.Compare;
+internal readonly struct TopKValueComparer<TValue, TResolver> : IComparer<(TValue Left, int Ordinal)>
+	where TResolver : struct, IJoinResolver {
+	private readonly TResolver _resolver;
+
+	public TopKValueComparer(TResolver resolver) => _resolver = resolver;
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	public int Compare((TValue Left, int Ordinal) x, (TValue Left, int Ordinal) y) {
-		var order = _inner(x.Left, y.Left);
+		var order = _resolver.CompareLeftValues(x.Left, y.Left);
 		return order != 0 ? order : x.Ordinal.CompareTo(y.Ordinal);
 	}
 }
 
 /// <summary>
-///   Joined-path twin of <see cref="TopKValueComparer{TValue}"/>: orders (key, left, ordinal) triples by
-///   the left value, then by encounter order, through the same once-per-query delegate.
+///   Joined-path twin of <see cref="TopKValueComparer{TValue,TResolver}"/>: orders (key, left, ordinal)
+///   triples by the left value, then by encounter order, comparing through the resolver chain so
+///   nothing is boxed and no delegate is created.
 /// </summary>
-internal readonly struct TopKPairComparer<TKey, TValue> : IComparer<(TKey Key, TValue Left, int Ordinal)> {
-	private readonly Comparison<TValue> _inner;
+internal readonly unsafe struct TopKPairComparer<TKey, TValue, TChain> : IComparer<(TKey Key, TValue Left, int Ordinal)>
+	where TChain : struct, IResolvers {
+	// A pointer, not the chain by value: this comparer is copied into every TopKSelect sift and
+	// partition frame, and a chain with several joins is a fat struct. The chain lives in the query
+	// builder for the whole query, which outlives every use here.
+	private readonly void* _chain;
 
-	public TopKPairComparer(IComparer<TValue> inner) {
-		_inner = inner.Compare;
-	}
+	public TopKPairComparer(ref TChain chain) => _chain = Unsafe.AsPointer(ref chain);
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	public int Compare((TKey Key, TValue Left, int Ordinal) x, (TKey Key, TValue Left, int Ordinal) y) {
-		var order = _inner(x.Left, y.Left);
+		var order = Unsafe.AsRef<TChain>(_chain).CompareLeftValues(x.Left, y.Left);
 		return order != 0 ? order : x.Ordinal.CompareTo(y.Ordinal);
 	}
 }
@@ -501,13 +524,14 @@ internal readonly struct TopKPairComparer<TKey, TValue> : IComparer<(TKey Key, T
 ///   via Seal. Pairs are drained into the
 ///   real results dictionary. The heap buffer never transfers ownership — Dispose always returns it.
 /// </summary>
-internal ref struct TopKJoinedBaseContainer<TKey, TValue>
+internal ref struct TopKJoinedBaseContainer<TKey, TValue, TChain>
 	: IResultContainerInitializer<TKey, TValue>
+	where TChain : struct, IResolvers
 	where TKey : notnull, IEquatable<TKey> {
 	private readonly int _skip;
 	private readonly int _take;
 	private readonly int _k;
-	private readonly TopKPairComparer<TKey, TValue> _comparer;
+	private readonly TopKPairComparer<TKey, TValue, TChain> _comparer;
 	private (TKey Key, TValue Left, int Ordinal)[]? _heap;
 	private int _seen;
 	private bool _collectAll;
@@ -517,8 +541,8 @@ internal ref struct TopKJoinedBaseContainer<TKey, TValue>
 
 	public int TotalCount => _totalCount;
 
-	public TopKJoinedBaseContainer(IComparer<TValue> comparer, int skip, int take) {
-		_comparer = new TopKPairComparer<TKey, TValue>(comparer);
+	public TopKJoinedBaseContainer(ref TChain chain, int skip, int take) {
+		_comparer = new TopKPairComparer<TKey, TValue, TChain>(ref chain);
 		_skip = skip;
 		_take = take;
 		_k = skip + take;
@@ -590,8 +614,8 @@ internal ref struct TopKProbeProcessor<TLeftValue> : IResolverExecutor {
 	internal int SorterCount;
 	internal bool SorterInnermost;
 	internal bool SorterAllowsBounded;
+	internal bool SorterOrdersByLeftValues;
 	internal bool AllInnerNarrowable;
-	internal IComparer<TLeftValue>? LeftComparer;
 
 	public static TopKProbeProcessor<TLeftValue> Create() => new() { AllInnerNarrowable = true };
 
@@ -600,11 +624,7 @@ internal ref struct TopKProbeProcessor<TLeftValue> : IResolverExecutor {
 			SorterCount++;
 			SorterInnermost = position == 0;
 			SorterAllowsBounded = resolver.AllowsBounded;
-			// Gate the comparer fetch on the opt-in: extracting it erases a struct comparer to an
-			// interface, which boxes. A query that never wanted the bounded plan must not pay for it.
-			if (resolver.AllowsBounded && resolver.TryGetLeftComparer<TLeftValue>(out var cmp))
-				LeftComparer = cmp;
-
+			SorterOrdersByLeftValues = resolver.OrdersByLeftValues<TLeftValue>();
 			return;
 		}
 

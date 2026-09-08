@@ -1,6 +1,7 @@
 namespace Prague.Core;
 
 using System.Buffers;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using Prague.Core.Collections;
 using Utils;
@@ -56,18 +57,14 @@ public struct SortResolver<TLeftKey, TLeftValue, TResult, TComparer> : IJoinReso
 			results.SortAndCrop(new JoinSortComparerWrapper<TFullResult>(_comparer), skip, take);
 	}
 
-	bool IJoinResolver.TryGetLeftComparer<TLeft>(out IComparer<TLeft>? comparer) {
-		// _isLeftValue pins TResult == TLeftValue; the typeof check additionally pins the
-		// caller's TLeft to the same runtime type, making the boxed cast safe. One boxing
-		// of the struct-generic TComparer per query — the classic sort path pays the same
-		// interface-dispatch per comparison anyway.
-		if (_isLeftValue && typeof(TLeft) == typeof(TResult)) {
-			comparer = (IComparer<TLeft>)(object)_comparer!;
-			return true;
-		}
+	bool IJoinResolver.OrdersByLeftValues<TLeft>() => _isLeftValue && typeof(TLeft) == typeof(TResult);
 
-		comparer = null;
-		return false;
+	int IJoinResolver.CompareLeftValues<TLeft>(TLeft a, TLeft b) {
+		// The caller gated on OrdersByLeftValues, which pins TLeft to TResult at runtime, so the
+		// reinterpret is sound. _comparer stays its own type here — nothing is boxed and nothing is
+		// wrapped in a delegate.
+		Debug.Assert(_isLeftValue && typeof(TLeft) == typeof(TResult), "CompareLeftValues on a sorter that does not order by the left value");
+		return _comparer.Compare(Unsafe.As<TLeft, TResult>(ref a), Unsafe.As<TLeft, TResult>(ref b));
 	}
 
 	private struct LeftSortComparerWrapper<TFullResult> : IComparer<TFullResult>

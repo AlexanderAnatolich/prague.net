@@ -23,39 +23,54 @@ public class TopKExecuteCoreTests {
 			=> x.Left.Order.CompareTo(y.Left.Order);
 	}
 
-	// Constrained call helper: IJoinResolver has static abstract members, so it cannot be
-	// used as a variable type — dispatch through the struct constraint instead.
-	private static bool TryGetLeftComparer<TResolver, TLeft>(ref TResolver resolver, out IComparer<TLeft>? comparer)
+	// Constrained call helpers: IJoinResolver has static abstract members, so it cannot be used as a
+	// variable type — dispatch through the struct constraint instead.
+	private static bool OrdersByLeftValues<TResolver, TLeft>(ref TResolver resolver)
 		where TResolver : struct, IJoinResolver
-		=> resolver.TryGetLeftComparer(out comparer);
+		=> resolver.OrdersByLeftValues<TLeft>();
 
-	// ── Comparer extraction seam ──
+	private static int CompareLeftValues<TResolver, TLeft>(ref TResolver resolver, TLeft a, TLeft b)
+		where TResolver : struct, IJoinResolver
+		=> resolver.CompareLeftValues(a, b);
+
+	// ── Comparison seam ──
+	// The bounded plan never takes the comparer out of the resolver: erasing it to IComparer<TLeft>
+	// would box a struct comparer, so the resolver answers "can I order left values?" and then does
+	// the comparing itself.
 
 	[Test]
-	public void SortResolver_LeftValueComparer_IsExtractable() {
+	public void SortResolver_OrdersByLeftValues_AndCompares() {
 		var resolver = new SortResolver<int, TkItem, TkItem, TkByOrderAsc>(new TkByOrderAsc());
-		Assert.That(TryGetLeftComparer<SortResolver<int, TkItem, TkItem, TkByOrderAsc>, TkItem>(ref resolver, out var cmp), Is.True);
-		Assert.That(cmp, Is.Not.Null);
+		Assert.That(OrdersByLeftValues<SortResolver<int, TkItem, TkItem, TkByOrderAsc>, TkItem>(ref resolver), Is.True);
+
 		var a = new TkItem { Id = 1, Order = 1 };
 		var b = new TkItem { Id = 2, Order = 2 };
-		Assert.That(cmp!.Compare(a, b), Is.LessThan(0));
+		Assert.That(CompareLeftValues(ref resolver, a, b), Is.LessThan(0));
+		Assert.That(CompareLeftValues(ref resolver, b, a), Is.GreaterThan(0));
+		Assert.That(CompareLeftValues(ref resolver, a, a), Is.Zero);
 	}
 
 	[Test]
-	public void SortResolver_JoinResultComparer_IsNotExtractable() {
-		// TResult != TLeftValue (joined-row comparer) — must refuse.
+	public void SortResolver_JoinResultComparer_DoesNotOrderLeftValues() {
+		// TResult != TLeftValue (joined-row comparer) — the bounded plan must refuse it.
 		var resolver = new SortResolver<int, TkItem, JoinResult<TkItem, TkItem>, TkJoinedComparer>(new TkJoinedComparer());
 		Assert.That(
-			TryGetLeftComparer<SortResolver<int, TkItem, JoinResult<TkItem, TkItem>, TkJoinedComparer>, TkItem>(ref resolver, out var cmp),
+			OrdersByLeftValues<SortResolver<int, TkItem, JoinResult<TkItem, TkItem>, TkJoinedComparer>, TkItem>(ref resolver),
 			Is.False);
-		Assert.That(cmp, Is.Null);
 	}
 
 	[Test]
-	public void BaseResolver_DefaultSeam_RefusesExtraction() {
+	public void BaseResolver_DefaultSeam_DoesNotOrderLeftValues() {
 		var resolver = new BaseResolver<int, TkItem>();
-		Assert.That(TryGetLeftComparer<BaseResolver<int, TkItem>, TkItem>(ref resolver, out var cmp), Is.False);
-		Assert.That(cmp, Is.Null);
+		Assert.That(OrdersByLeftValues<BaseResolver<int, TkItem>, TkItem>(ref resolver), Is.False);
+	}
+
+	[Test]
+	public void Sort_WithoutOptIn_DoesNotAllowBounding() {
+		var classic = new SortResolver<int, TkItem, TkItem, TkByOrderAsc>(new TkByOrderAsc());
+		var bounded = new SortResolver<int, TkItem, TkItem, TkByOrderAsc>(new TkByOrderAsc(), allowBounded: true);
+		Assert.That(classic.AllowsBounded, Is.False);
+		Assert.That(bounded.AllowsBounded, Is.True);
 	}
 
 	// ── Simple path: paged Execute* (now transparently bounded) vs the full classic order ──
