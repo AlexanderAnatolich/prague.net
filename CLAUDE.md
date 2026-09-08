@@ -79,3 +79,17 @@ Topic-first; each file opens with a one-line "Read when". Layer files (`core`/`g
 | Kafka header SerDe + `PragueMessagePack` isolation | [`context/kafka-serde.md`](context/kafka-serde.md) |
 | Kafka health checks | [`context/kafka-health.md`](context/kafka-health.md) |
 | Feature design history | `docs/superpowers/specs/` and `docs/superpowers/plans/` |
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues on `nanov/prague.net`, via the `gh` CLI. See [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md).
+
+### Triage labels
+
+The five canonical roles, each label string equal to its name. See [`docs/agents/triage-labels.md`](docs/agents/triage-labels.md).
+
+### Domain docs
+
+Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See [`docs/agents/domain.md`](docs/agents/domain.md).
