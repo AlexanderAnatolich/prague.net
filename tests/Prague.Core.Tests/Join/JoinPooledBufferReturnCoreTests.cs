@@ -219,7 +219,10 @@ public class JoinPooledBufferReturnCoreTests {
 		// query regardless of manyCount) would reintroduce that offset and break the linearity.
 
 		long PerIterAlloc(Func<int> run) {
-			for (var i = 0; i < 10; i++) run();                 // warm up JIT + prime pools
+			// The shared ArrayPool is process-wide, so whatever other fixtures left in the buckets
+			// this closure rents from shifts the first iterations' byte count. Warm up until the
+			// rent/return pattern reaches steady state, not just until the JIT has compiled.
+			for (var i = 0; i < 500; i++) run();
 			var before = GC.GetAllocatedBytesForCurrentThread();
 			var sink = 0L;
 			for (var i = 0; i < Iterations; i++) sink += run();

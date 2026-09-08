@@ -3172,6 +3172,8 @@ internal ref struct ExecuteWithAccessorProcessor<TLeftKey, TResult> : IResolverE
 	where TResult : struct, IJoinResult {
 	private readonly bool _cloneOnAdd;
 	private readonly bool _shouldPool;
+	private readonly bool _fillInner;
+	private readonly bool _skipSorter;
 	private readonly int _skip;
 	private readonly int _take;
 	private ref ValueDictionary<TLeftKey, TResult, DefaultKeyComparer<TLeftKey>> _results;
@@ -3185,17 +3187,28 @@ internal ref struct ExecuteWithAccessorProcessor<TLeftKey, TResult> : IResolverE
 		int take,
 		bool cloneOnAdd,
 		bool shouldPool,
-		ref QueryResultsDisposer disposer) {
+		ref QueryResultsDisposer disposer,
+		bool fillInner,
+		bool skipSorter) {
 		_skip = skip;
 		_take = take;
 		_cloneOnAdd = cloneOnAdd;
 		_shouldPool = shouldPool;
+		_fillInner = fillInner;
+		_skipSorter = skipSorter;
 		_disposer = ref disposer;
 		_results = ref results;
 	}
 
 	public void Process<TResolver>(int position, ref TResolver resolver) where TResolver : struct, IJoinResolver {
 		if (TResolver.IsSorter) {
+			if (_skipSorter) {
+				// Bounded top-K path: rows arrive pre-sorted and pre-cropped; mark DidSort so the
+				// container's fallback Crop stays off, and do not sort or slice again.
+				DidSort = true;
+				return;
+			}
+
 			resolver.UnsafeSortResults(ref _results, _skip, _take);
 			DidSort = true;
 			return;
@@ -3210,6 +3223,13 @@ internal ref struct ExecuteWithAccessorProcessor<TLeftKey, TResult> : IResolverE
 				if (!resolver.Inner) {
 					var a = new UnsafeRightAccessor<TLeftKey, TResult>(ref _results);
 					resolver.UnsafeExecuteWithAccessor(ref a, _cloneOnAdd, _shouldPool, ref _disposer);
+				} else if (_fillInner) {
+					// Bounded top-K: the inner resolver already narrowed the candidates, so the page
+					// rows only need their right values fetched from the narrowed map — the filter is
+					// not re-applied and the cache is not re-read, so a right replaced between the
+					// narrow and the fill cannot surface.
+					var a = new UnsafeRightAccessor<TLeftKey, TResult>(ref _results);
+					resolver.UnsafeFillNarrowedInner(ref a, _cloneOnAdd, _shouldPool, ref _disposer);
 				}
 				break;
 			}
@@ -3217,6 +3237,13 @@ internal ref struct ExecuteWithAccessorProcessor<TLeftKey, TResult> : IResolverE
 				if (!resolver.Inner) {
 					var a = new UnsafeRight2Accessor<TLeftKey, TResult>(ref _results);
 					resolver.UnsafeExecuteWithAccessor(ref a, _cloneOnAdd, _shouldPool, ref _disposer);
+				} else if (_fillInner) {
+					// Bounded top-K: the inner resolver already narrowed the candidates, so the page
+					// rows only need their right values fetched from the narrowed map — the filter is
+					// not re-applied and the cache is not re-read, so a right replaced between the
+					// narrow and the fill cannot surface.
+					var a = new UnsafeRight2Accessor<TLeftKey, TResult>(ref _results);
+					resolver.UnsafeFillNarrowedInner(ref a, _cloneOnAdd, _shouldPool, ref _disposer);
 				}
 				break;
 			}
@@ -3224,6 +3251,13 @@ internal ref struct ExecuteWithAccessorProcessor<TLeftKey, TResult> : IResolverE
 				if (!resolver.Inner) {
 					var a = new UnsafeRight3Accessor<TLeftKey, TResult>(ref _results);
 					resolver.UnsafeExecuteWithAccessor(ref a, _cloneOnAdd, _shouldPool, ref _disposer);
+				} else if (_fillInner) {
+					// Bounded top-K: the inner resolver already narrowed the candidates, so the page
+					// rows only need their right values fetched from the narrowed map — the filter is
+					// not re-applied and the cache is not re-read, so a right replaced between the
+					// narrow and the fill cannot surface.
+					var a = new UnsafeRight3Accessor<TLeftKey, TResult>(ref _results);
+					resolver.UnsafeFillNarrowedInner(ref a, _cloneOnAdd, _shouldPool, ref _disposer);
 				}
 				break;
 			}
@@ -3231,6 +3265,13 @@ internal ref struct ExecuteWithAccessorProcessor<TLeftKey, TResult> : IResolverE
 				if (!resolver.Inner) {
 					var a = new UnsafeRight4Accessor<TLeftKey, TResult>(ref _results);
 					resolver.UnsafeExecuteWithAccessor(ref a, _cloneOnAdd, _shouldPool, ref _disposer);
+				} else if (_fillInner) {
+					// Bounded top-K: the inner resolver already narrowed the candidates, so the page
+					// rows only need their right values fetched from the narrowed map — the filter is
+					// not re-applied and the cache is not re-read, so a right replaced between the
+					// narrow and the fill cannot surface.
+					var a = new UnsafeRight4Accessor<TLeftKey, TResult>(ref _results);
+					resolver.UnsafeFillNarrowedInner(ref a, _cloneOnAdd, _shouldPool, ref _disposer);
 				}
 				break;
 			}
@@ -3238,6 +3279,13 @@ internal ref struct ExecuteWithAccessorProcessor<TLeftKey, TResult> : IResolverE
 				if (!resolver.Inner) {
 					var a = new UnsafeRight5Accessor<TLeftKey, TResult>(ref _results);
 					resolver.UnsafeExecuteWithAccessor(ref a, _cloneOnAdd, _shouldPool, ref _disposer);
+				} else if (_fillInner) {
+					// Bounded top-K: the inner resolver already narrowed the candidates, so the page
+					// rows only need their right values fetched from the narrowed map — the filter is
+					// not re-applied and the cache is not re-read, so a right replaced between the
+					// narrow and the fill cannot surface.
+					var a = new UnsafeRight5Accessor<TLeftKey, TResult>(ref _results);
+					resolver.UnsafeFillNarrowedInner(ref a, _cloneOnAdd, _shouldPool, ref _disposer);
 				}
 				break;
 			}
@@ -3245,6 +3293,13 @@ internal ref struct ExecuteWithAccessorProcessor<TLeftKey, TResult> : IResolverE
 				if (!resolver.Inner) {
 					var a = new UnsafeRight6Accessor<TLeftKey, TResult>(ref _results);
 					resolver.UnsafeExecuteWithAccessor(ref a, _cloneOnAdd, _shouldPool, ref _disposer);
+				} else if (_fillInner) {
+					// Bounded top-K: the inner resolver already narrowed the candidates, so the page
+					// rows only need their right values fetched from the narrowed map — the filter is
+					// not re-applied and the cache is not re-read, so a right replaced between the
+					// narrow and the fill cannot surface.
+					var a = new UnsafeRight6Accessor<TLeftKey, TResult>(ref _results);
+					resolver.UnsafeFillNarrowedInner(ref a, _cloneOnAdd, _shouldPool, ref _disposer);
 				}
 				break;
 			}
@@ -3252,6 +3307,13 @@ internal ref struct ExecuteWithAccessorProcessor<TLeftKey, TResult> : IResolverE
 				if (!resolver.Inner) {
 					var a = new UnsafeRight7Accessor<TLeftKey, TResult>(ref _results);
 					resolver.UnsafeExecuteWithAccessor(ref a, _cloneOnAdd, _shouldPool, ref _disposer);
+				} else if (_fillInner) {
+					// Bounded top-K: the inner resolver already narrowed the candidates, so the page
+					// rows only need their right values fetched from the narrowed map — the filter is
+					// not re-applied and the cache is not re-read, so a right replaced between the
+					// narrow and the fill cannot surface.
+					var a = new UnsafeRight7Accessor<TLeftKey, TResult>(ref _results);
+					resolver.UnsafeFillNarrowedInner(ref a, _cloneOnAdd, _shouldPool, ref _disposer);
 				}
 				break;
 			}
@@ -3259,6 +3321,13 @@ internal ref struct ExecuteWithAccessorProcessor<TLeftKey, TResult> : IResolverE
 				if (!resolver.Inner) {
 					var a = new UnsafeRight8Accessor<TLeftKey, TResult>(ref _results);
 					resolver.UnsafeExecuteWithAccessor(ref a, _cloneOnAdd, _shouldPool, ref _disposer);
+				} else if (_fillInner) {
+					// Bounded top-K: the inner resolver already narrowed the candidates, so the page
+					// rows only need their right values fetched from the narrowed map — the filter is
+					// not re-applied and the cache is not re-read, so a right replaced between the
+					// narrow and the fill cannot surface.
+					var a = new UnsafeRight8Accessor<TLeftKey, TResult>(ref _results);
+					resolver.UnsafeFillNarrowedInner(ref a, _cloneOnAdd, _shouldPool, ref _disposer);
 				}
 				break;
 			}
@@ -3266,6 +3335,13 @@ internal ref struct ExecuteWithAccessorProcessor<TLeftKey, TResult> : IResolverE
 				if (!resolver.Inner) {
 					var a = new UnsafeRight9Accessor<TLeftKey, TResult>(ref _results);
 					resolver.UnsafeExecuteWithAccessor(ref a, _cloneOnAdd, _shouldPool, ref _disposer);
+				} else if (_fillInner) {
+					// Bounded top-K: the inner resolver already narrowed the candidates, so the page
+					// rows only need their right values fetched from the narrowed map — the filter is
+					// not re-applied and the cache is not re-read, so a right replaced between the
+					// narrow and the fill cannot surface.
+					var a = new UnsafeRight9Accessor<TLeftKey, TResult>(ref _results);
+					resolver.UnsafeFillNarrowedInner(ref a, _cloneOnAdd, _shouldPool, ref _disposer);
 				}
 				break;
 			}
@@ -3273,6 +3349,13 @@ internal ref struct ExecuteWithAccessorProcessor<TLeftKey, TResult> : IResolverE
 				if (!resolver.Inner) {
 					var a = new UnsafeRight10Accessor<TLeftKey, TResult>(ref _results);
 					resolver.UnsafeExecuteWithAccessor(ref a, _cloneOnAdd, _shouldPool, ref _disposer);
+				} else if (_fillInner) {
+					// Bounded top-K: the inner resolver already narrowed the candidates, so the page
+					// rows only need their right values fetched from the narrowed map — the filter is
+					// not re-applied and the cache is not re-read, so a right replaced between the
+					// narrow and the fill cannot surface.
+					var a = new UnsafeRight10Accessor<TLeftKey, TResult>(ref _results);
+					resolver.UnsafeFillNarrowedInner(ref a, _cloneOnAdd, _shouldPool, ref _disposer);
 				}
 				break;
 			}
@@ -3280,6 +3363,13 @@ internal ref struct ExecuteWithAccessorProcessor<TLeftKey, TResult> : IResolverE
 				if (!resolver.Inner) {
 					var a = new UnsafeRight11Accessor<TLeftKey, TResult>(ref _results);
 					resolver.UnsafeExecuteWithAccessor(ref a, _cloneOnAdd, _shouldPool, ref _disposer);
+				} else if (_fillInner) {
+					// Bounded top-K: the inner resolver already narrowed the candidates, so the page
+					// rows only need their right values fetched from the narrowed map — the filter is
+					// not re-applied and the cache is not re-read, so a right replaced between the
+					// narrow and the fill cannot surface.
+					var a = new UnsafeRight11Accessor<TLeftKey, TResult>(ref _results);
+					resolver.UnsafeFillNarrowedInner(ref a, _cloneOnAdd, _shouldPool, ref _disposer);
 				}
 				break;
 			}
@@ -3287,6 +3377,13 @@ internal ref struct ExecuteWithAccessorProcessor<TLeftKey, TResult> : IResolverE
 				if (!resolver.Inner) {
 					var a = new UnsafeRight12Accessor<TLeftKey, TResult>(ref _results);
 					resolver.UnsafeExecuteWithAccessor(ref a, _cloneOnAdd, _shouldPool, ref _disposer);
+				} else if (_fillInner) {
+					// Bounded top-K: the inner resolver already narrowed the candidates, so the page
+					// rows only need their right values fetched from the narrowed map — the filter is
+					// not re-applied and the cache is not re-read, so a right replaced between the
+					// narrow and the fill cannot surface.
+					var a = new UnsafeRight12Accessor<TLeftKey, TResult>(ref _results);
+					resolver.UnsafeFillNarrowedInner(ref a, _cloneOnAdd, _shouldPool, ref _disposer);
 				}
 				break;
 			}
@@ -3294,6 +3391,13 @@ internal ref struct ExecuteWithAccessorProcessor<TLeftKey, TResult> : IResolverE
 				if (!resolver.Inner) {
 					var a = new UnsafeRight13Accessor<TLeftKey, TResult>(ref _results);
 					resolver.UnsafeExecuteWithAccessor(ref a, _cloneOnAdd, _shouldPool, ref _disposer);
+				} else if (_fillInner) {
+					// Bounded top-K: the inner resolver already narrowed the candidates, so the page
+					// rows only need their right values fetched from the narrowed map — the filter is
+					// not re-applied and the cache is not re-read, so a right replaced between the
+					// narrow and the fill cannot surface.
+					var a = new UnsafeRight13Accessor<TLeftKey, TResult>(ref _results);
+					resolver.UnsafeFillNarrowedInner(ref a, _cloneOnAdd, _shouldPool, ref _disposer);
 				}
 				break;
 			}
@@ -3301,6 +3405,13 @@ internal ref struct ExecuteWithAccessorProcessor<TLeftKey, TResult> : IResolverE
 				if (!resolver.Inner) {
 					var a = new UnsafeRight14Accessor<TLeftKey, TResult>(ref _results);
 					resolver.UnsafeExecuteWithAccessor(ref a, _cloneOnAdd, _shouldPool, ref _disposer);
+				} else if (_fillInner) {
+					// Bounded top-K: the inner resolver already narrowed the candidates, so the page
+					// rows only need their right values fetched from the narrowed map — the filter is
+					// not re-applied and the cache is not re-read, so a right replaced between the
+					// narrow and the fill cannot surface.
+					var a = new UnsafeRight14Accessor<TLeftKey, TResult>(ref _results);
+					resolver.UnsafeFillNarrowedInner(ref a, _cloneOnAdd, _shouldPool, ref _disposer);
 				}
 				break;
 			}
@@ -3308,6 +3419,13 @@ internal ref struct ExecuteWithAccessorProcessor<TLeftKey, TResult> : IResolverE
 				if (!resolver.Inner) {
 					var a = new UnsafeRight15Accessor<TLeftKey, TResult>(ref _results);
 					resolver.UnsafeExecuteWithAccessor(ref a, _cloneOnAdd, _shouldPool, ref _disposer);
+				} else if (_fillInner) {
+					// Bounded top-K: the inner resolver already narrowed the candidates, so the page
+					// rows only need their right values fetched from the narrowed map — the filter is
+					// not re-applied and the cache is not re-read, so a right replaced between the
+					// narrow and the fill cannot surface.
+					var a = new UnsafeRight15Accessor<TLeftKey, TResult>(ref _results);
+					resolver.UnsafeFillNarrowedInner(ref a, _cloneOnAdd, _shouldPool, ref _disposer);
 				}
 				break;
 			}

@@ -28,6 +28,31 @@ public interface IJoinResolver {
 	static abstract bool IsSorter { get; }
 	bool Inner { get; }
 
+	/// <summary>
+	/// Sorter-only: did the caller ask for the bounded top-K plan (<c>SortBounded</c>) rather than the
+	/// classic full sort (<c>Sort</c>)? The two plans order comparer-equal rows differently — bounded
+	/// breaks ties by encounter order so consecutive pages partition the result, classic leaves them
+	/// unspecified — so the choice is the caller's, never inferred. Default: no.
+	/// </summary>
+	bool AllowsBounded => false;
+
+	/// <summary>
+	/// Sorter-only: does this sorter order by the LEFT value itself (TResult == TLeftValue), so the
+	/// bounded plan can drive it? Answers the question without handing
+	/// the comparer out — erasing it to <see cref="IComparer{T}"/> boxes a struct
+	/// comparer, and the gate has to be free for queries that then fall back. Default: no.
+	/// </summary>
+	bool OrdersByLeftValues<TLeft>() => false;
+
+	/// <summary>
+	/// Sorter-only: compare two LEFT values with the caller's comparer. Callers must have gated on
+	/// <see cref="OrdersByLeftValues{TLeft}"/>. Keeping the comparison behind the resolver — which
+	/// reaches the bounded containers as a struct type parameter — is what makes the bounded plan
+	/// allocation-free: no <see cref="Comparison{T}"/> delegate, no box, and both the resolver call
+	/// and the user comparer devirtualize per closed generic.
+	/// </summary>
+	int CompareLeftValues<TLeft>(TLeft a, TLeft b) => throw new InvalidOperationException("Join resolver is not sortable");
+
 	internal void UnsafeExecuteWithAccessor<TAccessor>(ref TAccessor accessor, bool cloneOnAdd, bool shouldPool,
 		ref QueryResultsDisposer disposer)
 		where TAccessor : struct, IUnsafeValueAccessor, allows ref struct;
@@ -38,6 +63,39 @@ public interface IJoinResolver {
 	internal void UnsafeSortResults<TKey, TFullResult>(ref ValueDictionary<TKey, TFullResult, DefaultKeyComparer<TKey>> results, int skip, int take)
 		where TFullResult: struct, IJoinResult
 		where TKey : notnull, IEquatable<TKey> => throw new InvalidOperationException("Join resolver is not sortable");
+
+
+	/// <summary>
+	/// Whether this resolver supports narrow-only inner execution
+	/// (<see cref="UnsafeNarrowIndexedInner{TExecutor}"/>). JIT-folded per instantiation;
+	/// the bounded top-K path probes this before committing to the bounded plan.
+	/// </summary>
+	static virtual bool SupportsNarrowOnly => false;
+
+	/// <summary>Returns any values retained by a bounded inner pass, including on failure.</summary>
+	internal void ReleaseNarrowedInner() { }
+
+	/// <summary>
+	/// Narrow-only inner execution: intersects the outer query's candidate set with the lefts
+	/// that have a (filter-passing) right match, without materializing full joined rows.
+	/// The resolver retains the checked values until fill and releases them via ReleaseNarrowedInner.
+	/// Only invoked by the bounded top-K path, and only on resolvers whose
+	/// <see cref="SupportsNarrowOnly"/> is true.
+	/// </summary>
+	internal void UnsafeNarrowIndexedInner<TExecutor>(ref TExecutor leftQuery)
+		where TExecutor : struct, IUnsafeCandidatesExecutor
+		=> throw new InvalidOperationException("Resolver does not support narrow-only inner execution");
+
+	/// <summary>
+	/// Bounded-path fill for an inner resolver whose membership was already decided by
+	/// <see cref="UnsafeNarrowIndexedInner{TExecutor}"/>: attaches the retained, checked values to
+	/// the selected page rows without re-reading the cache or re-applying the join filter.
+	/// Only invoked on resolvers whose <see cref="SupportsNarrowOnly"/> is true.
+	/// </summary>
+	internal void UnsafeFillNarrowedInner<TAccessor>(ref TAccessor accessor, bool cloneOnAdd, bool shouldPool,
+		ref QueryResultsDisposer disposer)
+		where TAccessor : struct, IUnsafeValueAccessor, allows ref struct
+		=> throw new InvalidOperationException("Resolver does not support narrow-only inner execution");
 
 	void UnsafeExecuteIndexedInner<TAccessor, TExecutor>(
 		ref TAccessor accessor,

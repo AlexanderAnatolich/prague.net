@@ -158,6 +158,7 @@ public struct JoinOneResolver<TLeftKey, TLeftValue, TRightCache, TRightKey, TRig
 	internal TFilter Filter;
 	internal TSelector Selector;
 	private readonly bool _isInner;
+	private ValueDictionary<TLeftKey, TRightValue, DefaultKeyComparer<TLeftKey>> _narrowedValues;
 
 	internal JoinOneResolver(TRightCache cache, TFilter filter, TSelector selector, bool isInner = false) {
 		Cache = cache;
@@ -271,6 +272,23 @@ public struct JoinOneResolver<TLeftKey, TLeftValue, TRightCache, TRightKey, TRig
 		ExecuteReverse(ref container, accessor.GetKeys<TLeftKey>());
 	}
 
+	void IJoinResolver.UnsafeFillNarrowedInner<TAccessor>(
+		ref TAccessor accessor, bool cloneOnAdd, bool shouldPool, ref QueryResultsDisposer disposer) {
+		var container = new UnsafeResolverContainer<TAccessor>(accessor, cloneOnAdd);
+		// Use the actual value that passed the filter, just as the classic single-pass plan does.
+		// Re-reading the cache here could attach a replacement that never passed the predicate.
+		foreach (var key in accessor.GetKeys<TLeftKey>()) {
+			if (_narrowedValues.IsInitialized && _narrowedValues.TryGetValue(key, out var value))
+				container.Add(key, value);
+		}
+	}
+
+	void IJoinResolver.ReleaseNarrowedInner() {
+		if (_narrowedValues.IsInitialized)
+			_narrowedValues.Dispose(withValues: true);
+		_narrowedValues = default;
+	}
+
 	// ── IndexedInner: single-pass right-attach + narrow ──────────────────────
 
 	/// <summary>
@@ -366,6 +384,84 @@ public struct JoinOneResolver<TLeftKey, TLeftValue, TRightCache, TRightKey, TRig
 			accessor.RetainNonNullSlots<TLeftKey, TRightValue>(ref candidates);
 		}
 		finally {
+			if (!handedOff && pairs.IsInitlized)
+				pairs.Dispose();
+		}
+	}
+
+	// ── Narrow-only inner execution (bounded top-K path) ─────────────────────
+
+	static bool IJoinResolver.SupportsNarrowOnly => true;
+
+	// Retain checked values separately from the page-sized joined result map.
+	private ref struct RetainedValuesContainer : IJoinedResultContainer<TLeftKey, TRightValue> {
+		private ref ValueDictionary<TLeftKey, TRightValue, DefaultKeyComparer<TLeftKey>> _values;
+		public int TotalCount => 1;
+
+		public RetainedValuesContainer(ref ValueDictionary<TLeftKey, TRightValue, DefaultKeyComparer<TLeftKey>> values) {
+			_values = ref values;
+		}
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public int Add(TLeftKey foreignKey, TRightValue result) {
+			_values.GetValueRefOrAddDefault(foreignKey, out _) = result;
+			return 0;
+		}
+	}
+
+	/// <summary>
+	/// Narrow-only twin of <see cref="UnsafeExecuteIndexedInner"/>: phases 1-3 (pair seeding via
+	/// KeyIndex, empty-intersect early-out, filter application) are identical; the terminal phase
+	/// collects surviving left keys and retains the checked values in a pooled map. Fill copies
+	/// those values to page rows without a second cache lookup, selector call or predicate call.
+	/// </summary>
+	void IJoinResolver.UnsafeNarrowIndexedInner<TExecutor>(ref TExecutor leftQuery) {
+		ref var candidates = ref leftQuery.GetCandidates<TLeftKey>();
+		if (!candidates.IsInitlized || candidates.Count == 0)
+			return;
+
+		var pairs = new ValueSet<JoinedKeyPair<TLeftKey, TRightKey>, DefaultKeyComparer<JoinedKeyPair<TLeftKey, TRightKey>>>(candidates.Count);
+		var handedOff = false;
+		try {
+			var keyIndex = Cache.Cache.KeyIndex;
+			if (TSelector.IsIdentity) {
+				ref var candidatesAsRight = ref Unsafe.As<ValueSet<TLeftKey, DefaultKeyComparer<TLeftKey>>, ValueSet<TRightKey, DefaultKeyComparer<TRightKey>>>(ref candidates);
+				ref var pairsAsRight = ref Unsafe.As<
+					ValueSet<JoinedKeyPair<TLeftKey, TRightKey>, DefaultKeyComparer<JoinedKeyPair<TLeftKey, TRightKey>>>,
+					ValueSet<JoinedKeyPair<TRightKey, TRightKey>, DefaultKeyComparer<JoinedKeyPair<TRightKey, TRightKey>>>>(ref pairs);
+				keyIndex.IntersectValues(ref candidatesAsRight, ref pairsAsRight, add: true);
+			} else {
+				keyIndex.IntersectValues<TLeftKey, TSelector>(ref candidates, Selector, ref pairs, add: true);
+			}
+
+			if (!pairs.IsInitlized || pairs.Count == 0) {
+				// Empty intersect: no left has a right match — narrow candidates to empty so
+				// the outer base-execute drops everything (Inner semantic).
+				candidates.IntersectWith(ReadOnlySpan<TLeftKey>.Empty);
+				return;
+			}
+
+			var dataCache = Cache.Cache;
+			var pairedCore = new PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>(dataCache, pairs);
+			var builder = new CacheQueryBuilderCombined<
+				NonExecutableQuery<TRightCache>,
+				PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>,
+				TRightKey, TRightValue,
+				Resolvers<BaseResolver<TRightKey, TRightValue>>,
+				TRightValue>(
+				new NonExecutableQuery<TRightCache>(Cache),
+				pairedCore,
+				new Resolvers<BaseResolver<TRightKey, TRightValue>>(new BaseResolver<TRightKey, TRightValue>()),
+				0);
+
+			builder = Filter.Apply(builder);
+
+			_narrowedValues = new ValueDictionary<TLeftKey, TRightValue, DefaultKeyComparer<TLeftKey>>(true, pairs.Count);
+			var container = new RetainedValuesContainer(ref _narrowedValues);
+			handedOff = true;
+			Unsafe.AsRef(in builder._leftQuery).ExecutePaired(ref container);
+			candidates.IntersectWith(_narrowedValues.Keys);
+		} finally {
 			if (!handedOff && pairs.IsInitlized)
 				pairs.Dispose();
 		}

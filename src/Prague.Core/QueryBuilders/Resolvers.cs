@@ -1,6 +1,7 @@
 namespace Prague.Core;
 
 using System.Buffers;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using Prague.Core.Collections;
 using Utils;
@@ -14,11 +15,15 @@ public struct SortResolver<TLeftKey, TLeftValue, TResult, TComparer> : IJoinReso
 
 	private readonly TComparer _comparer;
 	private readonly bool _isLeftValue;
+	private readonly bool _allowBounded;
 
-	public SortResolver(TComparer comparer) {
+	public SortResolver(TComparer comparer, bool allowBounded = false) {
 		_comparer = comparer;
 		_isLeftValue = typeof(TResult) == typeof(TLeftValue);
+		_allowBounded = allowBounded;
 	}
+
+	public bool AllowsBounded => _allowBounded;
 
 
 	public void UnsafeExecuteIndexedInner<TAccessor, TExecutor>(ref TAccessor accessor, ref TExecutor executor, bool cloneOnAdd, bool isFirst,
@@ -50,6 +55,16 @@ public struct SortResolver<TLeftKey, TLeftValue, TResult, TComparer> : IJoinReso
 			results.SortAndCrop(new LeftSortComparerWrapper<TFullResult>(_comparer), skip, take);
 		else
 			results.SortAndCrop(new JoinSortComparerWrapper<TFullResult>(_comparer), skip, take);
+	}
+
+	bool IJoinResolver.OrdersByLeftValues<TLeft>() => _isLeftValue && typeof(TLeft) == typeof(TResult);
+
+	int IJoinResolver.CompareLeftValues<TLeft>(TLeft a, TLeft b) {
+		// The caller gated on OrdersByLeftValues, which pins TLeft to TResult at runtime, so the
+		// reinterpret is sound. _comparer stays its own type here — nothing is boxed and nothing is
+		// wrapped in a delegate.
+		Debug.Assert(_isLeftValue && typeof(TLeft) == typeof(TResult), "CompareLeftValues on a sorter that does not order by the left value");
+		return _comparer.Compare(Unsafe.As<TLeft, TResult>(ref a), Unsafe.As<TLeft, TResult>(ref b));
 	}
 
 	private struct LeftSortComparerWrapper<TFullResult> : IComparer<TFullResult>

@@ -14,6 +14,8 @@
       href: articles/core-concepts/index-types.md
     - name: Query Engine
       href: articles/core-concepts/query-engine.md
+    - name: Sorted Paging
+      href: articles/core-concepts/sorted-paging.md
     - name: Conditional Updates
       href: articles/core-concepts/conditional-updates.md
     - name: Joins

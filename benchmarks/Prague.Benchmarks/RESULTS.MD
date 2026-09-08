@@ -143,3 +143,89 @@ DefaultJob : .NET 9.0.11 (9.0.11, 9.0.1125.51716), Arm64 RyuJIT armv8.0-a
 | SortedArraySet_RemoveOneByOne   | 1000 |  62,816.993 ns | 436.0578 ns | 364.1280 ns | 0.444 |    0.00 |    6 |  0.3662 |      - |    4056 B |       0.007 |
 | ImmutableHashSet_RemoveOneByOne | 1000 | 116,827.809 ns | 887.5783 ns | 830.2413 ns | 0.826 |    0.01 |    7 | 59.9365 | 3.5400 |  501824 B |       0.842 |
 | ImmutableHashSet_AddOneByOne    | 1000 | 141,414.297 ns | 717.2825 ns | 670.9465 ns | 1.000 |    0.01 |    8 | 71.0449 | 6.3477 |  595848 B |       1.000 |
+
+# Sorted paging — `Sort` vs `SortBounded`
+
+`SortBounded(cmp)` opts a sorted query into the bounded top-K plan for the paged `Execute*`
+terminals; `Sort(cmp)` is the classic materialize-and-full-sort. The choice is the caller's, because
+the plans order comparer-equal rows differently — see
+`www/docs/articles/core-concepts/sorted-paging.md`.
+
+Apple M4 Pro, .NET 9.0.19 (osx-arm64), `--job short` (3 iterations), `[MemoryDiagnoser]`.
+**Both plans measured in one process**, so every pair below is directly comparable. `*_ClassicCore*`
+rows call the classic core directly; the others go through the public terminal.
+
+Read the means as order-of-magnitude: ShortRun on a laptop gives error bars of 5-50% of the mean on
+the larger rows. The `Allocated` column is deterministic and is the point of the table.
+
+## N = 10,000
+
+| Shape | Method | Mean | Allocated |
+|---|---|---:|---:|
+| page of 20 | `Sorted_ExecutePooled` | **97.6 µs** | **-** |
+| | `Sorted_ClassicCore_Pooled` | 465.7 µs | 64 B |
+| page of 200 | `Sorted_ExecutePooled` | **193.9 µs** | **-** |
+| | `Sorted_ClassicCore_Pooled` | 449.2 µs | 128 B |
+| page of 20 at the end | `Sorted_DeepPage_ExecutePooled` | **232.4 µs** | **-** |
+| | `Sorted_DeepPage_ClassicCore` | 494.3 µs | 64 B |
+| half the result | `Sorted_HalfPage_ExecutePooled` | 813.2 µs | - |
+| | `Sorted_HalfPage_ClassicCore` | **506.2 µs** | 64 B |
+| the whole result | `Sorted_FullPage_ExecutePooled` | 1,175.0 µs | 768 B |
+| | `Sorted_FullPage_ClassicCore` | **440.9 µs** | 64 B |
+| joined, page of 20 | `SortedInnerJoin_ExecutePooled` | **433.3 µs** | **-** |
+| | `SortedInnerJoin_ClassicCore_Pooled` | 1,924.1 µs | 24 B |
+| joined, page of 200 | `SortedInnerJoin_ExecutePooled` | **624.0 µs** | **-** |
+| | `SortedInnerJoin_ClassicCore_Pooled` | 1,952.2 µs | 24 B |
+| joined, whole result | `SortedInnerJoin_FullPage_ExecutePooled` | 2,251.1 µs | 3,849 B |
+| | `SortedInnerJoin_FullPage_ClassicCore` | **1,960.2 µs** | 24 B |
+
+## N = 100,000
+
+| Shape | Method | Mean | Allocated |
+|---|---|---:|---:|
+| page of 20 | `Sorted_ExecutePooled` | **940.1 µs** | **-** |
+| | `Sorted_ClassicCore_Pooled` | 8,066.5 µs | 64 B |
+| page of 200 | `Sorted_ExecutePooled` | **1,079.9 µs** | **-** |
+| | `Sorted_ClassicCore_Pooled` | 7,711.9 µs | 64 B |
+| page of 20 at the end | `Sorted_DeepPage_ExecutePooled` | **2,192.4 µs** | **-** |
+| | `Sorted_DeepPage_ClassicCore` | 7,552.9 µs | 64 B |
+| half the result | `Sorted_HalfPage_ExecutePooled` | 10,281.4 µs | - |
+| | `Sorted_HalfPage_ClassicCore` | **7,766.1 µs** | 64 B |
+| the whole result | `Sorted_FullPage_ExecutePooled` | 16,241.0 µs | - |
+| | `Sorted_FullPage_ClassicCore` | **7,555.5 µs** | 64 B |
+| joined, page of 20 | `SortedInnerJoin_ExecutePooled` | **4,847.4 µs** | **-** |
+| | `SortedInnerJoin_ClassicCore_Pooled` | 24,403.8 µs | 24 B |
+| joined, whole result | `SortedInnerJoin_FullPage_ExecutePooled` | 28,942.7 µs | - |
+| | `SortedInnerJoin_FullPage_ClassicCore` | **25,207.3 µs** | 24 B |
+
+## Reading it
+
+- **Paging wins, 2.3-8.6×**, and the win grows with N — which is the point: the classic plan's cost
+  scales with the result, the bounded plan's with the page.
+- **`skip` is free.** A page of 20 taken from the end wins 2.1-3.4×; introselect over N still beats a
+  full sort of N.
+- **A large contiguous prefix loses**, 1.3× at half the result and 2.0-2.7× at all of it: a near-full
+  page leaves no sort to skip, only the `(value, ordinal)` tuple overhead at twice the bytes of a
+  bare reference. Deliberately not guarded against — see `context/query.md`.
+- **Paged shapes allocate nothing.** The comparer reaches the selection code as a struct type
+  parameter (no `Comparison<T>` delegate, no boxed `IComparer<T>`). The two non-zero bounded cells are
+  full-page collect-all renting its O(N) buffer, which is the shape you should not use it for.
+
+Per-query allocation, measured separately with `GC.GetAllocatedBytesForCurrentThread` over 20 ops
+after warmup on a 1,000-row cache (deterministic, unlike BenchmarkDotNet's per-op figure) and pinned
+by `tests/Prague.Core.Tests/Join/TopKAllocationCoreTests.cs`:
+
+| query | B/op |
+|---|---:|
+| unsorted `ExecutePooled()` | 0 |
+| `SortBounded(...).ExecutePooled(0, 10)` — struct or class comparer | **0** |
+| `Sort(...).ExecutePooled()` | 88 |
+| unsorted joined `ExecutePooled()` | 144 |
+| `SortBounded(...).InnerJoinOne(...).ExecutePooled(0, 10)` | **144** — nothing over the unsorted join |
+| `Sort(...).InnerJoinOne(...).ExecutePooled()` | 168 |
+
+> **Superseded.** An earlier revision of this file carried a Before/After pair from a Ryzen 9 9955HX3D
+> box claiming 16-29× and `Allocated: -` on every bounded row. Neither reproduces: the two runs used
+> different machines and the ratio was inflated at both ends, and the bounded path did allocate 64-88 B
+> per query at that commit (a `Comparison<T>` delegate plus a boxed struct comparer, both since
+> removed). The tables above replace it.
