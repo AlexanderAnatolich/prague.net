@@ -20,6 +20,7 @@ public struct CacheQueryBuilderCoreCombined<TKey, TValue>
 	private Predicate<TValue>? _filter;
 	private bool _disposed;
 	private bool _isIntersecter;
+	private bool _candidatesFiltered;
 	internal bool _first;
 	internal ValueSet<TKey, DefaultKeyComparer<TKey>> Candidates;
 	internal RefHolder<ValueSet<TKey, DefaultKeyComparer<TKey>>.IncrementalIntersecter> _incrementalIntersecter;
@@ -878,11 +879,47 @@ public struct CacheQueryBuilderCoreCombined<TKey, TValue>
 		public void Seal(int actualCount) { }
 	}
 
+	// Collects the candidate keys whose value passes the filter into a fresh set, so the set being
+	// walked is never mutated underneath the walk.
+	private ref struct FilterCandidatesContainer : IResultContainerInitializer<TKey, TValue> {
+		private ValueSet<TKey, DefaultKeyComparer<TKey>> _survivors;
+
+		public FilterCandidatesContainer(int capacity) {
+			_survivors = new ValueSet<TKey, DefaultKeyComparer<TKey>>(capacity);
+		}
+
+		public ValueSet<TKey, DefaultKeyComparer<TKey>> Survivors => _survivors;
+
+		public int TotalCount { get; }
+		public int Add(TKey foreignKey, TValue result) => _survivors.Add(foreignKey) ? 1 : 0;
+		// Pre-sized from the candidate count in the ctor — the walk must not swap the set out.
+		public void Init(int maxCount) { }
+		public void Seal(int actualCount) { }
+	}
+
+	// Auto-seeded candidate sets are filtered at seed time (EnumerateAllValuesInit takes _filter),
+	// index-seeded ones are not. An inner join narrows on whatever it is handed and retains a slot
+	// for every candidate with a right match — including lefts the filter rejects. The outer base
+	// walk then never writes those rows' Left, leaving rows with a default Left and Count greater
+	// than TotalCount. Equalizing the two seeding routes here is the root fix: no resolver ever
+	// sees a candidate the filter would reject.
+	[MethodImpl(MethodImplOptions.NoInlining)]
+	private void FilterSeededCandidates() {
+		var container = new FilterCandidatesContainer(Candidates.Count);
+		_ = _dataCache.TryGet(ref container, ref Candidates, _filter);
+		var stale = Candidates;
+		Candidates = container.Survivors;
+		stale.Dispose();
+	}
+
 	[UnscopedRef]
 	ref ValueSet<TKey1, DefaultKeyComparer<TKey1>> IUnsafeCandidatesExecutor.GetCandidates<TKey1>() {
 		if (!Candidates.IsInitlized) {
 			var initContainer = new InitContainer(ref Candidates);
 			_dataCache.EnumerateAllValuesInit(ref initContainer, _filter);
+		} else if (_filter is not null && !_candidatesFiltered) {
+			_candidatesFiltered = true;
+			FilterSeededCandidates();
 		}
 
 		return ref Unsafe.As<ValueSet<TKey, DefaultKeyComparer<TKey>>, ValueSet<TKey1, DefaultKeyComparer<TKey1>>>(ref Unsafe.AsRef(in Candidates));
