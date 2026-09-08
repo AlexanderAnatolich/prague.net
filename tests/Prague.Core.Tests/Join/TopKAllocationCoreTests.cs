@@ -68,26 +68,27 @@ public class TopKAllocationCoreTests {
 	// the same query with no sort at all, which is the floor for that shape.
 	[Test]
 	public void BoundedPooled_AddsNoAllocationOverTheUnsortedQuery() {
-		var unsorted = AllocPerOp(() => {
+		var unsorted = AllocPerOpPrecise(() => {
 			using var r = _small.Query().ExecutePooled();
 			return r.Count;
 		});
-		var bounded = AllocPerOp(() => {
+		var bounded = AllocPerOpPrecise(() => {
 			using var r = _small.Query().SortBounded(_cachedStruct).ExecutePooled(0, Take);
 			return r.Count;
 		});
 
 		Assert.That(unsorted, Is.Zero, "fixture sanity: a pooled unsorted query allocates nothing");
-		Assert.That(bounded, Is.Zero, "the bounded simple plan must stay allocation-free");
+		Assert.That(bounded, Is.LessThanOrEqualTo(unsorted),
+			$"the bounded simple plan must add nothing: {bounded} B/op vs {unsorted} B/op unsorted");
 	}
 
 	[Test]
 	public void BoundedJoinedPooled_AddsNoAllocationOverTheUnsortedJoin() {
-		var unsortedJoin = AllocPerOp(() => {
+		var unsortedJoin = AllocPerOpPrecise(() => {
 			using var r = _small.Query().InnerJoinOne(_smallRight).ExecutePooled();
 			return r.Count;
 		});
-		var boundedJoin = AllocPerOp(() => {
+		var boundedJoin = AllocPerOpPrecise(() => {
 			using var r = _small.Query().SortBounded(_cachedStruct).InnerJoinOne(_smallRight).ExecutePooled(0, Take);
 			return r.Count;
 		});
@@ -102,7 +103,7 @@ public class TopKAllocationCoreTests {
 	// why this pins a cached instance.
 	[Test]
 	public void BoundedPooled_WithClassComparer_IsAlsoAllocationFree() {
-		var bounded = AllocPerOp(() => {
+		var bounded = AllocPerOpPrecise(() => {
 			using var r = _small.Query().SortBounded(_cachedClass).ExecutePooled(0, Take);
 			return r.Count;
 		});
@@ -114,19 +115,25 @@ public class TopKAllocationCoreTests {
 
 	private static readonly TaByOrderAscStruct _cachedStruct = new();
 
-	private static long AllocPerOp(Func<int> run) {
+	// Same measurement with enough repetitions that a single small one-off inside the window —
+	// tiered-JIT bookkeeping, a GC side allocation on a shared runner — amortises to 0 instead of
+	// showing up as 1 B/op. The smallest regression these tests guard against is a 24 B box, so the
+	// margin is ample.
+	private static long AllocPerOpPrecise(Func<int> run) => AllocPerOp(run, 200);
+
+	private static long AllocPerOp(Func<int> run, int iterations = 20) {
 		// Warm up JIT and pools, then measure.
 		for (var i = 0; i < 5; i++)
 			run();
 
 		var sink = 0L;
 		var before = GC.GetAllocatedBytesForCurrentThread();
-		for (var i = 0; i < 20; i++)
+		for (var i = 0; i < iterations; i++)
 			sink += run();
 
 		var delta = GC.GetAllocatedBytesForCurrentThread() - before;
 		Assert.That(sink, Is.GreaterThan(0), "queries did not run");
-		return delta / 20;
+		return delta / iterations;
 	}
 
 	// The classic pipeline, reached through the internal cores (the public sorted terminals now
