@@ -6,6 +6,34 @@ using Prague.Core.Collections;
 // (max-heap of kept items, root = current worst); DrainAscending heapsorts in place.
 [TestFixture]
 public class TopKSelectTests {
+	[TestCase(0)]
+	[TestCase(1)]
+	[TestCase(16)]
+	[TestCase(17)]
+	[TestCase(1000)]
+	[TestCase(10000)]
+	public void LargePrefixSort_MatchesFrameworkSort_AndRespectsSlice(int length) {
+		var random = new Random(73);
+		var comparer = Comparer<int>.Create(static (a, b) => b.CompareTo(a));
+		foreach (var shape in new[] { "random", "ascending", "descending", "equal", "organ-pipe" }) {
+			var data = new int[length + 2];
+			data[0] = int.MinValue;
+			data[^1] = int.MaxValue;
+			for (var i = 0; i < length; i++)
+				data[i + 1] = shape switch {
+					"ascending" => i,
+					"descending" => length - i,
+					"equal" => 1,
+					"organ-pipe" => Math.Min(i, length - i),
+					_ => random.Next(37)
+				};
+			var expected = (int[])data.Clone();
+			Array.Sort(expected, 1, length, comparer);
+			TopKSelect.SortAscending(data.AsSpan(1, length), comparer);
+			Assert.That(data, Is.EqualTo(expected), shape);
+		}
+	}
+
 	private sealed class IntAsc : IComparer<int> {
 		public int Compare(int x, int y) => x.CompareTo(y);
 	}
@@ -84,5 +112,101 @@ public class TopKSelectTests {
 
 		var n = TopKSelect.DrainAscending(buffer, ref count, ref heapified, cmp);
 		Assert.That(buffer.AsSpan(0, n).ToArray(), Is.EqualTo(new[] { 1, 2, 4 }));
+	}
+
+	// ── Large prefix: introselect the page bounds, sort only the page ─────────
+
+	private static int[] Shape(string shape, int length, Random random) {
+		var data = new int[length];
+		for (var i = 0; i < length; i++) {
+			data[i] = shape switch {
+				"ascending" => i,
+				"descending" => length - i,
+				"equal" => 1,
+				"organ-pipe" => Math.Min(i, length - i),
+				"few-values" => random.Next(3),
+				_ => random.Next(1 << 20)
+			};
+		}
+
+		return data;
+	}
+
+	// Page shapes per length: first pages, middle pages, the last rows, pages past the end, empty pages.
+	private static IEnumerable<(int Skip, int Take)> Pages(int n) {
+		yield return (0, 1);
+		yield return (0, 3);
+		yield return (0, n);
+		yield return (0, n + 5);
+		yield return (1, 2);
+		yield return (n / 2, 3);
+		yield return (n / 4, n / 2);
+		yield return (Math.Max(n - 3, 0), 3);
+		yield return (Math.Max(n - 1, 0), 10);
+		yield return (n, 5);
+		yield return (n + 7, 5);
+		yield return (2, 0);
+		yield return (0, 0);
+		yield return (-1, 5);
+	}
+
+	[TestCase(0, false)]
+	[TestCase(1, false)]
+	[TestCase(2, false)]
+	[TestCase(16, false)]
+	[TestCase(17, false)]
+	[TestCase(33, false)]
+	[TestCase(1000, false)]
+	[TestCase(4097, false)]
+	[TestCase(17, true)]
+	[TestCase(1000, true)]
+	[TestCase(4097, true)]
+	public void SelectPage_MatchesSortedSlice_ForEveryShapeAndPage(int length, bool forceFallbacks) {
+		var random = new Random(91);
+		var comparer = new IntAsc();
+		foreach (var shape in new[] { "random", "ascending", "descending", "equal", "organ-pipe", "few-values" }) {
+			var source = Shape(shape, length, random);
+			var sorted = (int[])source.Clone();
+			Array.Sort(sorted);
+			foreach (var (skip, take) in Pages(length)) {
+				// Sentinels outside the span pin the slice; the multiset inside must survive unchanged.
+				var data = new int[length + 2];
+				data[0] = int.MinValue;
+				data[^1] = int.MaxValue;
+				source.CopyTo(data, 1);
+				var span = data.AsSpan(1, length);
+
+				var page = forceFallbacks
+					? TopKSelect.SelectPage(span, skip, take, comparer, depthLimit: 0)
+					: TopKSelect.SelectPage(span, skip, take, comparer);
+
+				var label = $"{shape} n={length} skip={skip} take={take}";
+				var expectedPage = skip < 0 || take <= 0 || skip >= length ? 0 : Math.Min(take, length - skip);
+				Assert.That(page, Is.EqualTo(expectedPage), label);
+				if (page > 0) {
+					Assert.That(data.AsSpan(1 + skip, page).ToArray(), Is.EqualTo(sorted.AsSpan(skip, page).ToArray()), label);
+				}
+
+				Assert.That(data[0], Is.EqualTo(int.MinValue), label);
+				Assert.That(data[^1], Is.EqualTo(int.MaxValue), label);
+				var remaining = data.AsSpan(1, length).ToArray();
+				Array.Sort(remaining);
+				Assert.That(remaining, Is.EqualTo(sorted), label);
+			}
+		}
+	}
+
+	[TestCase(17)]
+	[TestCase(1000)]
+	public void LargePrefixSort_DepthExhausted_FallsBackToHeapSort(int length) {
+		var random = new Random(5);
+		var comparer = new IntAsc();
+		foreach (var shape in new[] { "random", "descending", "equal", "few-values" }) {
+			var data = Shape(shape, length, random);
+			var expected = (int[])data.Clone();
+			Array.Sort(expected);
+			TopKSelect.SortAscending(data.AsSpan(), comparer, depthLimit: 0);
+			Assert.That(data, Is.EqualTo(expected), shape);
+		}
 	}
 }
