@@ -144,94 +144,88 @@ DefaultJob : .NET 9.0.11 (9.0.11, 9.0.1125.51716), Arm64 RyuJIT armv8.0-a
 | ImmutableHashSet_RemoveOneByOne | 1000 | 116,827.809 ns | 887.5783 ns | 830.2413 ns | 0.826 |    0.01 |    7 | 59.9365 | 3.5400 |  501824 B |       0.842 |
 | ImmutableHashSet_AddOneByOne    | 1000 | 141,414.297 ns | 717.2825 ns | 670.9465 ns | 1.000 |    0.01 |    8 | 71.0449 | 6.3477 |  595848 B |       1.000 |
 
+# Sorted paging — `Sort` vs `SortBounded`
 
-# Bounded top-K paging inside the sorted Execute* terminals
+`SortBounded(cmp)` opts a sorted query into the bounded top-K plan for the paged `Execute*`
+terminals; `Sort(cmp)` is the classic materialize-and-full-sort. The choice is the caller's, because
+the plans order comparer-equal rows differently — see
+`www/docs/articles/core-concepts/sorted-paging.md`.
 
-Sorted `Execute*` terminals bound transparently when `take` is finite: the page is selected with a
-heap of size `skip+take` instead of materializing and full-sorting every matched row; the joined
-variants narrow inner joins without dictionary writes and fill join slots for the page rows only.
-Same method names, same fixture and seed in both runs. ShortRun job (3 iterations) on a laptop —
-Error is large on some classic rows, so read these as order-of-magnitude.
+Apple M4 Pro, .NET 9.0.19 (osx-arm64), `--job short` (3 iterations), `[MemoryDiagnoser]`.
+**Both plans measured in one process**, so every pair below is directly comparable. `*_ClassicCore*`
+rows call the classic core directly; the others go through the public terminal.
 
-## Before (main @ 1bb8b1e — classic full-sort pipeline behind the sorted terminals)
+Read the means as order-of-magnitude: ShortRun on a laptop gives error bars of 5-50% of the mean on
+the larger rows. The `Allocated` column is deterministic and is the point of the table.
 
-```
+## N = 10,000
 
-BenchmarkDotNet v0.15.8, Windows 11 (10.0.26200.9106/25H2/2025Update/HudsonValley2)
-AMD Ryzen 9 9955HX3D 2.50GHz, 1 CPU, 16 logical and 16 physical cores
-.NET SDK 10.0.302
-  [Host]   : .NET 10.0.10 (10.0.10, 10.0.1026.32716), X64 RyuJIT x86-64-v4
-  ShortRun : .NET 10.0.10 (10.0.10, 10.0.1026.32716), X64 RyuJIT x86-64-v4
+| Shape | Method | Mean | Allocated |
+|---|---|---:|---:|
+| page of 20 | `Sorted_ExecutePooled` | **97.6 µs** | **-** |
+| | `Sorted_ClassicCore_Pooled` | 465.7 µs | 64 B |
+| page of 200 | `Sorted_ExecutePooled` | **193.9 µs** | **-** |
+| | `Sorted_ClassicCore_Pooled` | 449.2 µs | 128 B |
+| page of 20 at the end | `Sorted_DeepPage_ExecutePooled` | **232.4 µs** | **-** |
+| | `Sorted_DeepPage_ClassicCore` | 494.3 µs | 64 B |
+| half the result | `Sorted_HalfPage_ExecutePooled` | 813.2 µs | - |
+| | `Sorted_HalfPage_ClassicCore` | **506.2 µs** | 64 B |
+| the whole result | `Sorted_FullPage_ExecutePooled` | 1,175.0 µs | 768 B |
+| | `Sorted_FullPage_ClassicCore` | **440.9 µs** | 64 B |
+| joined, page of 20 | `SortedInnerJoin_ExecutePooled` | **433.3 µs** | **-** |
+| | `SortedInnerJoin_ClassicCore_Pooled` | 1,924.1 µs | 24 B |
+| joined, page of 200 | `SortedInnerJoin_ExecutePooled` | **624.0 µs** | **-** |
+| | `SortedInnerJoin_ClassicCore_Pooled` | 1,952.2 µs | 24 B |
+| joined, whole result | `SortedInnerJoin_FullPage_ExecutePooled` | 2,251.1 µs | 3,849 B |
+| | `SortedInnerJoin_FullPage_ClassicCore` | **1,960.2 µs** | 24 B |
 
-Job=ShortRun  IterationCount=3  LaunchCount=1  
-WarmupCount=3  
+## N = 100,000
 
-```
-| Method                        | N      | Take | Mean         | Error        | StdDev      | Ratio | RatioSD | Rank | Allocated | Alloc Ratio |
-|------------------------------ |------- |----- |-------------:|-------------:|------------:|------:|--------:|-----:|----------:|------------:|
-| Sorted_ExecutePooled          | 10000  | 20   |     588.2 μs |     15.39 μs |     0.84 μs |  1.00 |    0.00 |    1 |      64 B |        1.00 |
-| SortedInnerJoin_ExecutePooled | 10000  | 20   |   1,312.5 μs |    163.19 μs |     8.95 μs |  2.23 |    0.01 |    2 |      24 B |        0.38 |
-|                               |        |      |              |              |             |       |         |      |           |             |
-| Sorted_ExecutePooled          | 10000  | 200  |     580.0 μs |     74.80 μs |     4.10 μs |  1.00 |    0.01 |    1 |      64 B |        1.00 |
-| SortedInnerJoin_ExecutePooled | 10000  | 200  |   1,320.0 μs |    321.91 μs |    17.64 μs |  2.28 |    0.03 |    2 |      24 B |        0.38 |
-|                               |        |      |              |              |             |       |         |      |           |             |
-| Sorted_ExecutePooled          | 100000 | 20   |   9,872.8 μs |  4,060.66 μs |   222.58 μs |  1.00 |    0.03 |    1 |      64 B |        1.00 |
-| SortedInnerJoin_ExecutePooled | 100000 | 20   |  22,113.6 μs | 15,811.40 μs |   866.68 μs |  2.24 |    0.09 |    2 |      24 B |        0.38 |
-|                               |        |      |              |              |             |       |         |      |           |             |
-| Sorted_ExecutePooled          | 100000 | 200  |   9,540.0 μs |  6,506.93 μs |   356.67 μs |  1.00 |    0.05 |    1 |      64 B |        1.00 |
-| SortedInnerJoin_ExecutePooled | 100000 | 200  |  23,975.5 μs |  6,364.69 μs |   348.87 μs |  2.52 |    0.09 |    2 |      24 B |        0.38 |
-|                               |        |      |              |              |             |       |         |      |           |             |
-| Sorted_ExecutePooled          | 500000 | 20   |  79,272.2 μs | 63,079.22 μs | 3,457.59 μs |  1.00 |    0.05 |    1 |      71 B |        1.00 |
-| SortedInnerJoin_ExecutePooled | 500000 | 20   | 181,552.2 μs | 10,783.08 μs |   591.06 μs |  2.29 |    0.09 |    2 |      24 B |        0.34 |
-|                               |        |      |              |              |             |       |         |      |           |             |
-| Sorted_ExecutePooled          | 500000 | 200  |  77,574.4 μs | 86,447.78 μs | 4,738.49 μs |  1.00 |    0.08 |    1 |      71 B |        1.00 |
-| SortedInnerJoin_ExecutePooled | 500000 | 200  | 177,186.5 μs | 62,154.36 μs | 3,406.89 μs |  2.29 |    0.13 |    2 |      24 B |        0.34 |
+| Shape | Method | Mean | Allocated |
+|---|---|---:|---:|
+| page of 20 | `Sorted_ExecutePooled` | **940.1 µs** | **-** |
+| | `Sorted_ClassicCore_Pooled` | 8,066.5 µs | 64 B |
+| page of 200 | `Sorted_ExecutePooled` | **1,079.9 µs** | **-** |
+| | `Sorted_ClassicCore_Pooled` | 7,711.9 µs | 64 B |
+| page of 20 at the end | `Sorted_DeepPage_ExecutePooled` | **2,192.4 µs** | **-** |
+| | `Sorted_DeepPage_ClassicCore` | 7,552.9 µs | 64 B |
+| half the result | `Sorted_HalfPage_ExecutePooled` | 10,281.4 µs | - |
+| | `Sorted_HalfPage_ClassicCore` | **7,766.1 µs** | 64 B |
+| the whole result | `Sorted_FullPage_ExecutePooled` | 16,241.0 µs | - |
+| | `Sorted_FullPage_ClassicCore` | **7,555.5 µs** | 64 B |
+| joined, page of 20 | `SortedInnerJoin_ExecutePooled` | **4,847.4 µs** | **-** |
+| | `SortedInnerJoin_ClassicCore_Pooled` | 24,403.8 µs | 24 B |
+| joined, whole result | `SortedInnerJoin_FullPage_ExecutePooled` | 28,942.7 µs | - |
+| | `SortedInnerJoin_FullPage_ClassicCore` | **25,207.3 µs** | 24 B |
 
-## After (feature/top-k-bounded-execute — bounded pipeline)
+## Reading it
 
-`*_ClassicCore_Pooled` rows re-run the old pipeline through the internal cores for an
-in-run baseline; they match the Before run above within noise.
+- **Paging wins, 2.3-8.6×**, and the win grows with N — which is the point: the classic plan's cost
+  scales with the result, the bounded plan's with the page.
+- **`skip` is free.** A page of 20 taken from the end wins 2.1-3.4×; introselect over N still beats a
+  full sort of N.
+- **A large contiguous prefix loses**, 1.3× at half the result and 2.0-2.7× at all of it: a near-full
+  page leaves no sort to skip, only the `(value, ordinal)` tuple overhead at twice the bytes of a
+  bare reference. Deliberately not guarded against — see `context/query.md`.
+- **Paged shapes allocate nothing.** The comparer reaches the selection code as a struct type
+  parameter (no `Comparison<T>` delegate, no boxed `IComparer<T>`). The two non-zero bounded cells are
+  full-page collect-all renting its O(N) buffer, which is the shape you should not use it for.
 
-```
+Per-query allocation, measured separately with `GC.GetAllocatedBytesForCurrentThread` over 20 ops
+after warmup on a 1,000-row cache (deterministic, unlike BenchmarkDotNet's per-op figure) and pinned
+by `tests/Prague.Core.Tests/Join/TopKAllocationCoreTests.cs`:
 
-BenchmarkDotNet v0.15.8, Windows 11 (10.0.26200.9106/25H2/2025Update/HudsonValley2)
-AMD Ryzen 9 9955HX3D 2.50GHz, 1 CPU, 16 logical and 16 physical cores
-.NET SDK 10.0.302
-  [Host]   : .NET 10.0.10 (10.0.10, 10.0.1026.32716), X64 RyuJIT x86-64-v4
-  ShortRun : .NET 10.0.10 (10.0.10, 10.0.1026.32716), X64 RyuJIT x86-64-v4
+| query | B/op |
+|---|---:|
+| unsorted `ExecutePooled()` | 0 |
+| `SortBounded(...).ExecutePooled(0, 10)` — struct or class comparer | **0** |
+| `Sort(...).ExecutePooled()` | 88 |
+| unsorted joined `ExecutePooled()` | 144 |
+| `SortBounded(...).InnerJoinOne(...).ExecutePooled(0, 10)` | **144** — nothing over the unsorted join |
+| `Sort(...).InnerJoinOne(...).ExecutePooled()` | 168 |
 
-Job=ShortRun  IterationCount=3  LaunchCount=1  
-WarmupCount=3  
-
-```
-| Method                             | N      | Take | Mean          | Error         | StdDev       | Ratio | RatioSD | Rank | Allocated | Alloc Ratio |
-|----------------------------------- |------- |----- |--------------:|--------------:|-------------:|------:|--------:|-----:|----------:|------------:|
-| Sorted_ExecutePooled               | 10000  | 20   |      36.20 μs |      1.287 μs |     0.071 μs |  0.06 |    0.00 |    1 |         - |        0.00 |
-| SortedInnerJoin_ExecutePooled      | 10000  | 20   |     545.82 μs |     67.698 μs |     3.711 μs |  0.93 |    0.01 |    2 |         - |        0.00 |
-| Sorted_ClassicCore_Pooled          | 10000  | 20   |     588.72 μs |     20.895 μs |     1.145 μs |  1.00 |    0.00 |    2 |      64 B |        1.00 |
-| SortedInnerJoin_ClassicCore_Pooled | 10000  | 20   |   1,374.58 μs |     49.003 μs |     2.686 μs |  2.33 |    0.01 |    3 |      24 B |        0.38 |
-|                                    |        |      |               |               |              |       |         |      |           |             |
-| Sorted_ExecutePooled               | 10000  | 200  |      74.14 μs |     19.680 μs |     1.079 μs |  0.13 |    0.00 |    1 |         - |        0.00 |
-| Sorted_ClassicCore_Pooled          | 10000  | 200  |     591.40 μs |     57.430 μs |     3.148 μs |  1.00 |    0.01 |    2 |      64 B |        1.00 |
-| SortedInnerJoin_ExecutePooled      | 10000  | 200  |     650.56 μs |     40.846 μs |     2.239 μs |  1.10 |    0.01 |    2 |         - |        0.00 |
-| SortedInnerJoin_ClassicCore_Pooled | 10000  | 200  |   1,355.27 μs |     42.077 μs |     2.306 μs |  2.29 |    0.01 |    3 |      24 B |        0.38 |
-|                                    |        |      |               |               |              |       |         |      |           |             |
-| Sorted_ExecutePooled               | 100000 | 20   |     320.24 μs |    115.373 μs |     6.324 μs |  0.04 |    0.00 |    1 |         - |        0.00 |
-| SortedInnerJoin_ExecutePooled      | 100000 | 20   |   7,693.88 μs | 19,732.071 μs | 1,081.581 μs |  0.91 |    0.12 |    2 |         - |        0.00 |
-| Sorted_ClassicCore_Pooled          | 100000 | 20   |   8,435.10 μs |  5,921.890 μs |   324.599 μs |  1.00 |    0.05 |    2 |      64 B |        1.00 |
-| SortedInnerJoin_ClassicCore_Pooled | 100000 | 20   |  18,798.97 μs | 17,483.957 μs |   958.355 μs |  2.23 |    0.12 |    3 |      24 B |        0.38 |
-|                                    |        |      |               |               |              |       |         |      |           |             |
-| Sorted_ExecutePooled               | 100000 | 200  |     426.91 μs |    165.335 μs |     9.063 μs |  0.04 |    0.00 |    1 |         - |        0.00 |
-| SortedInnerJoin_ExecutePooled      | 100000 | 200  |   4,703.28 μs |  1,796.008 μs |    98.445 μs |  0.49 |    0.01 |    2 |         - |        0.00 |
-| Sorted_ClassicCore_Pooled          | 100000 | 200  |   9,573.03 μs |  4,707.966 μs |   258.059 μs |  1.00 |    0.03 |    3 |      64 B |        1.00 |
-| SortedInnerJoin_ClassicCore_Pooled | 100000 | 200  |  17,759.79 μs |  6,534.758 μs |   358.192 μs |  1.86 |    0.05 |    4 |      24 B |        0.38 |
-|                                    |        |      |               |               |              |       |         |      |           |             |
-| Sorted_ExecutePooled               | 500000 | 20   |   9,562.42 μs |  3,199.751 μs |   175.389 μs |  0.13 |    0.01 |    1 |         - |        0.00 |
-| Sorted_ClassicCore_Pooled          | 500000 | 20   |  76,017.93 μs | 58,690.756 μs | 3,217.038 μs |  1.00 |    0.05 |    2 |      71 B |        1.00 |
-| SortedInnerJoin_ExecutePooled      | 500000 | 20   |  86,449.48 μs | 12,119.492 μs |   664.310 μs |  1.14 |    0.04 |    2 |     163 B |        2.30 |
-| SortedInnerJoin_ClassicCore_Pooled | 500000 | 20   | 172,929.30 μs | 46,861.848 μs | 2,568.656 μs |  2.28 |    0.09 |    3 |      24 B |        0.34 |
-|                                    |        |      |               |               |              |       |         |      |           |             |
-| Sorted_ExecutePooled               | 500000 | 200  |   2,595.59 μs |    166.673 μs |     9.136 μs |  0.03 |    0.00 |    1 |         - |        0.00 |
-| SortedInnerJoin_ExecutePooled      | 500000 | 200  |  47,703.38 μs | 21,792.732 μs | 1,194.533 μs |  0.63 |    0.03 |    2 |         - |        0.00 |
-| Sorted_ClassicCore_Pooled          | 500000 | 200  |  75,950.17 μs | 62,090.966 μs | 3,403.415 μs |  1.00 |    0.06 |    3 |      71 B |        1.00 |
-| SortedInnerJoin_ClassicCore_Pooled | 500000 | 200  | 114,746.22 μs |  8,132.138 μs |   445.750 μs |  1.51 |    0.06 |    4 |      24 B |        0.34 |
+> **Superseded.** An earlier revision of this file carried a Before/After pair from a Ryzen 9 9955HX3D
+> box claiming 16-29× and `Allocated: -` on every bounded row. Neither reproduces: the two runs used
+> different machines and the ratio was inflated at both ends, and the bounded path did allocate 64-88 B
+> per query at that commit (a `Comparison<T>` delegate plus a boxed struct comparer, both since
+> removed). The tables above replace it.
