@@ -49,6 +49,29 @@ perf/run.sh real --machine apple-m4pro-darwin        # full-real (requires Docke
 Each config writes `perf/out/<config>.json`; `compare.py` then diffs those
 against `perf/baseline/<machine-class>.json` and prints a per-metric table.
 
+### Exit codes
+
+| code | meaning |
+|---|---|
+| `0` | every metric inside its tolerance band |
+| `1` | at least one metric regressed |
+| `2` | **the comparison itself is not trustworthy** — see below |
+
+`2` is deliberately distinct from `1`. A tripwire that cannot fail is worse than no
+tripwire, because a green run reads as coverage. Two ways that used to happen
+silently, both now hard errors:
+
+- **No baseline for this machine class.** Every metric prints `NEW`, nothing is
+  compared, and the old script returned `0`. Seed it with `--bless` — and be
+  deliberate about it, since blessing writes whatever the current run measured.
+- **A baselined metric missing from the run.** A renamed or dropped benchmark is
+  simply not compared, so a whole scenario can silently stop being watched.
+
+A note on noise: the `*.alloc` metrics on the JoinMany-family shapes have been
+observed to vary run-to-run on a laptop (65 B on one run, 268 B on the next at the
+same commit) against a 2% band. Confirm a suspected regression with a second run
+before treating it as real, and prefer a quiet machine.
+
 ## Metrics
 
 Metric ids are stable and config-scoped:
