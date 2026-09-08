@@ -14,7 +14,7 @@ public class TopKSelectTests {
 	[TestCase(10000)]
 	public void LargePrefixSort_MatchesFrameworkSort_AndRespectsSlice(int length) {
 		var random = new Random(73);
-		var comparer = Comparer<int>.Create(static (a, b) => b.CompareTo(a));
+		var comparer = new IntDesc();
 		foreach (var shape in new[] { "random", "ascending", "descending", "equal", "organ-pipe" }) {
 			var data = new int[length + 2];
 			data[0] = int.MinValue;
@@ -28,14 +28,18 @@ public class TopKSelectTests {
 					_ => random.Next(37)
 				};
 			var expected = (int[])data.Clone();
-			Array.Sort(expected, 1, length, comparer);
+			Array.Sort(expected, 1, length, (IComparer<int>)comparer);
 			TopKSelect.SortAscending(data.AsSpan(1, length), comparer);
 			Assert.That(data, Is.EqualTo(expected), shape);
 		}
 	}
 
-	private sealed class IntAsc : IComparer<int> {
+	private readonly struct IntAsc : IComparer<int> {
 		public int Compare(int x, int y) => x.CompareTo(y);
+	}
+
+	private readonly struct IntDesc : IComparer<int> {
+		public int Compare(int x, int y) => y.CompareTo(x);
 	}
 
 	private static int[] Select(IEnumerable<int> source, int k) {
@@ -75,7 +79,7 @@ public class TopKSelectTests {
 		var buffer = new int[3];
 		var count = 0;
 		var heapified = false;
-		var cmp = Comparer<int>.Create(static (x, y) => y.CompareTo(x));
+		var cmp = new IntDesc();
 		foreach (var item in new[] { 5, 9, 1, 7, 3 })
 			TopKSelect.Push(buffer, ref count, ref heapified, 3, item, cmp);
 

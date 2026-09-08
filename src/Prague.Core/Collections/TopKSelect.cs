@@ -35,7 +35,7 @@ internal static class TopKSelect {
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	internal static void Push<T, TComparer>(T[] buffer, ref int count, ref bool heapified, int k, T item, TComparer comparer)
-		where TComparer : IComparer<T> {
+		where TComparer : struct, IComparer<T> {
 		if (k <= 0)
 			return;
 
@@ -60,7 +60,7 @@ internal static class TopKSelect {
 
 	/// <summary>Heapsorts the kept items in place (ascending). Returns the row count; resets state.</summary>
 	internal static int DrainAscending<T, TComparer>(T[] buffer, ref int count, ref bool heapified, TComparer comparer)
-		where TComparer : IComparer<T> {
+		where TComparer : struct, IComparer<T> {
 		var n = count;
 		if (n == 0)
 			return 0;
@@ -85,12 +85,12 @@ internal static class TopKSelect {
 	///   Rows outside the page end up in unspecified order. Expected O(N + page log page).
 	/// </summary>
 	internal static int SelectPage<T, TComparer>(Span<T> values, int skip, int take, TComparer comparer)
-		where TComparer : IComparer<T>
+		where TComparer : struct, IComparer<T>
 		=> SelectPage(values, skip, take, comparer, DepthLimit(values.Length));
 
 	/// <summary>Test seam: <paramref name="depthLimit"/> bounds the partitioning depth (0 forces the fallbacks).</summary>
 	internal static int SelectPage<T, TComparer>(Span<T> values, int skip, int take, TComparer comparer, int depthLimit)
-		where TComparer : IComparer<T> {
+		where TComparer : struct, IComparer<T> {
 		var length = values.Length;
 		if (skip < 0 || take <= 0 || skip >= length)
 			return 0;
@@ -115,12 +115,12 @@ internal static class TopKSelect {
 
 	/// <summary>In-place introsort, ascending; constrained comparer calls avoid boxing.</summary>
 	internal static void SortAscending<T, TComparer>(Span<T> values, TComparer comparer)
-		where TComparer : IComparer<T>
+		where TComparer : struct, IComparer<T>
 		=> SortAscending(values, comparer, DepthLimit(values.Length));
 
 	/// <summary>Test seam: <paramref name="depthLimit"/> bounds the partitioning depth (0 forces the heapsort fallback).</summary>
 	internal static void SortAscending<T, TComparer>(Span<T> values, TComparer comparer, int depthLimit)
-		where TComparer : IComparer<T> {
+		where TComparer : struct, IComparer<T> {
 		if (values.Length > 1)
 			IntroSort(ref MemoryMarshal.GetReference(values), values.Length, depthLimit, comparer);
 	}
@@ -133,7 +133,7 @@ internal static class TopKSelect {
 	///   every item before it ordered not after it and every item after it ordered not before it.
 	/// </summary>
 	private static void Select<T, TComparer>(ref T first, int length, int rank, int depth, TComparer comparer)
-		where TComparer : IComparer<T> {
+		where TComparer : struct, IComparer<T> {
 		Debug.Assert((uint)rank < (uint)length, "rank out of range");
 		while (length > InsertionSortThreshold) {
 			if (depth == 0) {
@@ -160,7 +160,7 @@ internal static class TopKSelect {
 	}
 
 	private static void IntroSort<T, TComparer>(ref T first, int length, int depth, TComparer comparer)
-		where TComparer : IComparer<T> {
+		where TComparer : struct, IComparer<T> {
 		while (length > InsertionSortThreshold) {
 			if (depth == 0) {
 				// Adversarial partitioning: bounded O(N log N) fallback without another buffer.
@@ -191,7 +191,7 @@ internal static class TopKSelect {
 	///   it. Both parts are strictly shorter than the input, so callers always make progress.
 	/// </summary>
 	private static void Partition<T, TComparer>(ref T first, int length, TComparer comparer, out int lessCount, out int greaterStart)
-		where TComparer : IComparer<T> {
+		where TComparer : struct, IComparer<T> {
 		var last = length - 1;
 		ref var middle = ref Unsafe.Add(ref first, length >> 1);
 		ref var end = ref Unsafe.Add(ref first, last);
@@ -223,7 +223,7 @@ internal static class TopKSelect {
 	}
 
 	private static void InsertionSort<T, TComparer>(ref T first, int length, TComparer comparer)
-		where TComparer : IComparer<T> {
+		where TComparer : struct, IComparer<T> {
 		for (var i = 1; i < length; i++) {
 			var item = Unsafe.Add(ref first, i);
 			var j = i - 1;
@@ -237,14 +237,14 @@ internal static class TopKSelect {
 	}
 
 	private static void HeapSort<T, TComparer>(ref T first, int length, TComparer comparer)
-		where TComparer : IComparer<T> {
+		where TComparer : struct, IComparer<T> {
 		BuildMaxHeap(ref first, length, comparer);
 		SortBuiltHeap(ref first, length, comparer);
 	}
 
 	// Pops the max to the end repeatedly: a max-heap of n items becomes n items ascending.
 	private static void SortBuiltHeap<T, TComparer>(ref T root, int n, TComparer comparer)
-		where TComparer : IComparer<T> {
+		where TComparer : struct, IComparer<T> {
 		for (var i = n - 1; i > 0; i--) {
 			Swap(ref root, ref Unsafe.Add(ref root, i));
 			SiftDown(ref root, 0, i, comparer);
@@ -252,13 +252,13 @@ internal static class TopKSelect {
 	}
 
 	private static void BuildMaxHeap<T, TComparer>(ref T root, int size, TComparer comparer)
-		where TComparer : IComparer<T> {
+		where TComparer : struct, IComparer<T> {
 		for (var i = (size >> 1) - 1; i >= 0; i--)
 			SiftDown(ref root, i, size, comparer);
 	}
 
 	private static void SiftDown<T, TComparer>(ref T root, int i, int size, TComparer comparer)
-		where TComparer : IComparer<T> {
+		where TComparer : struct, IComparer<T> {
 		while (true) {
 			var largest = i;
 			var left = 2 * i + 1;
@@ -280,7 +280,7 @@ internal static class TopKSelect {
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	private static void SwapIfGreater<T, TComparer>(ref T a, ref T b, TComparer comparer)
-		where TComparer : IComparer<T> {
+		where TComparer : struct, IComparer<T> {
 		if (comparer.Compare(a, b) > 0)
 			Swap(ref a, ref b);
 	}

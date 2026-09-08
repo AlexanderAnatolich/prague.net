@@ -1811,17 +1811,31 @@ public struct CacheQueryBuilderCombined<TDiscriminator, TLeftQuery, TLeftKey, TL
 			container.ExecuteJoinsBounded();
 			return container.BuildResults();
 		} finally {
-			topK.Dispose();
-			container.Dispose();
-			var release = new ReleaseNarrowedInnerProcessor();
-			_resolverChain.Execute(ref release);
-			// A candidate set auto-populated by PrepareIndexedInnerBounded that the base execution
-			// never consumed is still ours — the narrow pass runs user code (join filters, Where
-			// predicates) and can throw before ExecuteBase's own finally would have released it.
-			// ValueSet.Dispose is idempotent, so after a legitimate consume this is a no-op.
-			var candidates = _leftQuery.Candidates;
-			if (candidates.IsInitlized)
-				candidates.Dispose();
+			// Every step owns pooled memory, so each one has to run even if an earlier one throws:
+			// ValueDictionary.Dispose returns its metadata array unguarded (unlike ValueSet, which
+			// swallows a double-return), so a single throw in a flat sequence would strand the
+			// narrowed inner maps and the candidate set for good.
+			try {
+				topK.Dispose();
+			} finally {
+				try {
+					container.Dispose();
+				} finally {
+					try {
+						var release = new ReleaseNarrowedInnerProcessor();
+						_resolverChain.Execute(ref release);
+					} finally {
+						// A candidate set auto-populated by PrepareIndexedInnerBounded that the base
+						// execution never consumed is still ours — the narrow pass runs user code (join
+						// filters, Where predicates) and can throw before ExecuteBase's own finally
+						// would have released it. ValueSet.Dispose is idempotent, so after a legitimate
+						// consume this is a no-op.
+						var candidates = _leftQuery.Candidates;
+						if (candidates.IsInitlized)
+							candidates.Dispose();
+					}
+				}
+			}
 		}
 	}
 
