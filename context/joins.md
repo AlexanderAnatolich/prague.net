@@ -61,6 +61,8 @@ This replaced the old miss-callback infra (`IInnerJoinContainer`, `UnsafeInnerRe
 
 Every `ExecuteReverse` / `UnsafeExecuteIndexedInner` wraps its `ValueSet<JoinedKeyPair<…>>` in `try { … } finally { if (!handedOff && pairs.IsInitlized) pairs.Dispose(); }`. **`handedOff = true` is set immediately before `ExecutePaired`, *after* `Filter.Apply`** — this position is load-bearing: `Filter.Apply` (user lambda) sits between paired-core construction and `ExecutePaired` and can throw; flipping earlier silently leaks the rented array. Enforces exactly-one-Dispose (a double `ArrayPool.Return` is swallowed by `ValueSet.Dispose` but corrupts the pool).
 
+The joined pipeline itself (`ExecuteCoreJoined` / `CountCoreJoined` / `ExecuteCoreJoinedTop` / `ExecuteCoreJoinedKeyed`) releases a candidate set the indexed-inner phase seeded or auto-populated when a resolver throws before base execution (`ReleaseUnconsumedCandidates`, no-op after a legitimate consume because base execution disposes candidates by ref).
+
 ## Concurrency — a query never fails
 
 Caches are written while queries read them (a live Kafka consumer on one side, request handlers on the other); there is no query-time lock and no snapshot isolation, by design. The contract that follows:
