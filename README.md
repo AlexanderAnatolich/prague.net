@@ -457,6 +457,59 @@ Two indices:   Scan 50 items        → ~500ns
 Three indices: Scan 10 items        → ~100ns ✨
 ```
 
+### **Sorted Paging — `Sort` vs `SortBounded`**
+
+Sorted queries come in two plans, and you pick one. Nothing is inferred, because they order
+comparer-equal rows differently.
+
+```csharp
+// Paging a large result: select just the page, never sort the rest.
+using var page = cache.Query()
+    .WithDepartmentId(1)
+    .SortBounded(new ByReleaseDateDesc())
+    .ExecutePooled(skip: 40, take: 20);
+
+// Materialising a whole result: classic full sort.
+using var all = cache.Query()
+    .WithDepartmentId(1)
+    .Sort(new ByReleaseDateDesc())
+    .ExecutePooled();
+```
+
+**Which one:**
+
+| You are… | Use | Why |
+|---|---|---|
+| paging — `take` is a small slice of what matched (tens to a few hundred rows) | `SortBounded` | **2.3–8.6× faster**; `skip` is irrelevant, deep pages win too |
+| taking a large chunk — `take` covers ~a quarter or more of what matched | `Sort` | bounded is **1.3–2.7× slower** there; no sort left to skip, just tuple overhead |
+| calling `Execute*()` with no page at all | `Sort` | unbounded always runs the classic sort anyway |
+| paging with a comparer that can **tie** | `SortBounded` — required | it breaks ties by encounter order, so consecutive pages partition the result |
+
+The deciding variable is **`take` as a fraction of the matched rows**, not `skip` and not the cache
+size. `SortBounded` buffers rows as `(value, ordinal)` pairs — twice the bytes of a bare reference —
+and earns that back by not sorting what you did not ask for. Ask for a page and the saving dwarfs the
+overhead; ask for everything and only the overhead is left.
+
+**Ties matter more than speed.** A comparer that returns `0` for two distinct rows leaves their
+order unspecified — so paging with `Sort` can repeat or drop a row between pages, exactly like SQL
+`ORDER BY … LIMIT/OFFSET` without a unique tiebreaker. Two ways out: use `SortBounded`, or make the
+comparer *total* by falling back to the primary key. With a total comparer both plans return
+byte-identical output and the choice is purely performance.
+
+**Allocation:** `SortBounded` on a page allocates **nothing** — the comparer reaches the selection
+code as a struct type parameter, so there is no delegate and no boxed `IComparer<T>`. `Sort` costs
+~88 B/query (simple) or ~168 B (joined). A near-full `take` on `SortBounded` rents an O(N) buffer,
+which is one more reason that shape belongs to `Sort`.
+
+**Measured** (Apple M4 Pro, .NET 9, one process, both plans in the same run):
+
+```
+                        page 20 of 100k   page 200 of 10k   half the result   whole result
+SortBounded                     940µs             194µs            10.3ms         16.2ms
+Sort (classic)                 8066µs             449µs             7.8ms          7.6ms
+                            8.6× faster       2.3× faster    1.3× slower    2.1× slower
+```
+
 ### **Conditional Updates**
 
 Prague detects when data hasn't changed and avoids unnecessary work:

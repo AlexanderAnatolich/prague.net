@@ -2446,6 +2446,19 @@ internal static class CacheQueryBuilderCombinedDiscriminatorExtensions {
 }
 
 public static class CacheQueryBuilderCombinedSortExtensions {
+	/// <summary>
+	///   Sort with the classic plan: the matched rows are materialized and fully sorted, then sliced
+	///   if the terminal was given a page. Use this when you want the whole result, or a chunk that
+	///   covers roughly a quarter or more of it.
+	///   <para>
+	///   For paging a large result use <c>SortBounded</c> instead — it selects the page without
+	///   sorting the rest (measured 2.3-8.6× faster for pages of tens to hundreds of rows). And note
+	///   that this plan leaves comparer-equal rows in an <b>unspecified</b> order, so paging it with a
+	///   comparer that can tie may repeat or drop a row between pages; either use <c>SortBounded</c>,
+	///   which breaks ties by encounter order, or make the comparer total by falling back to the
+	///   primary key.
+	///   </para>
+	/// </summary>
 	public static
 		CacheQueryBuilderCombined<SortedQuery<TDiscriminator>, TExecutor, TKey, TValue, Resolvers<SortResolver<TKey, TValue, TResult, TComparer>>, TResult>
 		Sort<TDiscriminator, TExecutor, TResult, TKey, TValue, TComparer>(
@@ -2481,6 +2494,13 @@ public static class CacheQueryBuilderCombinedSortExtensions {
 	}
 
 	/// <summary>
+	///   <b>Use this when you are paging</b> — when <c>take</c> is a small slice of the rows that
+	///   matched (tens to a few hundred out of thousands). <c>skip</c> does not matter: a deep page
+	///   wins as much as the first one. Use <see cref="Sort{TDiscriminator,TExecutor,TResult,TKey,TValue,TComparer}"/>
+	///   when <c>take</c> covers roughly a quarter or more of the result, or when there is no page at
+	///   all. The deciding variable is <c>take</c> as a fraction of the matched rows — not
+	///   <c>skip</c>, not the cache size.
+	///   <para>
 	///   Sort, opting in to the <b>bounded top-K plan</b> for the paged terminals: with a finite
 	///   <c>take</c>, <c>Execute*(skip, take)</c> selects the [skip, skip+take) page with a heap of
 	///   size skip+take (or introselect over the collected candidates) instead of materializing and
@@ -2499,9 +2519,11 @@ public static class CacheQueryBuilderCombinedSortExtensions {
 	///       the primary key) the two plans return identical output and this difference vanishes.
 	///     </item>
 	///     <item>
-	///       <b>A full-size page is slower</b> than the classic full sort (measured ~1.7×): the plan
-	///       collects every candidate and still sorts the whole tail. Use this when you page; not to
-	///       fetch everything.
+	///       <b>A large contiguous prefix is slower</b> than the classic full sort — measured 1.3× at
+	///       half the result and 2.0-2.7× at all of it. The plan buffers rows as (value, ordinal)
+	///       pairs, twice the bytes of a bare reference, and a near-full page leaves no sort for it to
+	///       skip. That shape also rents an O(N) buffer, so it is the one case where this plan
+	///       allocates. Page with it; do not fetch everything with it.
 	///     </item>
 	///     <item>
 	///       Unbounded <c>Execute*()</c> and chain shapes the plan cannot bound (a comparer over
