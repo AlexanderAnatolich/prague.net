@@ -278,12 +278,13 @@ internal ref struct JoinedResultContaier<TLeftKey, TLeftValue, TResolverChain, T
 		var offset = _results.Offset;
 		var allResults = QueryResults<TResult>.FromArray(
 			_results.ValuesArray ?? [], offset, _results.Count, TotalCount, _shouldPool, in _disposer);
-		_handedOff = true;
 
-		// Clone after slicing if needed
+		// Clone after slicing if needed. A Clone() that throws leaves the values array and the
+		// disposer to Dispose: nothing is handed off until the rows are finished.
 		if (_clone)
 			allResults.CloneElements(new ResolveChainCloner<TResolverChain, TLeftValue, TResult>());
 
+		_handedOff = true;
 		return allResults;
 	}
 
@@ -361,14 +362,16 @@ internal ref struct SimpleResultContainer<TKey, TValue, TResolver>
 					_totalCount);
 
 		var allResults = _results;
-		_handedOff = true;
-
 		if (TResolver.IsSorter)
 			_chain.UnsafeSortResults(ref allResults, _skip, _take);
 		else if (_skip > 0 || _take < int.MaxValue)
 			allResults.SliceLeaveTotalCount(_skip, Math.Min(_take, _totalCount - _skip));
 
-		return _clone ? allResults.CloneInPlace() : allResults;
+		// Sort and clone run on the same rented array: while either can still throw, the buffer
+		// stays ours and Dispose returns it; only the finished result leaves the container.
+		var built = _clone ? allResults.CloneInPlace() : allResults;
+		_handedOff = true;
+		return built;
 	}
 
 	public void Dispose() {

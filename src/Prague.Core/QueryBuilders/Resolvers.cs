@@ -58,7 +58,8 @@ public struct SortResolver<TLeftKey, TLeftValue, TResult, TComparer> : IJoinReso
 		// of the struct-generic TComparer per query — the classic sort path pays the same
 		// interface-dispatch per comparison anyway.
 		if (_isLeftValue && typeof(TLeft) == typeof(TResult)) {
-			comparer = (IComparer<TLeft>)(object)_comparer!;
+			// A null comparer means the default one, the way the classic sort treats it.
+			comparer = (IComparer<TLeft>?)(object?)_comparer ?? Comparer<TLeft>.Default;
 			return true;
 		}
 

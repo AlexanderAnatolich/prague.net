@@ -40,10 +40,19 @@ internal static class StableSort {
 	// Index ranges this short are insertion-sorted by (key, index) instead of partitioned.
 	private const int InsertionSortThreshold = 16;
 
-	/// <summary>Sorts <paramref name="values"/> ascending; equal items keep their relative order.</summary>
+	/// <summary>
+	///   Sorts <paramref name="values"/> ascending; equal items keep their relative order. A null
+	///   <paramref name="comparer"/> means <see cref="Comparer{T}.Default"/>, as it does for
+	///   <c>Span&lt;T&gt;.Sort</c>.
+	/// </summary>
 	internal static void Sort<T, TComparer>(Span<T> values, TComparer comparer)
 		where TComparer : IComparer<T> {
 		if (values.Length < 2) {
+			return;
+		}
+
+		if (comparer is null) {
+			Sort(values, Comparer<T>.Default);
 			return;
 		}
 
@@ -52,7 +61,8 @@ internal static class StableSort {
 
 	/// <summary>
 	///   Sorts <paramref name="values"/> ascending and moves <paramref name="items"/> alongside, so
-	///   <c>items[i]</c> still belongs to <c>values[i]</c> afterwards; equal values keep their order.
+	///   <c>items[i]</c> still belongs to <c>values[i]</c> afterwards; equal values keep their order. A
+	///   null <paramref name="comparer"/> means <see cref="Comparer{T}.Default"/>.
 	/// </summary>
 	internal static void Sort<T, TItem, TComparer>(Span<T> values, Span<TItem> items, TComparer comparer)
 		where TComparer : IComparer<T> {
@@ -62,6 +72,11 @@ internal static class StableSort {
 
 		var n = values.Length;
 		if (n < 2) {
+			return;
+		}
+
+		if (comparer is null) {
+			Sort(values, items, Comparer<T>.Default);
 			return;
 		}
 

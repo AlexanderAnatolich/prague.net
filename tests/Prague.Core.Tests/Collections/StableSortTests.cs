@@ -152,6 +152,31 @@ public class StableSortTests {
 		});
 	}
 
+	// Span<T>.Sort treats a null comparer as Comparer<T>.Default; so did the classic pipeline before
+	// StableSort, and QueryResults.Sort<IComparer<T>>(null) still must. Two rows take the direct
+	// insertion sort, 33 the index sort.
+	[TestCase(2)]
+	[TestCase(33)]
+	public void Sort_NullComparer_MeansDefault(int length) {
+		var random = new Random(41);
+		var values = Enumerable.Range(0, length).Select(_ => random.Next(100)).ToArray();
+		var expected = values.OrderBy(v => v).ToArray();
+
+		var plain = (int[])values.Clone();
+		StableSort.Sort<int, IComparer<int>>(plain.AsSpan(), null!);
+		Assert.That(plain, Is.EqualTo(expected));
+
+		var keyed = (int[])values.Clone();
+		var items = Enumerable.Range(0, length).ToArray();
+		StableSort.Sort<int, int, IComparer<int>>(keyed.AsSpan(), items.AsSpan(), null!);
+		Assert.That(keyed, Is.EqualTo(expected));
+		Assert.That(items.Select(i => values[i]), Is.EqualTo(expected), "items must follow their values");
+
+		var results = QueryResults<int>.FromArray((int[])values.Clone(), 0, length, length, false);
+		results.Sort<IComparer<int>>(null!);
+		Assert.That(results.ToArray(), Is.EqualTo(expected));
+	}
+
 	[Test]
 	public void SortKeyed_LengthMismatch_Throws() {
 		var rows = Rows("random", 10, new Random(1));
