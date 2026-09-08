@@ -145,10 +145,10 @@ public struct JoinManyRightListIndexResolver<TLeftKey, TLeftValue, TRightCache, 
 	// ── Core execution loop ──────────────────────────────────────────────────
 
 	/// <summary>
-	/// Walks the right index per leftKey, calls <c>container.Init(leftKey, bucket.Count)</c>
-	/// for keyed-init, then <c>PrepareSharedBuffer</c>, then runs the paired-core
-	/// <c>ExecutePaired</c> which dispatches <c>Add(leftKey, rightValue)</c> per pair.
-	/// Filter narrowing can only reduce pairs — pre-Init counts are upper bounds.
+	/// Walks the right index per leftKey, records its (leftKey, rightKey) pairs, calls
+	/// <c>container.Init(leftKey, pairsRecorded)</c> for keyed-init, then <c>PrepareSharedBuffer</c>,
+	/// then runs the paired-core <c>ExecutePaired</c> which dispatches <c>Add(leftKey, rightValue)</c>
+	/// per pair. Filter narrowing can only reduce pairs — the recorded counts are upper bounds.
 	/// </summary>
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	private void ExecuteReverse<TContainer>(ref TContainer container, ReadOnlySpan<TLeftKey> leftKeys)
@@ -176,8 +176,12 @@ public struct JoinManyRightListIndexResolver<TLeftKey, TLeftValue, TRightCache, 
 				if (bucket is null || bucket.Count == 0)
 					continue;
 
-				container.Init(leftKey, bucket.Count);
+				// Size the slot from the pairs this walk recorded, not from bucket.Count: the bucket
+				// is written concurrently, and a right published between the two reads would leave
+				// the slot short of the pairs ExecutePaired later delivers to it.
+				var before = pairs.Count;
 				pairs.UnionWith(JoinedKeyPair<TLeftKey, TRightKey>.IntoKeyed(leftKey), bucket);
+				container.Init(leftKey, pairs.Count - before);
 			}
 
 			// PrepareSharedBuffer allocates the contiguous TRightValue[] partitioned per-leftKey.
@@ -287,8 +291,10 @@ public struct JoinManyRightListIndexResolver<TLeftKey, TLeftValue, TRightCache, 
 				// GetValueRef call returns NullRef and silently skips _totalCount tracking,
 				// leaving PrepareSharedBuffer with a zero-length buffer.
 				_ = accessor.GetValueRefOrAddDefault<TLeftKey, QueryResults<TRightValue>>(leftKey, out _);
-				container.Init(leftKey, bucket.Count);
+				// Sized from the recorded pairs, not bucket.Count — see ExecuteReverse.
+				var before = pairs.Count;
 				pairs.UnionWith(JoinedKeyPair<TLeftKey, TRightKey>.IntoKeyed(leftKey), bucket);
+				container.Init(leftKey, pairs.Count - before);
 			}
 
 			if (!pairs.IsInitlized || pairs.Count == 0) {
