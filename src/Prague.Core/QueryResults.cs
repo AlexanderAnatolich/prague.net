@@ -20,6 +20,9 @@ public interface IQueryResultDisposePolicy<T> {
 public interface IQueryResults : IDisposable {
 	int Count { get; }
 	IEnumerable<object> AsEnumerable();
+
+	// Default-implemented so existing implementors stay source-compatible.
+	bool Truncated => false;
 }
 
 [DebuggerDisplay("Count = {Count}")]
@@ -32,6 +35,9 @@ public readonly struct QueryResults<T> : IList<T>, IReadOnlyList<T>, IDisposable
 	private readonly int _count;
 	private readonly int _totalCount;
 	private readonly bool _isPooled;
+	// Sits next to _isPooled so it lands in that bool's tail padding — QueryResultsSizeTests pins
+	// sizeof(QueryResults<T>) so this stays free.
+	private readonly bool _truncated;
 	private readonly ArrayPool<T>? _pool;
 	private readonly QueryResultsDisposer _disposer;
 
@@ -112,6 +118,13 @@ public readonly struct QueryResults<T> : IList<T>, IReadOnlyList<T>, IDisposable
 
 	public int Count => _count;
 	public int TotalCount => _totalCount;
+
+	/// <summary>
+	/// True when at least one row was dropped because the slot was already full. Only reachable
+	/// when the cache is written while the query runs, and never for a non-joined result. Callers
+	/// that would rather fail than serve a short list can branch on it.
+	/// </summary>
+	public bool Truncated => _truncated;
 
 	internal ref T UnsafeGetRef(int index)
 		=> ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(_array!), _offset + index);
@@ -273,14 +286,27 @@ public readonly struct QueryResults<T> : IList<T>, IReadOnlyList<T>, IDisposable
 		CloneElements(default(UnsafeCacheClonableCloner<T>));
 	}
 
+	// A join slot is a fixed partition of one shared buffer, so it cannot grow. A resolver that
+	// sized the slot from a live index count can deliver more rows than it reserved (the index is
+	// written concurrently); the query must still not fail — see context/joins.md, "Concurrency".
+	// The row is dropped, the result is marked Truncated and the drop is counted.
 	internal int UnsafeAdd(T item) {
 		if (_count == _capacity)
-			throw new IndexOutOfRangeException($"UnsafeAdd overflow: count={_count}, capacity={_capacity}");
+			return DropOverflowRow();
 		_array![_offset + _count] = item;
 		var count = _count;
 		Unsafe.AsRef(in _count) += 1;
 		Unsafe.AsRef(in _totalCount) += 1;
 		return count;
+	}
+
+	// Cold half of the fast/slow split — NoInlining keeps it out of UnsafeAdd's inlined frame.
+	[MethodImpl(MethodImplOptions.NoInlining)]
+	private int DropOverflowRow() {
+		Unsafe.AsRef(in _truncated) = true;
+		QueryResultsDiagnostics.RecordDroppedRow();
+		QueryResultsDiagnostics.AssertNoSlotOverflow(_count, _capacity);
+		return -1;
 	}
 
 	internal void UnsafeSetTotal(int total) {

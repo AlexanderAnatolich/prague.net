@@ -61,6 +61,24 @@ This replaced the old miss-callback infra (`IInnerJoinContainer`, `UnsafeInnerRe
 
 Every `ExecuteReverse` / `UnsafeExecuteIndexedInner` wraps its `ValueSet<JoinedKeyPair<…>>` in `try { … } finally { if (!handedOff && pairs.IsInitlized) pairs.Dispose(); }`. **`handedOff = true` is set immediately before `ExecutePaired`, *after* `Filter.Apply`** — this position is load-bearing: `Filter.Apply` (user lambda) sits between paired-core construction and `ExecutePaired` and can throw; flipping earlier silently leaks the rented array. Enforces exactly-one-Dispose (a double `ArrayPool.Return` is swallowed by `ValueSet.Dispose` but corrupts the pool).
 
+## Concurrency — a query never fails
+
+Caches are written while queries read them (a live Kafka consumer on one side, request handlers on the other); there is no query-time lock and no snapshot isolation, by design. The contract that follows:
+
+- **A query never fails because of a concurrent write.** No exception, no torn buffer.
+- **A query makes no consistency promise.** It sees a roughly-snapshot view: a row written mid-query may be included or missed, and different legs of one join may disagree. Stale or short results are correct behaviour; the next query sees the write.
+
+The sharp edge is slot sizing. A `JoinMany` slot is a **fixed partition of one shared buffer** (`Init` reserves, `PrepareSharedBuffer` partitions, `Add` fills) — it cannot grow. A resolver that reserves from a *live* index count and then delivers rows from a *separate* read of the same index can be handed more rows than it reserved: `PooledSet.Count` is a plain counter, while `Add` publishes the slot before bumping it and the enumerator walks a `LastIndex` snapshot, so an enumeration can legitimately yield more than a preceding `Count`.
+
+Two mechanisms hold the contract:
+
+1. **Size from the recorded pairs, not the live count.** `JoinManyRightListIndexResolver` records the bucket's `(left, right)` pairs first and calls `Init` with the number recorded for that left, so the reservation and the delivery come from one enumeration. Filter narrowing and rows removed mid-query can only *reduce* the delivered rows, so the recorded count is an exact upper bound.
+2. **`QueryResults.UnsafeAdd` drops rather than throws.** A full slot drops the row, sets `QueryResults{T}.Truncated`, and increments `QueryResultsDiagnostics.DroppedRows`. This is the floor under every resolver, including ones added later. In DEBUG the drop *throws* (`QueryResultsDiagnostics.ThrowOnSlotOverflowInDebug`) so a sizing defect fails a test; the throw is `[Conditional("DEBUG")]` and cannot reach release builds.
+
+`DroppedRows` is expected to be `0`. A non-zero value means a resolver is under-sizing slots — a drop leaves no other trace.
+
+**Still sizing from a live count:** `JoinManyLeftSymResolver` (`JoinManyResolver.cs:504`, `609`, `891`) and `JoinManyCollectionResolver` (`189`, `291`). Their pairs fan out through a live `LeftKeySetView`, so a recorded pair count is not an upper bound there — one recorded pair can become N `Add` calls with N read later. Mechanism 2 keeps them contract-correct (lossy, never fatal); mechanism 1 is being extended to them separately.
+
 ## Key files & tests
 
 - `src/Prague.Core/QueryBuilders/JoinOneResolver.cs`, `…/CacheQueryBuilder.JoinOne.Extensions.cs`, `…/JoinManyResolver.cs`, `…/CacheQueryBuilder.JoinMany.Extensions.cs`, `CacheQueryBuilder.cs` (paired core + `AsNonExecutable`).
