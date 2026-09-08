@@ -40,6 +40,7 @@ def main():
     baseline.setdefault("configs", {})
 
     any_regression = False
+    unusable = []
     for config in args.configs:
         cur = load(os.path.join(args.out_dir, config + ".json"))
         cur_metrics = {m["id"]: m for m in cur["metrics"]}
@@ -51,6 +52,23 @@ def main():
             print(f"[bless] {config}: {len(cur['metrics'])} metrics")
             continue
         base_metrics = {m["id"]: m for m in baseline["configs"].get(config, {}).get("metrics", [])}
+
+        # A tripwire that cannot fail is worse than no tripwire, because a green run reads as
+        # coverage. Two ways that happens silently: no baseline at all for this machine class (every
+        # metric prints NEW and nothing regresses), and a metric that vanished from the run (a
+        # benchmark renamed or dropped is simply not compared). Both are hard errors.
+        if not base_metrics:
+            print(f"\n== {config} ({args.machine}) ==")
+            print(f"  NO BASELINE for '{config}' on machine class '{args.machine}'"
+                  f" — nothing to compare against. Seed it with --bless.")
+            unusable.append(f"{config}: no baseline (run --bless to seed it)")
+            continue
+
+        dropped = sorted(set(base_metrics) - set(cur_metrics))
+        if dropped:
+            unusable.append(f"{config}: {len(dropped)} baselined metric(s) missing from the run: "
+                            + ", ".join(dropped))
+
         print(f"\n== {config} ({args.machine}) ==")
         print(f"{'metric':32} {'baseline':>14} {'current':>14} {'delta':>9} {'tol':>6}  status")
         for mid, m in sorted(cur_metrics.items()):
@@ -71,6 +89,13 @@ def main():
         write_rollup(args.baseline_dir)
         print(f"[bless] wrote {base_path}")
         return 0
+
+    if unusable:
+        print("\nComparison is not trustworthy:")
+        for u in unusable:
+            print(f"  - {u}")
+        return 2
+
     return 1 if any_regression else 0
 
 def write_rollup(baseline_dir):
