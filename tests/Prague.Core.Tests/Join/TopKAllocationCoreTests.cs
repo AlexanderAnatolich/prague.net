@@ -60,15 +60,13 @@ public class TopKAllocationCoreTests {
 
 	private static long AllocPerOp(Func<int> run) {
 		// Warm up JIT and pools, then measure.
-		for (var i = 0; i < 5; i++) {
+		for (var i = 0; i < 5; i++)
 			run();
-		}
 
 		var sink = 0L;
 		var before = GC.GetAllocatedBytesForCurrentThread();
-		for (var i = 0; i < 20; i++) {
+		for (var i = 0; i < 20; i++)
 			sink += run();
-		}
 
 		var delta = GC.GetAllocatedBytesForCurrentThread() - before;
 		Assert.That(sink, Is.GreaterThan(0), "queries did not run");

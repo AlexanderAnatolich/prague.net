@@ -52,9 +52,9 @@ internal struct ValueDictionary<TKey, TValue, TKeyComparer> : IDisposable
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
 	public void Add(TKey key, TValue value) {
-		if (Count >= _values.Length) {
+		Debug.Assert(Count < _values.Length, "ValueDictionary capacity exceeded");
+		if (Count >= _values.Length)
 			ThrowCapacityExceeded();
-		}
 
 		Debug.Assert(_metadata != null, "ValueDictionary used after Dispose");
 		var hashCode = GetHashCode(key);
@@ -129,9 +129,9 @@ internal struct ValueDictionary<TKey, TValue, TKeyComparer> : IDisposable
 			slot = (slot + 1) & capacityMask;
 		}
 
-		if (Count >= valuesSpan.Length) {
+		Debug.Assert(Count < valuesSpan.Length, "ValueDictionary capacity exceeded");
+		if (Count >= valuesSpan.Length)
 			ThrowCapacityExceeded();
-		}
 
 		var count = Count;
 		Unsafe.Add(ref keysRef, count) = key;

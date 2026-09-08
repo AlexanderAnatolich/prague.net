@@ -1787,9 +1787,8 @@ public struct CacheQueryBuilderCombined<TDiscriminator, TLeftQuery, TLeftKey, TL
 		// Cheap gates first: negative or unbounded paging keeps the classic core's historical
 		// behavior exactly (bounding is a pure optimization, never a gate), and bailing here skips
 		// the chain walk — which would otherwise box the sorter's comparer for nothing.
-		if (skip < 0 || take < 0 || take == int.MaxValue || (long)skip + take > int.MaxValue) {
+		if (skip < 0 || take < 0 || take == int.MaxValue || (long)skip + take > int.MaxValue)
 			return ExecuteCoreJoined<TJoinResult>(pool, clone, skip, take);
-		}
 
 		var probe = TopKProbeProcessor<TLeftValue>.Create();
 		_resolverChain.Execute(ref probe);
@@ -1797,9 +1796,8 @@ public struct CacheQueryBuilderCombined<TDiscriminator, TLeftQuery, TLeftKey, TL
 		               && probe.SorterInnermost
 		               && probe.LeftComparer is not null
 		               && probe.AllInnerNarrowable;
-		if (!canBound) {
+		if (!canBound)
 			return ExecuteCoreJoined<TJoinResult>(pool, clone, skip, take);
-		}
 
 		var container = new JoinedResultContaier<TLeftKey, TLeftValue, TResolverChain, TJoinResult>(
 			ref _resolverChain, pool, clone, _manyCount, bounded: true);
@@ -1822,9 +1820,8 @@ public struct CacheQueryBuilderCombined<TDiscriminator, TLeftQuery, TLeftKey, TL
 			// predicates) and can throw before ExecuteBase's own finally would have released it.
 			// ValueSet.Dispose is idempotent, so after a legitimate consume this is a no-op.
 			var candidates = _leftQuery.Candidates;
-			if (candidates.IsInitlized) {
+			if (candidates.IsInitlized)
 				candidates.Dispose();
-			}
 		}
 	}
 

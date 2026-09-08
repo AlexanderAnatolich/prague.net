@@ -14,9 +14,8 @@ public class TopKLeakTests {
 	[OneTimeSetUp]
 	public void SetUp() {
 		_cache = new InMemoryDataCache<int, TopKExecuteCoreTests.TkItem>();
-		for (var i = 0; i < 300; i++) {
+		for (var i = 0; i < 300; i++)
 			_cache.AddOrUpdate(i, new TopKExecuteCoreTests.TkItem { Id = i, Order = 300 - i });
-		}
 	}
 
 	[Test]
@@ -38,9 +37,8 @@ public class TopKLeakTests {
 		private int _calls;
 
 		public int Compare(TopKExecuteCoreTests.TkItem? x, TopKExecuteCoreTests.TkItem? y) {
-			if (++_calls > 50) {
+			if (++_calls > 50)
 				throw new InvalidOperationException("boom");
-			}
 
 			return (x?.Order ?? 0).CompareTo(y?.Order ?? 0);
 		}
@@ -105,9 +103,8 @@ public class TopKLeakTests {
 		private int _calls;
 
 		public int Compare(SnAuthor? x, SnAuthor? y) {
-			if (++_calls > 20) {
+			if (++_calls > 20)
 				throw new InvalidOperationException("boom");
-			}
 
 			return (y?.Id ?? 0).CompareTo(x?.Id ?? 0);
 		}

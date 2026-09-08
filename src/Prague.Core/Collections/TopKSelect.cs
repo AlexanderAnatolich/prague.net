@@ -36,9 +36,8 @@ internal static class TopKSelect {
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	internal static void Push<T, TComparer>(T[] buffer, ref int count, ref bool heapified, int k, T item, TComparer comparer)
 		where TComparer : IComparer<T> {
-		if (k <= 0) {
+		if (k <= 0)
 			return;
-		}
 
 		if (count < k) {
 			buffer[count++] = item;
@@ -52,9 +51,8 @@ internal static class TopKSelect {
 
 		// Heap is full — accept only items strictly better (smaller) than the current worst.
 		ref var root = ref MemoryMarshal.GetArrayDataReference(buffer);
-		if (comparer.Compare(item, root) >= 0) {
+		if (comparer.Compare(item, root) >= 0)
 			return;
-		}
 
 		root = item;
 		SiftDown(ref root, 0, count, comparer);
@@ -64,15 +62,13 @@ internal static class TopKSelect {
 	internal static int DrainAscending<T, TComparer>(T[] buffer, ref int count, ref bool heapified, TComparer comparer)
 		where TComparer : IComparer<T> {
 		var n = count;
-		if (n == 0) {
+		if (n == 0)
 			return 0;
-		}
 
 		Debug.Assert(n <= buffer.Length, "kept count exceeds the buffer");
 		ref var root = ref MemoryMarshal.GetArrayDataReference(buffer);
-		if (!heapified) {
+		if (!heapified)
 			BuildMaxHeap(ref root, n, comparer);
-		}
 
 		SortBuiltHeap(ref root, n, comparer);
 		count = 0;
@@ -96,9 +92,8 @@ internal static class TopKSelect {
 	internal static int SelectPage<T, TComparer>(Span<T> values, int skip, int take, TComparer comparer, int depthLimit)
 		where TComparer : IComparer<T> {
 		var length = values.Length;
-		if (skip < 0 || take <= 0 || skip >= length) {
+		if (skip < 0 || take <= 0 || skip >= length)
 			return 0;
-		}
 
 		var page = Math.Min(take, length - skip);
 		ref var first = ref MemoryMarshal.GetReference(values);
@@ -126,9 +121,8 @@ internal static class TopKSelect {
 	/// <summary>Test seam: <paramref name="depthLimit"/> bounds the partitioning depth (0 forces the heapsort fallback).</summary>
 	internal static void SortAscending<T, TComparer>(Span<T> values, TComparer comparer, int depthLimit)
 		where TComparer : IComparer<T> {
-		if (values.Length > 1) {
+		if (values.Length > 1)
 			IntroSort(ref MemoryMarshal.GetReference(values), values.Length, depthLimit, comparer);
-		}
 	}
 
 	// Same budget as the framework introsort: past it, partitioning is assumed adversarial.
@@ -210,17 +204,14 @@ internal static class TopKSelect {
 		var lo = 0;
 		var hi = last;
 		while (lo <= hi) {
-			while (lo <= last && comparer.Compare(Unsafe.Add(ref first, lo), pivot) < 0) {
+			while (lo <= last && comparer.Compare(Unsafe.Add(ref first, lo), pivot) < 0)
 				lo++;
-			}
 
-			while (hi >= 0 && comparer.Compare(Unsafe.Add(ref first, hi), pivot) > 0) {
+			while (hi >= 0 && comparer.Compare(Unsafe.Add(ref first, hi), pivot) > 0)
 				hi--;
-			}
 
-			if (lo > hi) {
+			if (lo > hi)
 				break;
-			}
 
 			Swap(ref Unsafe.Add(ref first, lo), ref Unsafe.Add(ref first, hi));
 			lo++;
@@ -262,9 +253,8 @@ internal static class TopKSelect {
 
 	private static void BuildMaxHeap<T, TComparer>(ref T root, int size, TComparer comparer)
 		where TComparer : IComparer<T> {
-		for (var i = (size >> 1) - 1; i >= 0; i--) {
+		for (var i = (size >> 1) - 1; i >= 0; i--)
 			SiftDown(ref root, i, size, comparer);
-		}
 	}
 
 	private static void SiftDown<T, TComparer>(ref T root, int i, int size, TComparer comparer)
@@ -274,17 +264,14 @@ internal static class TopKSelect {
 			var left = 2 * i + 1;
 			var right = left + 1;
 
-			if (left < size && comparer.Compare(Unsafe.Add(ref root, left), Unsafe.Add(ref root, largest)) > 0) {
+			if (left < size && comparer.Compare(Unsafe.Add(ref root, left), Unsafe.Add(ref root, largest)) > 0)
 				largest = left;
-			}
 
-			if (right < size && comparer.Compare(Unsafe.Add(ref root, right), Unsafe.Add(ref root, largest)) > 0) {
+			if (right < size && comparer.Compare(Unsafe.Add(ref root, right), Unsafe.Add(ref root, largest)) > 0)
 				largest = right;
-			}
 
-			if (largest == i) {
+			if (largest == i)
 				return;
-			}
 
 			Swap(ref Unsafe.Add(ref root, i), ref Unsafe.Add(ref root, largest));
 			i = largest;
@@ -294,9 +281,8 @@ internal static class TopKSelect {
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	private static void SwapIfGreater<T, TComparer>(ref T a, ref T b, TComparer comparer)
 		where TComparer : IComparer<T> {
-		if (comparer.Compare(a, b) > 0) {
+		if (comparer.Compare(a, b) > 0)
 			Swap(ref a, ref b);
-		}
 	}
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]

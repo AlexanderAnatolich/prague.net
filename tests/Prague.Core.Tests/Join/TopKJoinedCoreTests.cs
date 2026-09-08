@@ -27,15 +27,13 @@ public class TopKJoinedCoreTests {
 		_bookAuthorIdx = _books.CacheKeyValueListIndex<int>((_, v) => v.AuthorId);
 		_infoAuthorIdUniqueIdx = _infos.AddKeyValueIndex<int>((_, v) => v.AuthorId);
 
-		for (var i = 1; i <= 6; i++) {
+		for (var i = 1; i <= 6; i++)
 			_authors.AddOrUpdate(i, new SnAuthor { Id = i, Name = $"Author {i}" });
-		}
 
 		// Profiles share the author PK: authors 1..4 have one, 5 and 6 do not
 		// => InnerJoinOne(_profiles) drops 5 and 6 from the result AND from TotalCount.
-		for (var i = 1; i <= 4; i++) {
+		for (var i = 1; i <= 4; i++)
 			_profiles.AddOrUpdate(i, new SnProfile { Id = i, Bio = $"Bio {i}" });
-		}
 
 		// Infos carry a unique FK; author 2 has none => null Right on the outer JoinOne.
 		_infos.AddOrUpdate(701, new SnInfo { Id = 701, AuthorId = 1, Bio = "Info 1" });
@@ -225,9 +223,8 @@ public class TopKJoinedCoreTests {
 			.ExecutePooled(0, 10);
 
 		Assert.That(paged.Count, Is.EqualTo(4));
-		foreach (var row in paged) {
+		foreach (var row in paged)
 			Assert.That(row.Right, Is.Not.Null, $"inner join row {row.Left.Id} must carry a right value");
-		}
 	}
 
 	// ── Cloning ──────────────────────────────────────────────────────────────

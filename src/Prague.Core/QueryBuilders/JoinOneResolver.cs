@@ -430,8 +430,7 @@ public struct JoinOneResolver<TLeftKey, TLeftValue, TRightCache, TRightKey, TRig
 					ValueSet<JoinedKeyPair<TLeftKey, TRightKey>, DefaultKeyComparer<JoinedKeyPair<TLeftKey, TRightKey>>>,
 					ValueSet<JoinedKeyPair<TRightKey, TRightKey>, DefaultKeyComparer<JoinedKeyPair<TRightKey, TRightKey>>>>(ref pairs);
 				keyIndex.IntersectValues(ref candidatesAsRight, ref pairsAsRight, add: true);
-			}
-			else {
+			} else {
 				keyIndex.IntersectValues<TLeftKey, TSelector>(ref candidates, Selector, ref pairs, add: true);
 			}
 
@@ -462,8 +461,7 @@ public struct JoinOneResolver<TLeftKey, TLeftValue, TRightCache, TRightKey, TRig
 			handedOff = true;
 			Unsafe.AsRef(in builder._leftQuery).ExecutePaired(ref container);
 			candidates.IntersectWith(_narrowedValues.Keys);
-		}
-		finally {
+		} finally {
 			if (!handedOff && pairs.IsInitlized)
 				pairs.Dispose();
 		}

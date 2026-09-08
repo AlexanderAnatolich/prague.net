@@ -448,8 +448,7 @@ internal ref struct ExecuteWithAccessorProcessor<TLeftKey, TResult> : IResolverE
 				if (!resolver.Inner) {
 					var a = new <#= accessorName #><TLeftKey, TResult>(ref _results);
 					resolver.UnsafeExecuteWithAccessor(ref a, _cloneOnAdd, _shouldPool, ref _disposer);
-				}
-				else if (_fillInner) {
+				} else if (_fillInner) {
 					// Bounded top-K: the inner resolver already narrowed the candidates, so the page
 					// rows only need their right values fetched (filter not re-applied) and any slot
 					// left empty by a concurrent right-side removal pruned.

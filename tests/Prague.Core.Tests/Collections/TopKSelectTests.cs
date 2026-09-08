@@ -43,9 +43,8 @@ public class TopKSelectTests {
 		var count = 0;
 		var heapified = false;
 		var cmp = new IntAsc();
-		foreach (var item in source) {
+		foreach (var item in source)
 			TopKSelect.Push(buffer, ref count, ref heapified, k, item, cmp);
-		}
 
 		var n = TopKSelect.DrainAscending(buffer, ref count, ref heapified, cmp);
 		return buffer.AsSpan(0, n).ToArray();
@@ -77,9 +76,8 @@ public class TopKSelectTests {
 		var count = 0;
 		var heapified = false;
 		var cmp = Comparer<int>.Create(static (x, y) => y.CompareTo(x));
-		foreach (var item in new[] { 5, 9, 1, 7, 3 }) {
+		foreach (var item in new[] { 5, 9, 1, 7, 3 })
 			TopKSelect.Push(buffer, ref count, ref heapified, 3, item, cmp);
-		}
 
 		var n = TopKSelect.DrainAscending(buffer, ref count, ref heapified, cmp);
 		Assert.That(buffer.AsSpan(0, n).ToArray(), Is.EqualTo(new[] { 9, 7, 5 }));
@@ -106,9 +104,8 @@ public class TopKSelectTests {
 		var count = 0;
 		var heapified = false;
 		var cmp = new IntAsc();
-		foreach (var item in new[] { 4, 2, 9, 1 }) {
+		foreach (var item in new[] { 4, 2, 9, 1 })
 			TopKSelect.Push(buffer, ref count, ref heapified, 3, item, cmp);
-		}
 
 		var n = TopKSelect.DrainAscending(buffer, ref count, ref heapified, cmp);
 		Assert.That(buffer.AsSpan(0, n).ToArray(), Is.EqualTo(new[] { 1, 2, 4 }));
@@ -183,9 +180,8 @@ public class TopKSelectTests {
 				var label = $"{shape} n={length} skip={skip} take={take}";
 				var expectedPage = skip < 0 || take <= 0 || skip >= length ? 0 : Math.Min(take, length - skip);
 				Assert.That(page, Is.EqualTo(expectedPage), label);
-				if (page > 0) {
+				if (page > 0)
 					Assert.That(data.AsSpan(1 + skip, page).ToArray(), Is.EqualTo(sorted.AsSpan(skip, page).ToArray()), label);
-				}
 
 				Assert.That(data[0], Is.EqualTo(int.MinValue), label);
 				Assert.That(data[^1], Is.EqualTo(int.MaxValue), label);

@@ -4,7 +4,8 @@ using Prague.Core.Collections;
 
 // ValueDictionary is fixed-capacity: its working window is exactly the expected count while the rented
 // arrays are usually longer, so an overrun would silently write into pool slack. Both insert paths must
-// fail loudly in every build configuration, not only under Debug.Assert.
+// fail loudly in every build configuration: Debug trips the capacity Debug.Assert, Release the always-on
+// guard. Same message either way, which is what these tests pin.
 [TestFixture]
 public class ValueDictionaryCapacityTests {
 	[Test]
@@ -14,7 +15,7 @@ public class ValueDictionaryCapacityTests {
 			dict.Add(1, "a");
 			dict.Add(2, "b");
 
-			Assert.Throws<InvalidOperationException>(() => dict.Add(3, "c"));
+			AssertCapacityGuardTrips(() => dict.Add(3, "c"));
 
 			Assert.That(dict.Count, Is.EqualTo(2));
 			Assert.That(dict.TryGetValue(3, out _), Is.False);
@@ -34,7 +35,7 @@ public class ValueDictionaryCapacityTests {
 			Assert.That(dict.GetValueRefOrAddDefault(2, out var exists), Is.EqualTo("b"));
 			Assert.That(exists, Is.True);
 
-			Assert.Throws<InvalidOperationException>(() => { dict.GetValueRefOrAddDefault(3, out _); });
+			AssertCapacityGuardTrips(() => { dict.GetValueRefOrAddDefault(3, out _); });
 
 			Assert.That(dict.Count, Is.EqualTo(2));
 		} finally {
@@ -57,4 +58,7 @@ public class ValueDictionaryCapacityTests {
 			dict.Dispose(withValues: true);
 		}
 	}
+
+	private static void AssertCapacityGuardTrips(TestDelegate insert) =>
+		Assert.That(Assert.Catch(insert)?.Message, Does.Contain("ValueDictionary capacity exceeded"));
 }

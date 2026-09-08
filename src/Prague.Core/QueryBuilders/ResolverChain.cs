@@ -386,18 +386,16 @@ internal ref struct TopKSimpleResultContainer<TKey, TValue>
 	}
 
 	public void Init(int maxCount) {
-		if (_heap is not null) {
+		if (_heap is not null)
 			return;
-		}
 
 		// A small prefix is cheapest through the heap. Near the full result size, collect every row and
 		// select the page in place (introselect + page sort): fewer compares than a heap of size K or a
 		// full sort, for a buffer sized to the result instead of to K. Decided once, with the rent.
 		_collectAll = _k > 0 && (long)_k * 4 >= maxCount;
 		var capacity = _collectAll ? maxCount : Math.Min(_k, maxCount);
-		if (capacity > 0) {
+		if (capacity > 0)
 			_heap = PragueArrayPool<(TValue, int)>.Pool.Rent(capacity);
-		}
 	}
 
 	public void Seal(int actualCount) => _totalCount = actualCount;
@@ -417,9 +415,8 @@ internal ref struct TopKSimpleResultContainer<TKey, TValue>
 	}
 
 	public QueryResults<TValue> BuildResults() {
-		if (_totalCount == 0 || _skip > _totalCount) {
+		if (_totalCount == 0 || _skip > _totalCount)
 			return QueryResults<TValue>.EmptyWithTotalCount(_totalCount);
-		}
 
 		var page = 0;
 		if (_heap is not null) {
@@ -432,19 +429,16 @@ internal ref struct TopKSimpleResultContainer<TKey, TValue>
 			}
 		}
 
-		if (page == 0) {
+		if (page == 0)
 			return QueryResults<TValue>.EmptyWithTotalCount(_totalCount);
-		}
 
 		var results = new QueryResults<TValue>(page, _shouldPool);
-		for (var i = 0; i < page; i++) {
+		for (var i = 0; i < page; i++)
 			results.UnsafeAdd(_heap![_skip + i].Left);
-		}
 
 		results.UnsafeSetTotal(_totalCount);
-		if (!_clone) {
+		if (!_clone)
 			return results;
-		}
 
 		try {
 			return results.CloneInPlace();
@@ -531,16 +525,14 @@ internal ref struct TopKJoinedBaseContainer<TKey, TValue>
 	}
 
 	public void Init(int maxCount) {
-		if (_heap is not null) {
+		if (_heap is not null)
 			return;
-		}
 
 		// Same plan choice as TopKSimpleResultContainer: heap for a small prefix, collect + select otherwise.
 		_collectAll = _k > 0 && (long)_k * 4 >= maxCount;
 		var capacity = _collectAll ? maxCount : Math.Min(_k, maxCount);
-		if (capacity > 0) {
+		if (capacity > 0)
 			_heap = PragueArrayPool<(TKey, TValue, int)>.Pool.Rent(capacity);
-		}
 	}
 
 	public void Seal(int actualCount) => _totalCount = actualCount;
@@ -565,13 +557,11 @@ internal ref struct TopKJoinedBaseContainer<TKey, TValue>
 	///   materializes <c>Buffer[skip .. result)</c>.
 	/// </summary>
 	internal int Drain() {
-		if (_heap is null) {
+		if (_heap is null)
 			return 0;
-		}
 
-		if (_collectAll) {
+		if (_collectAll)
 			return _skip + TopKSelect.SelectPage(_heap.AsSpan(0, _heapCount), _skip, _take, _comparer);
-		}
 
 		return TopKSelect.DrainAscending(_heap, ref _heapCount, ref _heapified, _comparer);
 	}
@@ -608,16 +598,14 @@ internal ref struct TopKProbeProcessor<TLeftValue> : IResolverExecutor {
 		if (TResolver.IsSorter) {
 			SorterCount++;
 			SorterInnermost = position == 0;
-			if (resolver.TryGetLeftComparer<TLeftValue>(out var cmp)) {
+			if (resolver.TryGetLeftComparer<TLeftValue>(out var cmp))
 				LeftComparer = cmp;
-			}
 
 			return;
 		}
 
-		if (resolver.Inner && !TResolver.SupportsNarrowOnly) {
+		if (resolver.Inner && !TResolver.SupportsNarrowOnly)
 			AllInnerNarrowable = false;
-		}
 	}
 }
 
@@ -636,9 +624,8 @@ internal ref struct NarrowIndexedInnerProcessor<TExecutor> : IResolverExecutor
 	}
 
 	public void Process<TResolver>(int position, ref TResolver resolver) where TResolver : struct, IJoinResolver {
-		if (!resolver.Inner) {
+		if (!resolver.Inner)
 			return;
-		}
 
 		resolver.UnsafeNarrowIndexedInner(ref _leftQuery);
 	}
