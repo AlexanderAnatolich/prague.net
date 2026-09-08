@@ -16,6 +16,7 @@ public class ClassicVsBoundedDifferentialTests {
 	private const int TieCount = 64;
 
 	private InMemoryDataCache<int, SnAuthor> _many = null!;
+	private InMemoryDataCache<int, SnProfile> _manyProfiles = null!;
 
 	[SetUp]
 	public void SetUp() {
@@ -33,6 +34,10 @@ public class ClassicVsBoundedDifferentialTests {
 
 		for (var i = 1; i <= TieCount; i++)
 			_many.AddOrUpdate(i, new SnAuthor { Id = i, Name = $"Author {i}" });
+
+		_manyProfiles = new InMemoryDataCache<int, SnProfile>();
+		for (var i = 1; i <= TieCount; i++)
+			_manyProfiles.AddOrUpdate(i, new SnProfile { Id = i, Bio = $"Bio {i}" });
 	}
 
 	// Index-seeded candidates skip the seed-time filter pass, so the classic joined-inner
@@ -108,6 +113,22 @@ public class ClassicVsBoundedDifferentialTests {
 
 		Assert.That(bounded.TotalCount, Is.EqualTo(classic.Count));
 		Assert.That(bounded.Select(a => a.Id).ToArray(), Is.EqualTo(expected));
+	}
+
+	// The joined classic path sorts through ValueDictionary.SortAndCrop rather than
+	// QueryResults.Sort, so it needs the same tiebreak or the joined terminals diverge the same way.
+	[TestCase(0, TieCount)]
+	[TestCase(0, 8)]
+	[TestCase(8, 8)]
+	[TestCase(TieCount - 4, 4)]
+	public void JoinedTieOrder_AgreesBetweenClassicAndBounded(int skip, int take) {
+		using var classic = _many.Query().Sort(new AuthorByParity()).InnerJoinOne(_manyProfiles).ExecutePooled();
+		var expected = classic.Select(r => r.Left.Id).Skip(skip).Take(take).ToArray();
+
+		using var bounded = _many.Query().Sort(new AuthorByParity()).InnerJoinOne(_manyProfiles).ExecutePooled(skip, take);
+
+		Assert.That(bounded.TotalCount, Is.EqualTo(classic.Count));
+		Assert.That(bounded.Select(r => r.Left.Id).ToArray(), Is.EqualTo(expected));
 	}
 
 	// Consecutive bounded pages must partition the result exactly — no duplicates, no gaps —
