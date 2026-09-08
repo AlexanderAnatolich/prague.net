@@ -11,11 +11,16 @@ using NUnit.Framework;
 ///   The right-side list index is mutated by a live writer while a JoinMany query walks it.
 ///   Each left's result slot is a fixed partition of one shared buffer, so the number of rights
 ///   the resolver reserves for a left must bound the number it later adds — even when the bucket
-///   changes between the two reads. A violation surfaces as
-///   <see cref="IndexOutOfRangeException"/> ("UnsafeAdd overflow") from the real container.
+///   changes between the two reads. A violation shows up as a dropped row: counted in
+///   <see cref="QueryResultsDiagnostics.DroppedRows"/>, flagged on the slot's
+///   <see cref="QueryResults{T}.Truncated"/>, and thrown from the DEBUG-only assert.
 /// </summary>
 [TestFixture]
+// Reads QueryResultsDiagnostics, which is process-global.
+[NonParallelizable]
 public class JoinManyRightListIndexConcurrentMutationTests {
+	private const int BooksPerAuthor = 64;
+
 	private static TimeSpan Duration => TimeSpan.FromSeconds(2);
 
 	private InMemoryDataCache<int, MnAuthor> _authorCache = null!;
@@ -24,6 +29,7 @@ public class JoinManyRightListIndexConcurrentMutationTests {
 
 	[SetUp]
 	public void SetUp() {
+		QueryResultsDiagnostics.ResetDroppedRows();
 		_authorCache = new InMemoryDataCache<int, MnAuthor>();
 		_bookCache = new InMemoryDataCache<int, MnBook>();
 		_authorIdIndex = _bookCache.CacheKeyValueListIndex<int>((_, v) => v.AuthorId);
@@ -59,11 +65,10 @@ public class JoinManyRightListIndexConcurrentMutationTests {
 	[Test]
 	public void JoinMany_LiveRightWrites_NeverOverflowSlot() {
 		const int authors = 2;
-		const int booksPerAuthor = 64;
 		var next = new int[authors + 1];
 		for (var a = 1; a <= authors; a++) {
 			_authorCache.AddOrUpdate(a, new MnAuthor { Id = a, Name = "Author" + a });
-			for (var b = 0; b < booksPerAuthor; b++) {
+			for (var b = 0; b < BooksPerAuthor; b++) {
 				var id = BookId(a, next[a]++);
 				_bookCache.AddOrUpdate(id, new MnBook { Id = id, AuthorId = a, Title = "Book" });
 			}
@@ -78,7 +83,7 @@ public class JoinManyRightListIndexConcurrentMutationTests {
 				for (var a = 1; a <= authors; a++) {
 					var added = BookId(a, next[a]++);
 					_bookCache.AddOrUpdate(added, new MnBook { Id = added, AuthorId = a, Title = "Book" });
-					_bookCache.Remove(BookId(a, next[a] - 1 - booksPerAuthor));
+					_bookCache.Remove(BookId(a, next[a] - 1 - BooksPerAuthor));
 				}
 
 				rounds++;
@@ -86,6 +91,7 @@ public class JoinManyRightListIndexConcurrentMutationTests {
 		});
 
 		Exception? failure = null;
+		string? inconsistency = null;
 		var queries = 0;
 		writer.Start();
 		try {
@@ -94,12 +100,22 @@ public class JoinManyRightListIndexConcurrentMutationTests {
 				try {
 					if ((queries & 1) == 0) {
 						using var results = _authorCache.Query().JoinMany(_bookCache, _authorIdIndex).ExecutePooled();
+						foreach (var row in results)
+							inconsistency ??= Inspect(row.Left.Id, row.Right);
 					} else {
 						using var results = _authorCache.Query().InnerJoinMany(_bookCache, _authorIdIndex).ExecutePooled();
+						foreach (var row in results)
+							inconsistency ??= Inspect(row.Left.Id, row.Right);
 					}
 
+					if (inconsistency is not null)
+						break;
+
 					queries++;
-				} catch (IndexOutOfRangeException e) {
+				} catch (Exception e) {
+					// Not typed: an under-sized slot throws IndexOutOfRangeException before the
+					// never-overflow change and InvalidOperationException (the DEBUG-only assert) after
+					// it. The invariant is that neither happens.
 					failure = e;
 					break;
 				}
@@ -109,7 +125,32 @@ public class JoinManyRightListIndexConcurrentMutationTests {
 			writer.Join();
 		}
 
-		Assert.That(failure, Is.Null, $"slot overflow after {queries} queries / {rounds} writer rounds: {failure}");
+		Assert.Multiple(() => {
+			Assert.That(failure, Is.Null, $"query failed after {queries} queries / {rounds} writer rounds: {failure}");
+			Assert.That(inconsistency, Is.Null, $"after {queries} queries / {rounds} writer rounds");
+			Assert.That(QueryResultsDiagnostics.DroppedRows, Is.Zero,
+				$"a slot was handed more rows than it reserved after {queries} queries / {rounds} writer rounds");
+		});
+	}
+
+	// A crash is not the only way to get slot sizing wrong: an over-sized slot silently under-fills,
+	// and a mis-partitioned shared buffer hands one left another left's rows. Both are checked here,
+	// so the stress test measures the join and not just the absence of an exception.
+	private static string? Inspect(int authorId, QueryResults<MnBook> books) {
+		if (books.Truncated)
+			return $"author {authorId} got a truncated slot";
+
+		// books.Count is deliberately not asserted. A query promises no consistency (see
+		// context/joins.md) and under this writer a left can legitimately come back with anything
+		// from 0 to BooksPerAuthor+1 rights — a bucket that grows mid-walk recycles the Tables the
+		// enumerator is holding, and GetValuesUnsafe does not pin the ReaderGate. What must hold is
+		// that whatever arrives in a slot belongs to that slot: the shared buffer is partitioned
+		// per-left, so a foreign right means the sizing put the partitions in the wrong place.
+		foreach (var book in books)
+			if (book.AuthorId != authorId)
+				return $"author {authorId} got book {book.Id} belonging to author {book.AuthorId}";
+
+		return null;
 	}
 
 	private static int BookId(int authorId, int ordinal) => authorId * 1_000_000 + ordinal;
@@ -127,8 +168,11 @@ public class JoinManyRightListIndexConcurrentMutationTests {
 
 		public RecordingContainer(SlotLog log) => _log = log;
 
+		// Assigns, like the real QueryResults.SetPendingCapacity — accumulating here would model the
+		// container's _totalCount instead of the slot, and a repeated Init would then be scored
+		// against the sum while the real slot holds only the last value.
 		public void Init(int key, int maxCount) {
-			_log.Capacity[key] = _log.Capacity.GetValueOrDefault(key) + maxCount;
+			_log.Capacity[key] = maxCount;
 			_log.OnInit?.Invoke(key);
 		}
 
