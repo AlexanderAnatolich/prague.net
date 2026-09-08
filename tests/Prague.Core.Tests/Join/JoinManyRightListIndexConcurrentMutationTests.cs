@@ -141,11 +141,13 @@ public class JoinManyRightListIndexConcurrentMutationTests {
 			return $"author {authorId} got a truncated slot";
 
 		// books.Count is deliberately not asserted. A query promises no consistency (see
-		// context/joins.md) and under this writer a left can legitimately come back with anything
-		// from 0 to BooksPerAuthor+1 rights — a bucket that grows mid-walk recycles the Tables the
-		// enumerator is holding, and GetValuesUnsafe does not pin the ReaderGate. What must hold is
-		// that whatever arrives in a slot belongs to that slot: the shared buffer is partitioned
-		// per-left, so a foreign right means the sizing put the partitions in the wrong place.
+		// context/joins.md), and the loss here is structural rather than a race on the bucket: the
+		// walk records right keys, then ExecutePaired re-resolves each one against the right cache,
+		// so every right the writer removed in between is gone by the time the rows are delivered.
+		// Measured under this writer, slots come back with a mode of 52 of 64 and about 1 in 16,000
+		// comes back empty. What must hold is that whatever arrives in a slot belongs to that slot:
+		// the shared buffer is partitioned per-left, so a foreign right means the sizing put the
+		// partitions in the wrong place.
 		foreach (var book in books)
 			if (book.AuthorId != authorId)
 				return $"author {authorId} got book {book.Id} belonging to author {book.AuthorId}";
