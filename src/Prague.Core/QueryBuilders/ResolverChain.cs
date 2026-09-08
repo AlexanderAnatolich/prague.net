@@ -33,7 +33,8 @@ public interface IResolvers {
 	/// Callers must have probed that the chain has exactly one sorter and that it orders by the left
 	/// value.
 	/// </summary>
-	int CompareLeftValues<TLeft>(TLeft a, TLeft b);
+	int CompareLeftValues<TLeft>(TLeft a, TLeft b)
+		=> throw new InvalidOperationException("Resolver chain has no sorter");
 }
 
 public interface IResolverExecutor {
