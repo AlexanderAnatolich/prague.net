@@ -1791,6 +1791,7 @@ public struct CacheQueryBuilderCombined<TDiscriminator, TLeftQuery, TLeftKey, TL
 			return _leftQuery.CountBase();
 		} finally {
 			container.Dispose();
+			ReleaseUnconsumedCandidates();
 		}
 	}
 
@@ -1809,6 +1810,7 @@ public struct CacheQueryBuilderCombined<TDiscriminator, TLeftQuery, TLeftKey, TL
 			return container.BuildResults();
 		} finally {
 			container.Dispose();
+			ReleaseUnconsumedCandidates();
 		}
 	}
 
@@ -1860,21 +1862,27 @@ public struct CacheQueryBuilderCombined<TDiscriminator, TLeftQuery, TLeftKey, TL
 					container.Dispose();
 				} finally {
 					try {
+						// Inner resolvers keep the right values they validated in the narrow pass until
+						// the fill; return those maps whether or not the fill ran.
 						var release = new ReleaseNarrowedInnerProcessor();
 						_resolverChain.Execute(ref release);
 					} finally {
-						// A candidate set auto-populated by PrepareIndexedInnerBounded that the base
-						// execution never consumed is still ours — the narrow pass runs user code (join
-						// filters, Where predicates) and can throw before ExecuteBase's own finally
-						// would have released it. ValueSet.Dispose is idempotent, so after a legitimate
-						// consume this is a no-op.
-						var candidates = _leftQuery.Candidates;
-						if (candidates.IsInitlized)
-							candidates.Dispose();
+						ReleaseUnconsumedCandidates();
 					}
 				}
 			}
 		}
+	}
+
+	// A candidate set the indexed-inner phase seeded or auto-populated is owned by this builder
+	// until the base execution consumes it. Base execution disposes candidates BY REF through this
+	// same storage, so after a legitimate consume the arrays are already null and this is a no-op
+	// (ValueSet.Dispose is idempotent). When a resolver throws before base execution — a user join
+	// filter, typically — the arrays are still rented and this returns them exactly once.
+	private void ReleaseUnconsumedCandidates() {
+		ref var candidates = ref _leftQuery.Candidates;
+		if (candidates.IsInitlized)
+			candidates.Dispose();
 	}
 
 	// Nested-join seam: run the full joined pipeline but hand back the keyed result map
@@ -1903,16 +1911,7 @@ public struct CacheQueryBuilderCombined<TDiscriminator, TLeftQuery, TLeftKey, TL
 			// ExtractKeyedResults defaults the container's dict/disposer, so on success this
 			// is a no-op; on a throw it returns everything the container still owns.
 			container.Dispose();
-			// A seeded/auto-populated candidate set the base execution never consumed is still
-			// ours. Base execution disposes candidates BY REF through this same storage
-			// (_leftQuery.Candidates is a ref to the leaf's field — verified Task 3 Step 1), so
-			// after a legitimate consume the field's arrays are already null and this Dispose is a
-			// no-op (ValueSet.Dispose is idempotent: ReturnArrays nulls + null-guards each array).
-			// On a throw before base execution the arrays are still rented — this returns them
-			// exactly once. IsInitlized only gates the never-seeded (default) case.
-			var candidates = _leftQuery.Candidates;
-			if (candidates.IsInitlized)
-				candidates.Dispose();
+			ReleaseUnconsumedCandidates();
 		}
 	}
 

@@ -175,6 +175,29 @@ public class QueryJoinLeakTests {
 			}
 		});
 
+	// Indexed-inner path with an auto-populated candidate set large enough to be pool-rented: a
+	// filter throwing inside UnsafeExecuteIndexedInner must not strand the candidates the
+	// PrepareIndexedInner phase rented.
+	[Test]
+	public void InnerJoinManyPooled_ThrowingFilter_DoesNotLeakCandidates() =>
+		LeakAssert.Balanced(() => {
+			try {
+				_left.Query().InnerJoinMany(_rightMany, _manyIndex, static _ => throw new InvalidOperationException("hostile filter")).ExecutePooled();
+				Assert.Fail("filter must throw");
+			} catch (InvalidOperationException) {
+			}
+		});
+
+	[Test]
+	public void InnerJoinMany_ThrowingFilter_Count_DoesNotLeakCandidates() =>
+		LeakAssert.Balanced(() => {
+			try {
+				_left.Query().InnerJoinMany(_rightMany, _manyIndex, static _ => throw new InvalidOperationException("hostile filter")).Count();
+				Assert.Fail("filter must throw");
+			} catch (InvalidOperationException) {
+			}
+		});
+
 	[Test]
 	public void JoinManyPooled_DoubleDispose_NoDoubleReturnOfChildBuffers() =>
 		LeakAssert.Balanced(() => {
