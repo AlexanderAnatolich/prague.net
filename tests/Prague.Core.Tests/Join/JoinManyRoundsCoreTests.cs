@@ -81,6 +81,53 @@ public class JoinManyRoundsTests {
 		}
 	}
 
+	// A right shared by m lefts needs m rounds. The unhinted Add must find the first free round with a
+	// binary search over the rounds and hash the pair once for all of its probes: 64 pairs cost 64
+	// hashes, not the 64 * 65 / 2 = 2080 a linear first-fit restarting at round 0 pays.
+	[Test]
+	public void Add_SameRightKeyManyTimes_HashesOncePerPair_AndLandsInConsecutiveRounds() {
+		var rounds = new JoinManyRounds<int, ProbeKey>(4);
+		var hashes = 0;
+		ProbeKey.Arm(_ => hashes++);
+		try {
+			for (var left = 1; left <= 64; left++) {
+				Assert.That(rounds.Add(new JoinedKeyPair<int, ProbeKey>(left, new ProbeKey(7))), Is.EqualTo(left - 1));
+			}
+
+			Assert.That(rounds.Count, Is.EqualTo(64));
+			Assert.That(hashes, Is.EqualTo(64), "one hash per pair, however many rounds already hold the key");
+		} finally {
+			ProbeKey.Disarm();
+			rounds.Dispose();
+		}
+	}
+
+	// Hinted adds may leave a key in a later round without holding it in every earlier one. An unhinted
+	// Add on such an instance still lands in a round free of the key and never adds a duplicate.
+	[Test]
+	public void Add_AfterHintedAddsBrokeThePrefix_StillLandsInARoundWithoutTheKey() {
+		var rounds = new JoinManyRounds<int, int>(4);
+		try {
+			Assert.That(rounds.Add(new JoinedKeyPair<int, int>(1, 100)), Is.EqualTo(0));
+			Assert.That(rounds.Add(new JoinedKeyPair<int, int>(1, 200), 1), Is.EqualTo(1), "hinted past round 0: key 200 sits in round 1 only");
+
+			var landed = rounds.Add(new JoinedKeyPair<int, int>(2, 200));
+
+			Assert.That(landed, Is.Not.EqualTo(1));
+			Assert.That(rounds[landed].Contains(new JoinedKeyPair<int, int>(2, 200)), Is.True);
+			var holders = 0;
+			for (var i = 0; i < rounds.Count; i++) {
+				if (rounds[i].Contains(new JoinedKeyPair<int, int>(0, 200))) {
+					holders++;
+				}
+			}
+
+			Assert.That(holders, Is.EqualTo(2), "each round holds the key at most once");
+		} finally {
+			rounds.Dispose();
+		}
+	}
+
 	// Ten lefts on one right key: the extra-rounds array is rented on the first collision and grows
 	// by rent-copy-return; every set must be reachable afterwards and Dispose must return it all.
 	[Test]

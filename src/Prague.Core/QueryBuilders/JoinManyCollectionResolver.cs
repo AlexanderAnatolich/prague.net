@@ -112,11 +112,12 @@ public struct JoinManyCollectionResolver<TLeftKey, TLeftValue, TRightCache, TRig
 	}
 
 	/// <summary>
-	/// Enumerates <paramref name="bucket"/> once, first-fitting every (left, right) pair into
-	/// <paramref name="rounds"/>; returns the number of pairs recorded — the exact capacity the
-	/// left's slot must reserve. Right multiplicities across lefts are small for collection FKs,
-	/// so first-fit always starts at round 0. A right the enumerator yields twice (removed and
-	/// re-added under the walk) is recorded twice.
+	/// Enumerates <paramref name="bucket"/> once, placing every (left, right) pair into the earliest
+	/// round of <paramref name="rounds"/> free of its right key; returns the number of pairs recorded —
+	/// the exact capacity the left's slot must reserve. No per-right bookkeeping is needed: the rounds
+	/// binary-search the free round (one hash per pair), so an owner shared by thousands of elements
+	/// stays O(pairs log rounds) instead of quadratic. A right the enumerator yields twice (removed
+	/// and re-added under the walk) is recorded twice.
 	/// </summary>
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	private static int RecordPairs(ref JoinManyRounds<TLeftKey, TRightKey> rounds, TLeftKey leftKey,

@@ -37,11 +37,13 @@ public class JoinManyLeftSymCollectionBenchmarks {
 	private static readonly int[] GroupSizes = { 1, 8, 64 };
 	private static readonly int[] RightsPerGroupSizes = { 8, 64 };
 	private static readonly int[] ElementsPerOwnerSizes = { 1, 3, 8 };
+	private static readonly int[] OneOwnerElementSizes = { 256, 4096 };
 
 	private LeftSymSet[] _leftSymSets = null!;
 	private CollectionSet[] _collectionSets = null!;
 	private LeftSymSet _leftSymLarge = null!;
 	private CollectionSet _collectionLarge = null!;
+	private CollectionSet[] _oneOwnerSets = null!;
 
 	[GlobalSetup]
 	public void Setup() {
@@ -59,6 +61,11 @@ public class JoinManyLeftSymCollectionBenchmarks {
 
 		_leftSymLarge = BuildLeftSym(LargeGroups, 8, 64);
 		_collectionLarge = BuildCollection(LargeOwners, 8);
+
+		_oneOwnerSets = new CollectionSet[OneOwnerElementSizes.Length];
+		for (var ei = 0; ei < OneOwnerElementSizes.Length; ei++) {
+			_oneOwnerSets[ei] = BuildOneOwner(OneOwnerElementSizes[ei]);
+		}
 	}
 
 	// ── Left-symmetric: outer, pooled ─────────────────────────────────────────
@@ -148,6 +155,18 @@ public class JoinManyLeftSymCollectionBenchmarks {
 		return r.Count;
 	}
 
+	// ── Collection: one owner shared by every element ─────────────────────────
+	//    Every pair carries the same right key, so the rounds engine needs one round per element: the
+	//    maximal-multiplicity shape where a linear first-fit restarting at round 0 went quadratic.
+	[Benchmark]
+	[Arguments(256)]
+	[Arguments(4096)]
+	public int Collection_Outer_Pooled_OneOwner(int elements) {
+		var set = _oneOwnerSets[IndexOf(OneOwnerElementSizes, elements)];
+		using var r = set.Elements.Query().JoinManyCollection(set.Owners, set.OwnerElementsIdx).ExecutePooled();
+		return r.Count;
+	}
+
 	// ── Dataset selection ─────────────────────────────────────────────────────
 
 	private LeftSymSet LeftSym(int groupSize, int rightsPerGroup) =>
@@ -186,6 +205,19 @@ public class JoinManyLeftSymCollectionBenchmarks {
 			set.Rights.AddOrUpdate(id, new BmLsRight { Id = id, Group = j % groups, Flag = random.Next(2) == 0 });
 		}
 
+		return set;
+	}
+
+	// One owner referencing every element: every (element, owner) pair shares the right key.
+	private static CollectionSet BuildOneOwner(int elements) {
+		var set = new CollectionSet();
+		var ids = new List<int>(elements);
+		for (var e = 1; e <= elements; e++) {
+			set.Elements.AddOrUpdate(e, new BmCoElement { Id = e });
+			ids.Add(e);
+		}
+
+		set.Owners.AddOrUpdate(1, new BmCoOwner { Id = 1, ElementIds = ids });
 		return set;
 	}
 

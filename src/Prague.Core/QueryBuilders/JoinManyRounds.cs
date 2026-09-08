@@ -66,9 +66,41 @@ internal ref struct JoinManyRounds<TLeftKey, TRightKey>
 		}
 	}
 
-	/// <summary>First-fits <paramref name="pair"/> starting at round 0; returns the round it landed in.</summary>
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public int Add(JoinedKeyPair<TLeftKey, TRightKey> pair) => Add(pair, 0);
+	/// <summary>
+	/// Places <paramref name="pair"/> in the earliest round whose set does not hold its right key and
+	/// returns that round. Every pair of a key placed this way lands in the first free round, so the
+	/// rounds holding a key always form a prefix [0, k): the search is a binary search over the rounds,
+	/// O(log rounds) membership probes with the pair hashed once for all of them. A right shared by m
+	/// lefts therefore costs O(m log m) instead of the m²/2 rejected probes of a linear first-fit that
+	/// restarts at round 0. Hinted adds on the same instance can break the prefix; the tail loop then
+	/// still yields a round without the key, just not necessarily the earliest.
+	/// </summary>
+	public int Add(JoinedKeyPair<TLeftKey, TRightKey> pair) {
+		// Every round shares the comparer, so round 0's hash is every round's hash.
+		var hashCode = _round0.HashOf(pair);
+		var lo = 0;
+		var hi = _count;
+		while (lo < hi) {
+			var mid = (lo + hi) >> 1;
+			if (this[mid].Contains(pair, hashCode)) {
+				lo = mid + 1;
+			} else {
+				hi = mid;
+			}
+		}
+
+		while (true) {
+			if (lo == _count) {
+				AddRound();
+			}
+
+			if (this[lo].Add(pair, hashCode)) {
+				return lo;
+			}
+
+			lo++;
+		}
+	}
 
 	/// <summary>
 	/// First-fits <paramref name="pair"/> into the earliest round at or after

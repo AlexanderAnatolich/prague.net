@@ -133,6 +133,25 @@ internal struct ValueSet<T, TKeyComparer> : IDisposable
 		return AddIfNotPresent(item);
 	}
 
+	/// <summary>
+	///   Hash of <paramref name="item"/> as this set buckets it. Sets sharing <typeparamref name="TKeyComparer"/>
+	///   bucket identically, so a caller probing many of them for one item hashes it once here and passes the
+	///   result to <see cref="Add(T, int)"/> / <see cref="Contains(T, int)"/>.
+	/// </summary>
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	internal int HashOf(T item) => InternalGetHashCode(item);
+
+	/// <summary>Adds with a hash obtained from <see cref="HashOf"/>; false when an equal item is already present.</summary>
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	internal bool Add(T item, int hashCode) {
+		Debug.Assert(!IsInitlized || _size > 0, "ValueSet used after Dispose");
+		return AddIfNotPresent(item, hashCode);
+	}
+
+	/// <summary>Membership test with a hash obtained from <see cref="HashOf"/>.</summary>
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	internal bool Contains(T item, int hashCode) => InternalIndexOf(item, hashCode) >= 0;
+
 	[MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
 	public bool Contains(T item) {
 		var hashCode = InternalGetHashCode(item);

@@ -191,7 +191,10 @@ internal struct JoinedKeyPair<TJoinedKey, TKey> : IEquatable<JoinedKeyPair<TJoin
 		Key = key;
 	}
 
-	public bool Equals(JoinedKeyPair<TJoinedKey, TKey> other) => Key.Equals(other.Key);
+	// TKey is only constrained to notnull, so Key.Equals(other.Key) would bind to object.Equals and box
+	// a value-type key on every call. EqualityComparer<TKey>.Default is a JIT intrinsic: a direct call
+	// for IEquatable<TKey> value types, the cached singleton for reference types — no boxing either way.
+	public bool Equals(JoinedKeyPair<TJoinedKey, TKey> other) => EqualityComparer<TKey>.Default.Equals(Key, other.Key);
 
 	public override bool Equals([NotNullWhen(true)] object? obj) =>
 		obj is JoinedKeyPair<TJoinedKey, TKey> other && Equals(other);

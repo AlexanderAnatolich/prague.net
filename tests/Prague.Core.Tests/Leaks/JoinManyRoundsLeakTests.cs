@@ -269,9 +269,10 @@ public class JoinManyRoundsLeakTests {
 	// sixth sharing left opens round 5 — growing the extra-rounds array — at pair 301.
 	private const int LeftSymWalkThrowAt = 5 * SharedRights + 30;
 
-	// The collection resolver has no hint: the j-th sharing left probes j + 1 rounds per pair, so
-	// five lefts cost 60 x 15 = 900 hashes and the sixth opens round 5 on its first pair.
-	private const int CollectionWalkThrowAt = 15 * SharedRights + 100;
+	// The collection resolver has no hint, but its unhinted Add binary-searches the rounds with the
+	// pair hashed once, so it also hashes one right per pair: five lefts cost 300 hashes and the
+	// sixth opens round 5 — growing the extra-rounds array — at pair 301, like LeftSym.
+	private const int CollectionWalkThrowAt = 5 * SharedRights + 30;
 
 	[Test]
 	public void JoinManyLeftSymPooled_RightKeyHashThrowsMidWalk_DoesNotLeak() =>
