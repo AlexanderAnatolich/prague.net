@@ -28,7 +28,7 @@ public class CoreSortBenchmarks {
 	private sealed class Config : ManualConfig {
 		public Config() => AddJob(Job.Default
 			.WithToolchain(InProcessNoEmitToolchain.Instance)
-			.WithWarmupCount(1).WithIterationCount(5));
+			.WithWarmupCount(2).WithIterationCount(15));
 	}
 
 	// Struct comparers so the sort devirtualises per closed generic, matching how callers are meant
