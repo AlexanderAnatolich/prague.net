@@ -48,7 +48,15 @@ internal static class BdnResultExport {
 		Console.WriteLine($"[baseline] wrote {outPath} ({metrics.Count} metrics)");
 	}
 
-	private static bool SkipAllocMetric(string method) => method == "SortTiedJoined";
+	// Joined shapes measure 224 B and 24 B on consecutive identical runs, the way
+	// query.joinMany.alloc flips between 64 B and ~268 B. SortBoundedFullPage allocates a fraction of
+	// a byte per op, which BDN rounds to 0 or 1 from run to run — gated against a zero baseline, that
+	// reads as an infinite regression. Neither is a number worth failing a build over; their p50s are
+	// stable to ~1%.
+	private static bool SkipAllocMetric(string method)
+		=> method is "SortTiedJoined" or "SortTiedJoinedBoundedPage"
+			or "SortTiedLeftThenJoinClassic" or "SortTiedLeftThenJoinBounded"
+			or "SortBoundedFullPage";
 
 	private static string MapQueryType(string method) => method switch {
 		"UniqueLookup" => "uniqueLookup",
@@ -61,6 +69,9 @@ internal static class BdnResultExport {
 		"SortTiedJoined" => "sortTiedJoined",
 		"SortBoundedPage" => "sortBoundedPage",
 		"SortBoundedFullPage" => "sortBoundedFullPage",
+		"SortTiedJoinedBoundedPage" => "sortTiedJoinedBoundedPage",
+		"SortTiedLeftThenJoinClassic" => "sortTiedLeftThenJoinClassic",
+		"SortTiedLeftThenJoinBounded" => "sortTiedLeftThenJoinBounded",
 		_ => method,
 	};
 }
