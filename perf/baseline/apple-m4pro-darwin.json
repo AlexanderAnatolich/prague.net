@@ -163,13 +163,13 @@
         "dotnet": ".NET 9.0.19",
         "coreCount": 12
       },
-      "commit": "99a074a",
-      "timestampUtc": "2026-09-09T00:45:10.2999110Z",
+      "commit": "b87b770",
+      "timestampUtc": "2026-09-09T01:41:46.0305050Z",
       "metrics": [
         {
           "id": "query.sortDistinct.p50",
           "unit": "ns",
-          "value": 19938.97183227539,
+          "value": 19994.248817443848,
           "higherIsBetter": false
         },
         {
@@ -181,7 +181,7 @@
         {
           "id": "query.sortTied.p50",
           "unit": "ns",
-          "value": 11198.220950317384,
+          "value": 11125.622932434082,
           "higherIsBetter": false
         },
         {
@@ -193,31 +193,31 @@
         {
           "id": "query.sortTiedJoined.p50",
           "unit": "ns",
-          "value": 217336.94458007812,
+          "value": 236550.26114908853,
           "higherIsBetter": false
         },
         {
           "id": "query.sortTiedJoinedBoundedPage.p50",
           "unit": "ns",
-          "value": 214800.59313964844,
+          "value": 228575.74350585937,
           "higherIsBetter": false
         },
         {
           "id": "query.sortTiedLeftThenJoinClassic.p50",
           "unit": "ns",
-          "value": 64138.76640625,
+          "value": 65720.96752115885,
           "higherIsBetter": false
         },
         {
           "id": "query.sortTiedLeftThenJoinBounded.p50",
           "unit": "ns",
-          "value": 19807.810986328124,
+          "value": 20751.932103083684,
           "higherIsBetter": false
         },
         {
           "id": "query.sortBoundedPage.p50",
           "unit": "ns",
-          "value": 7551.435211181641,
+          "value": 7604.165521748861,
           "higherIsBetter": false
         },
         {
@@ -229,7 +229,7 @@
         {
           "id": "query.sortBoundedFullPage.p50",
           "unit": "ns",
-          "value": 33264.313745117186,
+          "value": 33120.37676188151,
           "higherIsBetter": false
         }
       ]
