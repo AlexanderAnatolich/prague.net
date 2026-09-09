@@ -1,5 +1,5 @@
 # Prague performance baseline
-_Generated 2026-09-09T02:11:08Z_
+_Generated 2026-09-09T08:45:18Z_
 
 ## apple-m4pro-darwin
 
@@ -13,37 +13,42 @@ _Generated 2026-09-09T02:11:08Z_
 | query.multiJoin.p999 | 34099199.00 | ns |
 
 ### core-only  
-`cpu` · `Darwin 25.2.0 Darwin Kernel Version 25.2.0: Tue Nov 18 21:09:56 PST 2025; root:xnu-12377.61.12~1/RELEASE_ARM64_T6041` · `.NET 9.0.19` · commit `6b9faea`
+`cpu` · `Darwin 25.2.0 Darwin Kernel Version 25.2.0: Tue Nov 18 21:09:56 PST 2025; root:xnu-12377.61.12~1/RELEASE_ARM64_T6041` · `.NET 9.0.19` · commit `9d0a8e8`
 | metric | value | unit |
 |---|---:|---|
-| ingest.throughput | 8253371.87 | ent/s |
+| ingest.throughput | 8349305.60 | ent/s |
 | ingest.alloc | 208.02 | bytes |
-| query.uniqueLookup.p50 | 217.77 | ns |
+| query.uniqueLookup.p50 | 215.08 | ns |
 | query.uniqueLookup.alloc | 0.00 | bytes |
-| query.rangeScan.p50 | 2917.62 | ns |
-| query.rangeScan.alloc | 64.00 | bytes |
-| query.joinOne.p50 | 8618.38 | ns |
-| query.joinOne.alloc | 64.00 | bytes |
-| query.joinMany.p50 | 99345.42 | ns |
-| query.joinMany.alloc | 268.00 | bytes |
-| query.multiJoin.p50 | 104333.95 | ns |
-| query.multiJoin.alloc | 269.00 | bytes |
+| query.rangeScan.p50 | 2931.99 | ns |
+| query.rangeScan.alloc | 0.00 | bytes |
+| query.joinOne.p50 | 8684.03 | ns |
+| query.joinOne.alloc | 0.00 | bytes |
+| query.joinMany.p50 | 98964.44 | ns |
+| query.joinMany.alloc | 0.00 | bytes |
+| query.multiJoin.p50 | 104678.10 | ns |
+| query.multiJoin.alloc | 0.00 | bytes |
 
 ### core-sort  
-`cpu` · `Darwin 25.2.0 Darwin Kernel Version 25.2.0: Tue Nov 18 21:09:56 PST 2025; root:xnu-12377.61.12~1/RELEASE_ARM64_T6041` · `.NET 9.0.19` · commit `b87b770`
+`cpu` · `Darwin 25.2.0 Darwin Kernel Version 25.2.0: Tue Nov 18 21:09:56 PST 2025; root:xnu-12377.61.12~1/RELEASE_ARM64_T6041` · `.NET 9.0.19` · commit `9d0a8e8`
 | metric | value | unit |
 |---|---:|---|
-| query.sortDistinct.p50 | 19994.25 | ns |
+| query.sortDistinct.p50 | 20338.03 | ns |
 | query.sortDistinct.alloc | 88.00 | bytes |
-| query.sortTied.p50 | 11125.62 | ns |
+| query.sortTied.p50 | 11358.74 | ns |
 | query.sortTied.alloc | 88.00 | bytes |
-| query.sortTiedJoined.p50 | 236550.26 | ns |
-| query.sortTiedJoinedBoundedPage.p50 | 228575.74 | ns |
-| query.sortTiedLeftThenJoinClassic.p50 | 65720.97 | ns |
-| query.sortTiedLeftThenJoinBounded.p50 | 20751.93 | ns |
-| query.sortBoundedPage.p50 | 7604.17 | ns |
+| query.sortTiedJoined.p50 | 234804.71 | ns |
+| query.sortTiedJoined.alloc | 24.00 | bytes |
+| query.sortTiedJoinedBoundedPage.p50 | 233405.60 | ns |
+| query.sortTiedJoinedBoundedPage.alloc | 24.00 | bytes |
+| query.sortTiedLeftThenJoinClassic.p50 | 66430.36 | ns |
+| query.sortTiedLeftThenJoinClassic.alloc | 24.00 | bytes |
+| query.sortTiedLeftThenJoinBounded.p50 | 21174.67 | ns |
+| query.sortTiedLeftThenJoinBounded.alloc | 0.00 | bytes |
+| query.sortBoundedPage.p50 | 7639.78 | ns |
 | query.sortBoundedPage.alloc | 0.00 | bytes |
-| query.sortBoundedFullPage.p50 | 33120.38 | ns |
+| query.sortBoundedFullPage.p50 | 33309.40 | ns |
+| query.sortBoundedFullPage.alloc | 0.00 | bytes |
 
 ### full-sim  
 `Apple M4 Pro` · `Darwin 25.2.0 Darwin Kernel Version 25.2.0: Tue Nov 18 21:09:56 PST 2025; root:xnu-12377.61.12~1/RELEASE_ARM64_T6041` · `.NET 9.0.17` · commit `420d77b`
