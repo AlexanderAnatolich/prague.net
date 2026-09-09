@@ -17,7 +17,7 @@
 
 Two plans, chosen by the caller (`IJoinResolver.AllowsBounded`, set by `SortBounded`); never inferred, because they order comparer-equal rows differently.
 
-- `Sort(cmp)` — classic: materialize, full-sort (`QueryResults.Sort` / `ValueDictionary.SortAndCrop` → `StableSort`), slice. **Stable**: comparer-equal rows keep encounter order, the same tie rule the bounded plans apply, so both plans return the same rows for the same query.
+- `Sort(cmp)` — classic: materialize, full-sort (`QueryResults.Sort` / `ValueDictionary.SortAndCrop` → `StableSort`), slice. **Stable**: comparer-equal rows keep encounter order, the same tie rule the bounded plans apply, so both plans return the same rows for the same query. **0 B/query with a struct comparer** (#77): `StableSort` carries the comparer as a type parameter, by `ref`, through every frame, and owns its keyed introsort — the framework's `Span.Sort(keys, items, comparer)` takes `IComparer<TKey>` and boxes a struct (24 B), and its single-span sort builds a `Comparison<T>` over the box on top (88 B). Pinned by `TopKAllocationCoreTests.ClassicSort*`, `StableSortTests.Sort_StructComparer_AllocatesNothing_*` and the `query.sort*.alloc` tripwire metrics at 0.
 - `SortBounded(cmp)` — with a finite `take`, the base walk feeds `TopKSimpleResultContainer` (simple) or `TopKJoinedBaseContainer` (joined, `ExecuteCoreJoinedTop`), which pick a plan once at `Init(maxCount)`:
   - **heap** while `K = skip + take` is below `maxCount / 4`: pooled max-heap of K rows (`TopKSelect.Push`/`DrainAscending`), O(N log K), buffer of K.
   - **collect + select** otherwise: collect every matched row, `TopKSelect.SelectPage` introselects the page bounds and sorts only the page — O(N + take log take), buffer of N.

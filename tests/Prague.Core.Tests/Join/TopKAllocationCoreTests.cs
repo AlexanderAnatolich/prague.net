@@ -111,6 +111,58 @@ public class TopKAllocationCoreTests {
 		Assert.That(bounded, Is.Zero);
 	}
 
+	// Issue #77: the classic plan used to cost 88 B per pooled query with a struct comparer (a boxed
+	// comparer plus the Comparison<T> the single-span sort built over it) and 24 B on the joined path
+	// (the framework's keyed Span.Sort boxing the struct). The comparer now reaches every comparison
+	// as a type parameter, so the classic plan is as allocation-free as the bounded one. The tripwire
+	// pins the same at query.sortDistinct/sortTied/sortTiedJoined/sortTiedLeftThenJoinClassic.alloc = 0.
+	[Test]
+	public void ClassicSortPooled_StructComparer_AllocatesNothing() {
+		var sorted = AllocPerOpPrecise(() => {
+			using var r = _small.Query().Sort(_cachedStruct).ExecutePooled();
+			return r.Count;
+		});
+
+		Assert.That(sorted, Is.Zero, $"the classic simple plan allocated {sorted} B/op");
+	}
+
+	[Test]
+	public void ClassicSortJoinedPooled_StructComparer_AddsNoAllocationOverTheUnsortedJoin() {
+		var unsortedJoin = AllocPerOpPrecise(() => {
+			using var r = _small.Query().InnerJoinOne(_smallRight).ExecutePooled();
+			return r.Count;
+		});
+		var sortedJoin = AllocPerOpPrecise(() => {
+			using var r = _small.Query().Sort(_cachedStruct).InnerJoinOne(_smallRight).ExecutePooled();
+			return r.Count;
+		});
+
+		Assert.That(sortedJoin, Is.LessThanOrEqualTo(unsortedJoin),
+			$"the classic joined plan added allocation: {sortedJoin} B/op vs {unsortedJoin} B/op unsorted");
+	}
+
+	// A comparer over the joined row takes the classic plan too (canBound needs a left-value comparer).
+	[Test]
+	public void ClassicSortOverJoinedRowPooled_StructComparer_AddsNoAllocationOverTheUnsortedJoin() {
+		var unsortedJoin = AllocPerOpPrecise(() => {
+			using var r = _small.Query().InnerJoinOne(_smallRight).ExecutePooled();
+			return r.Count;
+		});
+		var sortedJoin = AllocPerOpPrecise(() => {
+			using var r = _small.Query().InnerJoinOne(_smallRight).Sort(_cachedJoinedStruct).ExecutePooled();
+			return r.Count;
+		});
+
+		Assert.That(sortedJoin, Is.LessThanOrEqualTo(unsortedJoin),
+			$"the classic joined-row sort added allocation: {sortedJoin} B/op vs {unsortedJoin} B/op unsorted");
+	}
+
+	internal readonly struct TaByOrderAscJoinedStruct : IComparer<JoinResult<TaItem, TaRight?>> {
+		public int Compare(JoinResult<TaItem, TaRight?> x, JoinResult<TaItem, TaRight?> y) => x.Left.Order.CompareTo(y.Left.Order);
+	}
+
+	private static readonly TaByOrderAscJoinedStruct _cachedJoinedStruct = new();
+
 	private static readonly TaByOrderAsc _cachedClass = new();
 
 	private static readonly TaByOrderAscStruct _cachedStruct = new();
