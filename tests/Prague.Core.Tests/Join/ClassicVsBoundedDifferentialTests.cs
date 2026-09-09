@@ -154,15 +154,21 @@ public class ClassicVsBoundedDifferentialTests {
 			Assert.That(author.Id, Is.InRange(1, TieCount));
 	}
 
-	// ── Opt-in is required: Sort must not silently take the bounded plan ─────
+	// ── The two plans agree on ties ──────────────────────────────────────────
 
-	// The plans differ on ties, so a query that only said Sort has to keep the classic behaviour.
-	// Both must honour the comparer — every even Id before every odd one — but only the bounded plan
-	// pins the order *within* a tie group. The inequality is an implementation-detail guard: it works
-	// because the framework sort visibly reorders a tie-heavy comparer. If a future runtime made the
-	// two coincide, the assertion fails and tells us the guard lost its power.
+	// This test used to assert the opposite. It read the plans' tie orders differing as evidence that
+	// Sort had not silently adopted the bounded plan, and its own comment called that a guard that
+	// would lose its power if the two ever coincided. They coincide now on purpose: the classic sort
+	// is stable, so both plans break ties by encounter order and the same query returns the same rows
+	// whichever plan runs it. The old inequality was pinning a defect — a caller who switched to
+	// SortBounded for the 2.7x it buys on a joined query silently got different rows.
+	//
+	// The original intent — Sort must not take the bounded execution plan without being asked — is now
+	// covered where it is actually observable: query.sortTiedLeftThenJoinClassic and
+	// query.sortTiedLeftThenJoinBounded sit 3x apart in the perf baseline, so a silent adoption moves
+	// a metric.
 	[Test]
-	public void Sort_DoesNotAdoptTheBoundedTieOrder() {
+	public void Sort_AndSortBounded_AgreeOnTieOrder() {
 		using var boundedResults = _many.Query().SortBounded(new AuthorByParity()).ExecutePooled(0, TieCount);
 		using var classicResults = _many.Query().Sort(new AuthorByParity()).ExecutePooled(0, TieCount);
 		var bounded = boundedResults.Select(a => a.Id).ToArray();
@@ -170,9 +176,8 @@ public class ClassicVsBoundedDifferentialTests {
 
 		Assert.That(bounded.Take(TieCount / 2).All(id => id % 2 == 0), Is.True, "bounded broke the comparer");
 		Assert.That(classic.Take(TieCount / 2).All(id => id % 2 == 0), Is.True, "classic broke the comparer");
-		Assert.That(classic, Is.Not.EqualTo(bounded),
-			"either Sort has silently adopted the bounded plan, or the framework sort became stable "
-			+ "and this guard can no longer detect that");
+		Assert.That(classic, Is.EqualTo(bounded),
+			"the plans returned different rows for the same query — the classic sort is no longer stable");
 	}
 
 	// The strong, deterministic promise of the bounded plan: the page boundaries do not depend on how
