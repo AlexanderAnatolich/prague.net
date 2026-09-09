@@ -185,22 +185,57 @@ public class StableSortTests {
 	}
 
 	[Test]
-	public void Sort_PoolBalanced_AndNoGcAllocationBeyondTheComparisonDelegate() {
+	public void Sort_PoolBalanced() {
 		var rows = Rows("random", 20000, new Random(9));
 		LeakAssert.Balanced(() => {
 			var sorted = (Row[])rows.Clone();
 			StableSort.Sort(sorted.AsSpan(), new ByKey());
 		});
+	}
 
-		var comparison = new Comparison<Row>(new ByKey().Compare);
+	// Issue #77: the comparer reaches every comparison as a type parameter, so a struct comparer costs
+	// no box and no Comparison<T> delegate on either overload — the framework's Span.Sort takes 88 B
+	// (single span) and 24 B (keyed) for the same struct. Tied keys so the keyed overload also walks
+	// its tie-repair path. Averaged over enough runs that a one-off JIT side allocation cannot read as
+	// a per-call byte; the smallest regression this guards is a 24 B box.
+	[Test]
+	public void Sort_StructComparer_AllocatesNothing_OnEitherOverload() {
+		var rows = Rows("few-values", 5000, new Random(9));
 		var scratch = (Row[])rows.Clone();
-		StableSort.Sort(scratch.AsSpan(), comparison);
-		var before = GC.GetAllocatedBytesForCurrentThread();
-		for (var i = 0; i < 5; i++) {
+		var items = new int[rows.Length];
+
+		Assert.That(AllocPerOp(() => {
+			rows.CopyTo(scratch, 0);
+			StableSort.Sort(scratch.AsSpan(), new ByKeyStruct());
+		}), Is.Zero, "single-span overload");
+
+		Assert.That(AllocPerOp(() => {
+			rows.CopyTo(scratch, 0);
+			StableSort.Sort(scratch.AsSpan(), items.AsSpan(), new ByKeyStruct());
+		}), Is.Zero, "keyed overload");
+	}
+
+	// The delegate is the caller's; the sort itself adds nothing per call around it.
+	[Test]
+	public void Sort_ComparisonDelegate_AllocatesNothingBeyondTheDelegateItself() {
+		var rows = Rows("random", 5000, new Random(9));
+		var scratch = (Row[])rows.Clone();
+		var comparison = new Comparison<Row>(new ByKey().Compare);
+
+		Assert.That(AllocPerOp(() => {
 			rows.CopyTo(scratch, 0);
 			StableSort.Sort(scratch.AsSpan(), comparison);
-		}
+		}), Is.Zero);
+	}
 
-		Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.LessThan(1024), "the merge buffers must come from the pool");
+	private static long AllocPerOp(Action run, int iterations = 50) {
+		for (var i = 0; i < 5; i++)
+			run();
+
+		var before = GC.GetAllocatedBytesForCurrentThread();
+		for (var i = 0; i < iterations; i++)
+			run();
+
+		return (GC.GetAllocatedBytesForCurrentThread() - before) / iterations;
 	}
 }

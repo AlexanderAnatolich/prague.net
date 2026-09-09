@@ -1,5 +1,5 @@
 # Prague performance baseline
-_Generated 2026-09-09T08:45:18Z_
+_Generated 2026-09-09T09:07:52Z_
 
 ## apple-m4pro-darwin
 
@@ -30,24 +30,24 @@ _Generated 2026-09-09T08:45:18Z_
 | query.multiJoin.alloc | 0.00 | bytes |
 
 ### core-sort  
-`cpu` · `Darwin 25.2.0 Darwin Kernel Version 25.2.0: Tue Nov 18 21:09:56 PST 2025; root:xnu-12377.61.12~1/RELEASE_ARM64_T6041` · `.NET 9.0.19` · commit `9d0a8e8`
+`cpu` · `Darwin 25.2.0 Darwin Kernel Version 25.2.0: Tue Nov 18 21:09:56 PST 2025; root:xnu-12377.61.12~1/RELEASE_ARM64_T6041` · `.NET 9.0.19` · commit `ced408d`
 | metric | value | unit |
 |---|---:|---|
-| query.sortDistinct.p50 | 20338.03 | ns |
-| query.sortDistinct.alloc | 88.00 | bytes |
-| query.sortTied.p50 | 11358.74 | ns |
-| query.sortTied.alloc | 88.00 | bytes |
-| query.sortTiedJoined.p50 | 234804.71 | ns |
-| query.sortTiedJoined.alloc | 24.00 | bytes |
-| query.sortTiedJoinedBoundedPage.p50 | 233405.60 | ns |
-| query.sortTiedJoinedBoundedPage.alloc | 24.00 | bytes |
-| query.sortTiedLeftThenJoinClassic.p50 | 66430.36 | ns |
-| query.sortTiedLeftThenJoinClassic.alloc | 24.00 | bytes |
-| query.sortTiedLeftThenJoinBounded.p50 | 21174.67 | ns |
+| query.sortDistinct.p50 | 11541.76 | ns |
+| query.sortDistinct.alloc | 0.00 | bytes |
+| query.sortTied.p50 | 9269.23 | ns |
+| query.sortTied.alloc | 0.00 | bytes |
+| query.sortTiedJoined.p50 | 227422.36 | ns |
+| query.sortTiedJoined.alloc | 0.00 | bytes |
+| query.sortTiedJoinedBoundedPage.p50 | 223486.94 | ns |
+| query.sortTiedJoinedBoundedPage.alloc | 0.00 | bytes |
+| query.sortTiedLeftThenJoinClassic.p50 | 61954.25 | ns |
+| query.sortTiedLeftThenJoinClassic.alloc | 0.00 | bytes |
+| query.sortTiedLeftThenJoinBounded.p50 | 20467.06 | ns |
 | query.sortTiedLeftThenJoinBounded.alloc | 0.00 | bytes |
-| query.sortBoundedPage.p50 | 7639.78 | ns |
+| query.sortBoundedPage.p50 | 7497.36 | ns |
 | query.sortBoundedPage.alloc | 0.00 | bytes |
-| query.sortBoundedFullPage.p50 | 33309.40 | ns |
+| query.sortBoundedFullPage.p50 | 32740.31 | ns |
 | query.sortBoundedFullPage.alloc | 0.00 | bytes |
 
 ### full-sim  
