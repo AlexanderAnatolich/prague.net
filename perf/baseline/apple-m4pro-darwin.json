@@ -2,30 +2,30 @@
   "configs": {
     "core-only": {
       "env": {
-        "cpu": "Apple M4 Pro",
+        "cpu": "cpu",
         "os": "Darwin 25.2.0 Darwin Kernel Version 25.2.0: Tue Nov 18 21:09:56 PST 2025; root:xnu-12377.61.12~1/RELEASE_ARM64_T6041",
-        "dotnet": ".NET 9.0.17",
+        "dotnet": ".NET 9.0.19",
         "coreCount": 12
       },
-      "commit": "420d77b",
-      "timestampUtc": "2026-07-21T18:26:00.5341380Z",
+      "commit": "6b9faea",
+      "timestampUtc": "2026-09-09T02:11:08.1225150Z",
       "metrics": [
         {
           "id": "ingest.throughput",
           "unit": "ent/s",
-          "value": 7689081.845433025,
+          "value": 8253371.869135514,
           "higherIsBetter": true
         },
         {
           "id": "ingest.alloc",
           "unit": "bytes",
-          "value": 265.84181818181816,
+          "value": 208.02290909090908,
           "higherIsBetter": false
         },
         {
           "id": "query.uniqueLookup.p50",
           "unit": "ns",
-          "value": 216.94475994110107,
+          "value": 217.76952478090922,
           "higherIsBetter": false
         },
         {
@@ -37,7 +37,7 @@
         {
           "id": "query.rangeScan.p50",
           "unit": "ns",
-          "value": 2934.126602935791,
+          "value": 2917.62439428057,
           "higherIsBetter": false
         },
         {
@@ -49,7 +49,7 @@
         {
           "id": "query.joinOne.p50",
           "unit": "ns",
-          "value": 8514.581680297852,
+          "value": 8618.379050118583,
           "higherIsBetter": false
         },
         {
@@ -61,25 +61,25 @@
         {
           "id": "query.joinMany.p50",
           "unit": "ns",
-          "value": 104405.78825683593,
+          "value": 99345.41790364584,
           "higherIsBetter": false
         },
         {
           "id": "query.joinMany.alloc",
           "unit": "bytes",
-          "value": 65,
+          "value": 268,
           "higherIsBetter": false
         },
         {
           "id": "query.multiJoin.p50",
           "unit": "ns",
-          "value": 109515.32294921875,
+          "value": 104333.9533935547,
           "higherIsBetter": false
         },
         {
           "id": "query.multiJoin.alloc",
           "unit": "bytes",
-          "value": 65,
+          "value": 269,
           "higherIsBetter": false
         }
       ]
