@@ -7,25 +7,25 @@
         "dotnet": ".NET 9.0.20",
         "coreCount": 4
       },
-      "commit": "0614b57",
-      "timestampUtc": "2026-09-09T09:50:26.9508218Z",
+      "commit": "9b34732",
+      "timestampUtc": "2026-09-09T10:20:36.9742060Z",
       "metrics": [
         {
           "id": "ingest.throughput",
           "unit": "ent/s",
-          "value": 3762217.036963217,
+          "value": 4655727.863209768,
           "higherIsBetter": true
         },
         {
           "id": "ingest.alloc",
           "unit": "bytes",
-          "value": 196.325,
+          "value": 196.32527272727273,
           "higherIsBetter": false
         },
         {
           "id": "query.uniqueLookup.p50",
           "unit": "ns",
-          "value": 376.09985487801686,
+          "value": 292.6929498036703,
           "higherIsBetter": false
         },
         {
@@ -37,7 +37,7 @@
         {
           "id": "query.rangeScan.p50",
           "unit": "ns",
-          "value": 6284.47354888916,
+          "value": 4731.690202566294,
           "higherIsBetter": false
         },
         {
@@ -49,7 +49,7 @@
         {
           "id": "query.joinOne.p50",
           "unit": "ns",
-          "value": 19760.130689493813,
+          "value": 15338.007098388673,
           "higherIsBetter": false
         },
         {
@@ -61,11 +61,23 @@
         {
           "id": "query.joinMany.p50",
           "unit": "ns",
-          "value": 292483.48287760414,
+          "value": 182444.62255859375,
           "higherIsBetter": false
         },
         {
           "id": "query.joinMany.alloc",
+          "unit": "bytes",
+          "value": 2,
+          "higherIsBetter": false
+        },
+        {
+          "id": "query.joinManyAll.p50",
+          "unit": "ns",
+          "value": 357359.58646065847,
+          "higherIsBetter": false
+        },
+        {
+          "id": "query.joinManyAll.alloc",
           "unit": "bytes",
           "value": 3,
           "higherIsBetter": false
@@ -73,13 +85,13 @@
         {
           "id": "query.multiJoin.p50",
           "unit": "ns",
-          "value": 318056.7279622396,
+          "value": 196820.15350748698,
           "higherIsBetter": false
         },
         {
           "id": "query.multiJoin.alloc",
           "unit": "bytes",
-          "value": 4,
+          "value": 2,
           "higherIsBetter": false
         }
       ]
@@ -91,31 +103,31 @@
         "dotnet": ".NET 9.0.20",
         "coreCount": 4
       },
-      "commit": "0614b57",
-      "timestampUtc": "2026-09-09T09:55:37.7465600Z",
+      "commit": "9b34732",
+      "timestampUtc": "2026-09-09T10:24:43.3568115Z",
       "metrics": [
         {
           "id": "ingest.throughput",
           "unit": "ent/s",
-          "value": 1029230.1358583779,
+          "value": 1176105.806755124,
           "higherIsBetter": true
         },
         {
           "id": "query.multiJoin.p50",
           "unit": "ns",
-          "value": 313391,
+          "value": 199159,
           "higherIsBetter": false
         },
         {
           "id": "query.multiJoin.p99",
           "unit": "ns",
-          "value": 693695,
+          "value": 421583,
           "higherIsBetter": false
         },
         {
           "id": "query.multiJoin.p999",
           "unit": "ns",
-          "value": 802399,
+          "value": 596959,
           "higherIsBetter": false
         }
       ]
@@ -127,31 +139,31 @@
         "dotnet": ".NET 9.0.20",
         "coreCount": 4
       },
-      "commit": "0614b57",
-      "timestampUtc": "2026-09-09T09:56:11.5509996Z",
+      "commit": "9b34732",
+      "timestampUtc": "2026-09-09T10:25:16.2352554Z",
       "metrics": [
         {
           "id": "read.throughput",
           "unit": "reads/s",
-          "value": 2001751.5836549294,
+          "value": 2873005.6505983397,
           "higherIsBetter": true
         },
         {
           "id": "query.multiJoin.p50",
           "unit": "ns",
-          "value": 505087,
+          "value": 367567,
           "higherIsBetter": false
         },
         {
           "id": "query.multiJoin.p99",
           "unit": "ns",
-          "value": 12955647,
+          "value": 12524031,
           "higherIsBetter": false
         },
         {
           "id": "query.multiJoin.p999",
           "unit": "ns",
-          "value": 13702143,
+          "value": 13767679,
           "higherIsBetter": false
         }
       ]
@@ -163,13 +175,13 @@
         "dotnet": ".NET 9.0.20",
         "coreCount": 4
       },
-      "commit": "0614b57",
-      "timestampUtc": "2026-09-09T09:52:22.8378741Z",
+      "commit": "9b34732",
+      "timestampUtc": "2026-09-09T10:22:41.9916492Z",
       "metrics": [
         {
           "id": "query.sortDistinct.p50",
           "unit": "ns",
-          "value": 17565.696060180664,
+          "value": 13191.275932898889,
           "higherIsBetter": false
         },
         {
@@ -181,7 +193,7 @@
         {
           "id": "query.sortTied.p50",
           "unit": "ns",
-          "value": 14471.960033961705,
+          "value": 11141.375291951497,
           "higherIsBetter": false
         },
         {
@@ -193,43 +205,43 @@
         {
           "id": "query.sortTiedJoined.p50",
           "unit": "ns",
-          "value": 637258.9831891741,
+          "value": 384178.9004255022,
           "higherIsBetter": false
         },
         {
           "id": "query.sortTiedJoined.alloc",
           "unit": "bytes",
-          "value": 6,
+          "value": 2,
           "higherIsBetter": false
         },
         {
           "id": "query.sortTiedJoinedBoundedPage.p50",
           "unit": "ns",
-          "value": 639786.8530970982,
+          "value": 382672.0006385216,
           "higherIsBetter": false
         },
         {
           "id": "query.sortTiedJoinedBoundedPage.alloc",
           "unit": "bytes",
-          "value": 6,
+          "value": 3,
           "higherIsBetter": false
         },
         {
           "id": "query.sortTiedLeftThenJoinClassic.p50",
           "unit": "ns",
-          "value": 65038.68070765904,
+          "value": 47205.44881330217,
           "higherIsBetter": false
         },
         {
           "id": "query.sortTiedLeftThenJoinClassic.alloc",
           "unit": "bytes",
-          "value": 1,
+          "value": 0,
           "higherIsBetter": false
         },
         {
           "id": "query.sortTiedLeftThenJoinBounded.p50",
           "unit": "ns",
-          "value": 33284.51898701986,
+          "value": 24998.332085242637,
           "higherIsBetter": false
         },
         {
@@ -241,7 +253,7 @@
         {
           "id": "query.sortBoundedPage.p50",
           "unit": "ns",
-          "value": 9673.190952046712,
+          "value": 7792.952600332407,
           "higherIsBetter": false
         },
         {
@@ -253,7 +265,7 @@
         {
           "id": "query.sortBoundedFullPage.p50",
           "unit": "ns",
-          "value": 55703.118905203686,
+          "value": 43636.19301932199,
           "higherIsBetter": false
         },
         {
