@@ -288,7 +288,9 @@ internal struct ValueDictionary<TKey, TValue, TKeyComparer> : IDisposable
 
 		var keysSpan = _keys.Span.Slice(0, count);
 		var valuesSpan = _values.Span.Slice(0, count);
-		valuesSpan.Sort(keysSpan, comparer);
+		// Stable: rows that compare equal keep their encounter order, the same tie rule the bounded
+		// paging plans apply, so the classic and bounded plans return the same rows for the same query.
+		StableSort.Sort(valuesSpan, keysSpan, comparer);
 
 		if (skip >= count) {
 			Count = 0;

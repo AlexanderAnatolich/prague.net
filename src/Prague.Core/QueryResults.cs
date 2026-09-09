@@ -257,7 +257,7 @@ public readonly struct QueryResults<T> : IList<T>, IReadOnlyList<T>, IDisposable
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	public void Sort<TComparer>(TComparer comparer) where TComparer : IComparer<T> {
-		AsSpan().Sort(comparer);
+		StableSort.Sort(AsSpan(), comparer);
 	}
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
