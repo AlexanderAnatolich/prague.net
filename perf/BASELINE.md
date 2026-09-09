@@ -1,5 +1,5 @@
 # Prague performance baseline
-_Generated 2026-09-09T01:41:46Z_
+_Generated 2026-09-09T02:11:08Z_
 
 ## apple-m4pro-darwin
 
@@ -13,21 +13,21 @@ _Generated 2026-09-09T01:41:46Z_
 | query.multiJoin.p999 | 34099199.00 | ns |
 
 ### core-only  
-`Apple M4 Pro` · `Darwin 25.2.0 Darwin Kernel Version 25.2.0: Tue Nov 18 21:09:56 PST 2025; root:xnu-12377.61.12~1/RELEASE_ARM64_T6041` · `.NET 9.0.17` · commit `420d77b`
+`cpu` · `Darwin 25.2.0 Darwin Kernel Version 25.2.0: Tue Nov 18 21:09:56 PST 2025; root:xnu-12377.61.12~1/RELEASE_ARM64_T6041` · `.NET 9.0.19` · commit `6b9faea`
 | metric | value | unit |
 |---|---:|---|
-| ingest.throughput | 7689081.85 | ent/s |
-| ingest.alloc | 265.84 | bytes |
-| query.uniqueLookup.p50 | 216.94 | ns |
+| ingest.throughput | 8253371.87 | ent/s |
+| ingest.alloc | 208.02 | bytes |
+| query.uniqueLookup.p50 | 217.77 | ns |
 | query.uniqueLookup.alloc | 0.00 | bytes |
-| query.rangeScan.p50 | 2934.13 | ns |
+| query.rangeScan.p50 | 2917.62 | ns |
 | query.rangeScan.alloc | 64.00 | bytes |
-| query.joinOne.p50 | 8514.58 | ns |
+| query.joinOne.p50 | 8618.38 | ns |
 | query.joinOne.alloc | 64.00 | bytes |
-| query.joinMany.p50 | 104405.79 | ns |
-| query.joinMany.alloc | 65.00 | bytes |
-| query.multiJoin.p50 | 109515.32 | ns |
-| query.multiJoin.alloc | 65.00 | bytes |
+| query.joinMany.p50 | 99345.42 | ns |
+| query.joinMany.alloc | 268.00 | bytes |
+| query.multiJoin.p50 | 104333.95 | ns |
+| query.multiJoin.alloc | 269.00 | bytes |
 
 ### core-sort  
 `cpu` · `Darwin 25.2.0 Darwin Kernel Version 25.2.0: Tue Nov 18 21:09:56 PST 2025; root:xnu-12377.61.12~1/RELEASE_ARM64_T6041` · `.NET 9.0.19` · commit `b87b770`
