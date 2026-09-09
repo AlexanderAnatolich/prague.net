@@ -52,6 +52,7 @@ internal static class BdnResultExport {
 		"RangeScan" => "rangeScan",
 		"JoinOne" => "joinOne",
 		"JoinMany" => "joinMany",
+		"JoinManyAll" => "joinManyAll",
 		"MultiJoin" => "multiJoin",
 		"SortDistinct" => "sortDistinct",
 		"SortTied" => "sortTied",

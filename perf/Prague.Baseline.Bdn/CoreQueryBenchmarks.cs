@@ -67,6 +67,15 @@ public class CoreQueryBenchmarks {
 		return r.Count;
 	}
 
+	// Every left, no range narrowing and no sort: 500 lefts × 20 rights through the JoinMany
+	// recording loop and nothing else. JoinMany narrows with WithRange first, so its left count
+	// varies with the cursor; SortTiedJoined joins every left but pays for the sort on top. This is
+	// the metric that isolates the per-left recording cost the fan-out regressed in #72.
+	[Benchmark] public int JoinManyAll() {
+		using var r = _products.Query().JoinMany(_offers.Cache, _offers.ProductIdIndex).ExecutePooled();
+		return r.Count;
+	}
+
 	[Benchmark] public int MultiJoin() {
 		using var r = _products.Query().WithRange(static (q, id) => q.Gte(id), NextId())
 			.JoinWithBaselineProductInfo()

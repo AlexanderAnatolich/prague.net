@@ -163,7 +163,11 @@ internal struct ValueSet<T, TKeyComparer> : IDisposable
 		return AddIfNotPresent(item, InternalGetHashCode(item), out slot);
 	}
 
-	/// <summary>Slot of the stored item equal to <paramref name="item"/>, or -1.</summary>
+	/// <summary>
+	///   Slot of the stored item equal to <paramref name="item"/>, or -1. Production code reads slots from
+	///   <see cref="Enumerator.CurrentSlot"/> while walking the set; this is the test-side stand-in that lets
+	///   a test name a slot without enumerating.
+	/// </summary>
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	internal int IndexOf(T item) => InternalIndexOf(item);
 
@@ -323,10 +327,15 @@ internal struct ValueSet<T, TKeyComparer> : IDisposable
 			AddIfNotPresent(into.Into(item));
 	}
 
+	// Hashes each item itself rather than taking the hash the bucket stores for it: the enumerator's
+	// atomic-copy path reads a slot's hash and then its value without re-validating, so a concurrent
+	// remove plus slot reuse between the two reads pairs the old key's hash with the new key, and an
+	// item stored under the wrong hash is invisible to Contains/Remove and duplicated on the next
+	// sighting. Reusing the hash measured no faster on the JoinMany recording loop (#72), so nothing
+	// is traded away here.
 	public void UnionWith(PooledSet<T, DefaultKeyComparer<T>> other) {
-		using var enumerator = other.GetEnumerator();
-		while (enumerator.MoveNext())
-			AddIfNotPresent(enumerator.Current, enumerator.CurrentHashCode, out _);
+		foreach (var item in other)
+			AddIfNotPresent(item);
 	}
 
 	public void UnionWith(IEnumerable<T> other) {
@@ -1728,6 +1737,18 @@ internal struct ValueSet<T, TKeyComparer> : IDisposable
 		}
 
 		public T Current { get; private set; }
+
+		/// <summary>
+		///   Slot of <see cref="Current"/> in the set — the same index <see cref="ValueSet{T,TKeyComparer}.AddOrFind"/>
+		///   reported when the item was added; slots survive growth and in-place removals.
+		/// </summary>
+		public int CurrentSlot {
+			[MethodImpl(MethodImplOptions.AggressiveInlining)]
+			get {
+				Debug.Assert(_index > 0 && _index <= _lastIndex, "CurrentSlot read outside a successful MoveNext");
+				return _index - 1;
+			}
+		}
 
 		object IEnumerator.Current {
 			get {

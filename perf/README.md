@@ -93,7 +93,8 @@ Metric ids are stable and config-scoped:
 | `query.<type>.alloc` | bytes | bytes allocated per query |
 
 Query `<type>` is one of `uniqueLookup`, `rangeScan`, `joinOne`, `joinMany`,
-`multiJoin`.
+`joinManyAll` (every left through the JoinMany recording loop, no range and no
+sort), `multiJoin`, plus the `sort*` shapes of the `core-sort` config.
 
 Which config emits which:
 
