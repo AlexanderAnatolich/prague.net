@@ -124,8 +124,8 @@ public class StableSortTests {
 		}
 	}
 
-	// The keyed overload sorts in place with the framework sort and repairs the ties afterwards; a
-	// struct comparer must give the same stable order, and the item span must follow every row.
+	// The keyed overload sorts the same index array as the single-span one; a struct comparer must give
+	// the same stable order, and the item span must follow every row.
 	[TestCase(33)]
 	[TestCase(5000)]
 	public void SortKeyed_StructComparer_IsStableToo(int length) {
@@ -135,6 +135,25 @@ public class StableSortTests {
 			var items = Enumerable.Range(0, length).ToArray();
 			var expected = rows.OrderBy(r => r.Key).ToArray();
 			StableSort.Sort(rows.AsSpan(), items.AsSpan(), new ByKeyStruct());
+			Assert.That(rows, Is.EqualTo(expected), shape);
+			for (var i = 0; i < length; i++) {
+				Assert.That(items[i], Is.EqualTo(rows[i].Ordinal), $"{shape}: items[{i}] must follow its value");
+			}
+		}
+	}
+
+	// Past the depth budget the keyed path falls back to the index heapsort too; it must be just as
+	// stable, and the items must still follow.
+	[TestCase(33)]
+	[TestCase(1000)]
+	[TestCase(4097)]
+	public void SortKeyed_DepthExhausted_FallsBackToStableHeapSort(int length) {
+		var random = new Random(17);
+		foreach (var shape in new[] { "random", "few-values", "equal", "descending" }) {
+			var rows = Rows(shape, length, random);
+			var items = Enumerable.Range(0, length).ToArray();
+			var expected = rows.OrderBy(r => r.Key).ToArray();
+			StableSort.Sort(rows.AsSpan(), items.AsSpan(), new ByKeyStruct(), depthLimit: 0);
 			Assert.That(rows, Is.EqualTo(expected), shape);
 			for (var i = 0; i < length; i++) {
 				Assert.That(items[i], Is.EqualTo(rows[i].Ordinal), $"{shape}: items[{i}] must follow its value");

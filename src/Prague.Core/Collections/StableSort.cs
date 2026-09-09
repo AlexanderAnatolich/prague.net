@@ -18,13 +18,12 @@ using System.Runtime.InteropServices;
 ///   framework's unstable introsort on distinct keys and beat it on heavy ties.
 ///   </para>
 ///   <para>
-///   The keyed overload — the joined pipeline's row dictionary, arrays of result structs several
-///   megabytes long — sorts the values IN PLACE with a specialisation of the framework's keyed
-///   introsort, moving a pooled ordinal per row as the sort's items, then restores encounter order
-///   inside every run of equal values by sorting the runs' ordinals — integers only — and gathering the
-///   rows into that order once; the caller's items follow the ordinals through one more permutation
-///   pass. Sorting indices there cost half again the framework sort: every comparison took an extra
-///   random hop into the struct rows, which the in-place sort reads sequentially.
+///   The keyed overload — the joined pipeline's row dictionary — sorts the same index array and then
+///   permutes the rows and the caller's items through one pooled buffer each. It used to sort the rows
+///   in place with a Hoare introsort, carrying an ordinal per row, and repair the ties afterwards; on
+///   tie-heavy joined rows that recursed into every run of equal rows — swapping references, a GC write
+///   barrier per swap, for log k more levels on a run of k — and then gathered the whole result a second
+///   time. Sorting indices instead halved the classic joined sort on the perf baseline (#67).
 ///   </para>
 ///   <para>
 ///   The comparer reaches every comparison as a type parameter, passed by reference through each
@@ -35,8 +34,9 @@ using System.Runtime.InteropServices;
 ///   boxes a struct — 24 B) is used. A class comparer dispatches through the interface, as the framework
 ///   sort does.
 ///   </para>
-///   A comparison that throws leaves the rows in an unspecified permutation like the framework sort
-///   (the single-span overload leaves them untouched unless it throws inside the final permutation).
+///   A comparison that throws leaves the rows untouched above <c>DirectInsertionThreshold</c> (the sort
+///   orders indices until a final permutation that compares nothing) and in an unspecified permutation
+///   below it, like the framework sort.
 /// </summary>
 internal static class StableSort {
 	// Below this many rows the index machinery does not pay for itself: a stable insertion sort on the
@@ -67,6 +67,11 @@ internal static class StableSort {
 	///   null <paramref name="comparer"/> means <see cref="Comparer{T}.Default"/>.
 	/// </summary>
 	internal static void Sort<T, TItem, TComparer>(Span<T> values, Span<TItem> items, TComparer comparer)
+		where TComparer : IComparer<T>
+		=> Sort(values, items, comparer, DepthLimit(values.Length));
+
+	/// <summary>Test seam: <paramref name="depthLimit"/> bounds the partitioning depth (0 forces the heapsort fallback).</summary>
+	internal static void Sort<T, TItem, TComparer>(Span<T> values, Span<TItem> items, TComparer comparer, int depthLimit)
 		where TComparer : IComparer<T> {
 		if (values.Length != items.Length)
 			throw new ArgumentException("values and items must have the same length", nameof(items));
@@ -76,7 +81,7 @@ internal static class StableSort {
 			return;
 
 		if (comparer is null) {
-			Sort(values, items, Comparer<T>.Default);
+			Sort(values, items, Comparer<T>.Default, depthLimit);
 			return;
 		}
 
@@ -85,20 +90,17 @@ internal static class StableSort {
 			return;
 		}
 
-		var ordinals = PragueArrayPool<int>.Pool.Rent(n);
+		var indices = PragueArrayPool<int>.Pool.Rent(n);
+		var buffer = PragueArrayPool<T>.Pool.Rent(n);
 		var itemBuffer = PragueArrayPool<TItem>.Pool.Rent(n);
 		try {
-			var order = ordinals.AsSpan(0, n);
-			for (var i = 0; i < n; i++)
-				order[i] = i;
-
-			// In place, unstable: the ordinals ride along as the sort's items and record where each row
-			// came from.
-			IntroSortRows(values, order, ref comparer, DepthLimit(n));
-			RestoreEncounterOrder(values, order, ref comparer);
+			var order = indices.AsSpan(0, n);
+			SortIndices(order, values, ref comparer, depthLimit);
+			Permute(values, order, buffer.AsSpan(0, n));
 			Permute(items, order, itemBuffer.AsSpan(0, n));
 		} finally {
-			PragueArrayPool<int>.Pool.Return(ordinals);
+			PragueArrayPool<int>.Pool.Return(indices);
+			PragueArrayPool<T>.Pool.Return(buffer, RuntimeHelpers.IsReferenceOrContainsReferences<T>());
 			PragueArrayPool<TItem>.Pool.Return(itemBuffer, RuntimeHelpers.IsReferenceOrContainsReferences<TItem>());
 		}
 	}
@@ -133,55 +135,6 @@ internal static class StableSort {
 		} finally {
 			PragueArrayPool<int>.Pool.Return(indices);
 			PragueArrayPool<T>.Pool.Return(buffer, RuntimeHelpers.IsReferenceOrContainsReferences<T>());
-		}
-	}
-
-	// After the unstable in-place sort every run of values the comparer calls equal is contiguous, and
-	// order[i] is the encounter position of the row now at i. Within a run the stable order is ascending
-	// encounter position: sort each run's positions — integers, no user comparisons, no row moves — and,
-	// once any run longer than one row exists, gather the rows into the corrected order in one pass.
-	// Distinct keys make every run one row long and cost only the adjacent comparison that finds them.
-	private static void RestoreEncounterOrder<T, TComparer>(Span<T> values, Span<int> order, ref TComparer comparer)
-		where TComparer : IComparer<T> {
-		var n = values.Length;
-		int[]? unstable = null; // unstable[encounter position] = index the row holds after the in-place sort
-		try {
-			var runStart = 0;
-			for (var i = 1; i <= n; i++) {
-				if (i < n && comparer.Compare(values[i - 1], values[i]) == 0)
-					continue;
-
-				var length = i - runStart;
-				if (length > 1) {
-					if (unstable is null) {
-						// First tie: remember where every row sits before any run is re-ordered.
-						unstable = PragueArrayPool<int>.Pool.Rent(n);
-						for (var k = 0; k < n; k++)
-							unstable[order[k]] = k;
-					}
-
-					order.Slice(runStart, length).Sort();
-				}
-
-				runStart = i;
-			}
-
-			if (unstable is null)
-				return;
-
-			var buffer = PragueArrayPool<T>.Pool.Rent(n);
-			try {
-				var gathered = buffer.AsSpan(0, n);
-				for (var k = 0; k < n; k++)
-					gathered[k] = values[unstable[order[k]]];
-
-				gathered.CopyTo(values);
-			} finally {
-				PragueArrayPool<T>.Pool.Return(buffer, RuntimeHelpers.IsReferenceOrContainsReferences<T>());
-			}
-		} finally {
-			if (unstable is not null)
-				PragueArrayPool<int>.Pool.Return(unstable);
 		}
 	}
 
@@ -390,113 +343,5 @@ internal static class StableSort {
 			Unsafe.Add(ref first, j + 1) = value;
 			Unsafe.Add(ref firstItem, j + 1) = item;
 		}
-	}
-
-	// ── Rows in place (keyed overload) ────────────────────────────────────────
-	// The framework's keyed introsort (ArraySortHelper<TKey, TValue>) specialised on TComparer:
-	// median-of-three pivot parked at hi - 1 as the scan sentinel, Hoare partition, heapsort past the
-	// depth budget, insertion sort under the threshold. Unstable on its own; RestoreEncounterOrder
-	// repairs the ties from the ordinals that travel as the items. Indexing stays bounds-checked so an
-	// inconsistent comparer throws instead of scanning past the span.
-
-	private static void IntroSortRows<T, TComparer>(Span<T> values, Span<int> items, ref TComparer comparer, int depth)
-		where TComparer : IComparer<T> {
-		var partitionSize = values.Length;
-		while (partitionSize > 1) {
-			if (partitionSize <= InsertionSortThreshold) {
-				InsertionSortRows(values.Slice(0, partitionSize), items.Slice(0, partitionSize), ref comparer);
-				return;
-			}
-
-			if (depth == 0) {
-				HeapSortRows(values.Slice(0, partitionSize), items.Slice(0, partitionSize), ref comparer);
-				return;
-			}
-
-			depth--;
-			var p = PartitionRows(values.Slice(0, partitionSize), items.Slice(0, partitionSize), ref comparer);
-
-			// Rows above the pivot recurse, rows below loop.
-			var upper = p + 1;
-			IntroSortRows(values.Slice(upper, partitionSize - upper), items.Slice(upper, partitionSize - upper), ref comparer, depth);
-			partitionSize = p;
-		}
-	}
-
-	// Returns the pivot's final position; [0, p) <= pivot, (p, length) >= pivot.
-	private static int PartitionRows<T, TComparer>(Span<T> values, Span<int> items, ref TComparer comparer)
-		where TComparer : IComparer<T> {
-		var hi = values.Length - 1;
-		var middle = hi >> 1;
-		SwapRowsIfGreater(values, items, 0, middle, ref comparer);
-		SwapRowsIfGreater(values, items, 0, hi, ref comparer);
-		SwapRowsIfGreater(values, items, middle, hi, ref comparer);
-
-		// values[0] <= pivot <= values[hi] bound both scans; the pivot itself sits at hi - 1 until the end.
-		var pivot = values[middle];
-		SwapRows(values, items, middle, hi - 1);
-		var left = 0;
-		var right = hi - 1;
-		while (left < right) {
-			do left++; while (comparer.Compare(values[left], pivot) < 0);
-			do right--; while (comparer.Compare(pivot, values[right]) < 0);
-
-			if (left >= right)
-				break;
-
-			SwapRows(values, items, left, right);
-		}
-
-		if (left != hi - 1)
-			SwapRows(values, items, left, hi - 1);
-
-		return left;
-	}
-
-	private static void HeapSortRows<T, TComparer>(Span<T> values, Span<int> items, ref TComparer comparer)
-		where TComparer : IComparer<T> {
-		var n = values.Length;
-		for (var i = n >> 1; i >= 1; i--)
-			DownHeapRows(values, items, i, n, ref comparer);
-
-		for (var i = n; i > 1; i--) {
-			SwapRows(values, items, 0, i - 1);
-			DownHeapRows(values, items, 1, i - 1, ref comparer);
-		}
-	}
-
-	// 1-based heap over values[0..n): sifts the row at i down to its place.
-	private static void DownHeapRows<T, TComparer>(Span<T> values, Span<int> items, int i, int n, ref TComparer comparer)
-		where TComparer : IComparer<T> {
-		var value = values[i - 1];
-		var item = items[i - 1];
-		while (i <= n >> 1) {
-			var child = 2 * i;
-			if (child < n && comparer.Compare(values[child - 1], values[child]) < 0)
-				child++;
-
-			if (comparer.Compare(value, values[child - 1]) >= 0)
-				break;
-
-			values[i - 1] = values[child - 1];
-			items[i - 1] = items[child - 1];
-			i = child;
-		}
-
-		values[i - 1] = value;
-		items[i - 1] = item;
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	private static void SwapRowsIfGreater<T, TComparer>(Span<T> values, Span<int> items, int i, int j, ref TComparer comparer)
-		where TComparer : IComparer<T> {
-		if (comparer.Compare(values[i], values[j]) > 0)
-			SwapRows(values, items, i, j);
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	private static void SwapRows<T>(Span<T> values, Span<int> items, int i, int j) {
-		(values[i], values[j]) = (values[j], values[i]);
-		(items[i], items[j]) = (items[j], items[i]);
 	}
 }
