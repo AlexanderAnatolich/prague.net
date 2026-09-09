@@ -425,10 +425,6 @@ public interface IJoinedSourceResultContainer<in TJoinKey, in TRightKey, in TRig
 	void Add(TJoinKey key, TRightKey source, TRightValue TRightValue);
 }
 
-public interface IJoinedResultContainer<in TForeignKey, in TKey, in TResult> {
-	void Add(TForeignKey foreignKey, TKey key, TResult result);
-}
-
 /// <summary>
 /// Container for a paired walk that reports each surviving pair by the slot it occupies in the pair
 /// set. <see cref="Collections.ValueSet{T,TKeyComparer}"/> slots survive growth and in-place removals,
@@ -445,11 +441,6 @@ internal interface IResultContainerInitializer<TForeignKey, TResult> : IJoinedRe
 	void Init(int maxCount);
 
 	void Seal(int actualCount);
-}
-
-internal interface
-	IResultContainerInitializer<TForeignKey, TKey, TResult> : IJoinedResultContainer<TForeignKey, TKey, TResult>
-	where TForeignKey : notnull {
 }
 
 // From IJoinedKeyedResultContainerInitializer.cs

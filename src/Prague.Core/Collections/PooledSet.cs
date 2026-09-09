@@ -158,17 +158,15 @@ internal sealed class PooledSet<T, TKeyComparer> : IReadOnlyCollection<T>, IEnum
 		private readonly int[]? _versions;
 		private readonly int _lastIndex;
 		private T _currentValue;
-		private int _currentHashCode;
 		private int _index;
 
+		// Only the value is exposed. The slot's hash is deliberately not: the atomic-copy path below
+		// reads the hash and the value in two loads with no version guard, so a remove plus slot reuse
+		// in between pairs one key's hash with another key's value. A consumer that needs the hash
+		// computes it from Current.
 		public T Current {
 			[MethodImpl(MethodImplOptions.AggressiveInlining)]
 			get => _currentValue;
-		}
-
-		public int CurrentHashCode {
-			[MethodImpl(MethodImplOptions.AggressiveInlining)]
-			get => _currentHashCode;
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -178,7 +176,6 @@ internal sealed class PooledSet<T, TKeyComparer> : IReadOnlyCollection<T>, IEnum
 			_versions = tables.Versions;
 			_lastIndex = lastIndex;
 			_currentValue = default!;
-			_currentHashCode = 0;
 			_index = -1;
 		}
 
@@ -192,10 +189,9 @@ internal sealed class PooledSet<T, TKeyComparer> : IReadOnlyCollection<T>, IEnum
 					if (hashCode < 0)
 						continue;
 
-					// Atomic copy: stale-or-new, never torn. Current/CurrentHashCode
-					// must not re-read the live slot later.
+					// Atomic copy: stale-or-new, never torn. Current must not re-read
+					// the live slot later.
 					_currentValue = slot.Value;
-					_currentHashCode = hashCode;
 					return true;
 				}
 
@@ -212,7 +208,6 @@ internal sealed class PooledSet<T, TKeyComparer> : IReadOnlyCollection<T>, IEnum
 					continue;
 
 				_currentValue = value;
-				_currentHashCode = guardedHashCode;
 				return true;
 			}
 
