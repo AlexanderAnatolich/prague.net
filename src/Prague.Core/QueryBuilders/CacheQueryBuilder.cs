@@ -1627,6 +1627,27 @@ void ICandidatesExecutor<TKey, TValue>.ExecuteBase<TContainer>(ref TContainer c)
 		}
 	}
 
+	/// <summary>
+	/// <see cref="ExecutePaired{TContainer}"/> for a container that also wants the right key: the store
+	/// calls <c>Add(pair.JoinedKey, pair.Key, value)</c> per surviving pair. The JoinMany fan-out uses the
+	/// key to deliver one right to every left recorded for it. Auto-disposes after execution.
+	/// </summary>
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	internal void ExecutePairedJoined<TContainer>(scoped ref TContainer container)
+		where TContainer : struct, IJoinedResultContainer<TLeft, TKey, TValue>, allows ref struct {
+		if (_disposed)
+			throw new ObjectDisposedException(nameof(PairedCacheQueryBuilderCoreCombined<TLeft, TKey, TValue>));
+
+		try {
+			if (!_candidates.IsInitlized || _candidates.Count == 0)
+				return;
+
+			_ = _dataCache.TryGetJoined<TLeft, TContainer>(ref container, ref _candidates, _filter);
+		} finally {
+			Dispose();
+		}
+	}
+
 public void Dispose() {
 		if (_disposed) return;
 		_candidates.Dispose();
@@ -2451,11 +2472,9 @@ public static class CacheQueryBuilderCombinedSortExtensions {
 	///   covers roughly a quarter or more of it.
 	///   <para>
 	///   For paging a large result use <c>SortBounded</c> instead — it selects the page without
-	///   sorting the rest (measured 2.3-8.6× faster for pages of tens to hundreds of rows). And note
-	///   that this plan leaves comparer-equal rows in an <b>unspecified</b> order, so paging it with a
-	///   comparer that can tie may repeat or drop a row between pages; either use <c>SortBounded</c>,
-	///   which breaks ties by encounter order, or make the comparer total by falling back to the
-	///   primary key.
+	///   sorting the rest (measured 2.3-8.6× faster for pages of tens to hundreds of rows). Both plans
+	///   are stable — comparer-equal rows keep their encounter order — so paging either one partitions
+	///   the result, and the two return the same rows for the same query.
 	///   </para>
 	/// </summary>
 	public static
@@ -2512,10 +2531,9 @@ public static class CacheQueryBuilderCombinedSortExtensions {
 	///   <list type="bullet">
 	///     <item>
 	///       <b>Ties resolve by encounter order</b>, so consecutive pages of an unchanged result
-	///       partition it with no duplicates and no gaps. The classic sort leaves comparer-equal rows
-	///       in an unspecified order, so paging it can repeat or drop a row across pages. If your
-	///       comparer is <i>total</i> (never returns 0 for two distinct rows — e.g. it falls back to
-	///       the primary key) the two plans return identical output and this difference vanishes.
+	///       partition it with no duplicates and no gaps. The classic sort is stable too, and applies
+	///       the same tie rule, so the two plans return the same rows for the same query — the choice
+	///       between them is purely about cost.
 	///     </item>
 	///     <item>
 	///       <b>A large contiguous prefix is slower</b> than the classic full sort — measured 1.3× at

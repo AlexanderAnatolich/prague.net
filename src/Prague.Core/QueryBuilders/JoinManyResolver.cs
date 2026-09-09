@@ -11,9 +11,14 @@ using Prague.Core.Utils;
 // Mirrors JoinOneRightUniqueIndexResolver structurally but over a list-valued
 // FK index (CacheKeyValueListIndex) instead of a unique one. Per-left fan-in
 // to QueryResults<TRightValue> uses the standard keyed-init container protocol
-// (Init/Seal/PrepareSharedBuffer/Add) — set up BEFORE the paired ExecutePaired
-// walks pairs and dispatches Add calls. Filter narrowing can only reduce the
-// pair set, so pre-Init bucket sizes are upper bounds (slack capacity is OK).
+// (Init/Seal/PrepareSharedBuffer/Add) — set up BEFORE the paired execute walks
+// pairs and dispatches Add calls. Pairs are recorded into a JoinManyFanOut so a
+// right that several lefts reach — a non-injective key selector folding lefts
+// onto one bucket, or a collection-backed index whose buckets overlap — is
+// delivered to every one of them; in the plain FK shape (every right belongs to
+// one left) the fan-out writes nothing but the pair set and the execute runs
+// straight from the store. Filter narrowing can only reduce the pair set, so
+// the recorded counts are upper bounds (slack capacity is OK).
 
 /// <summary>
 /// Resolver for JoinMany over a right-side <see cref="CacheKeyValueListIndex{TKey,TValue,TIndexKey}"/>.
@@ -145,10 +150,59 @@ public struct JoinManyRightListIndexResolver<TLeftKey, TLeftValue, TRightCache, 
 	// ── Core execution loop ──────────────────────────────────────────────────
 
 	/// <summary>
+	/// One paired execute over every recorded right: builds the paired core over the fan-out's pair
+	/// set, applies the user filter once, then hands the set to the core and delivers each surviving
+	/// right to all of its lefts — through the plain paired execute when no right is shared (the FK
+	/// shape), through a <see cref="JoinManyFanOut{TLeftKey,TRightKey}.Delivery{TRightValue,TContainer}"/>
+	/// otherwise. The set is marked handed off right before the execute — after the filter ran — so a
+	/// throw inside the user lambda leaves it to <see cref="JoinManyFanOut{TLeftKey,TRightKey}.Dispose"/>,
+	/// while a set that reached the core is never disposed twice.
+	/// </summary>
+	private void ExecutePairs<TContainer>(ref JoinManyFanOut<TLeftKey, TRightKey> fanOut, ref TContainer container)
+		where TContainer : struct, IJoinedResultContainer<TLeftKey, TRightValue>, allows ref struct {
+		if (fanOut.DistinctRights == 0) {
+			return;
+		}
+
+		var pairedCore = new PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>(_rightCache.Cache, fanOut.Pairs);
+		var builder = new CacheQueryBuilderCombined<
+			NonExecutableQuery<TRightCache>,
+			PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>,
+			TRightKey, TRightValue,
+			Resolvers<BaseResolver<TRightKey, TRightValue>>,
+			TRightValue>(
+			new NonExecutableQuery<TRightCache>(_rightCache),
+			pairedCore,
+			new Resolvers<BaseResolver<TRightKey, TRightValue>>(new BaseResolver<TRightKey, TRightValue>()),
+			0);
+
+		// NoFilter.Apply() is JIT-elided. The filter narrows pairs in place; it cannot add or renumber
+		// them. A throw here (user lambda) must leave disposal to the fan-out.
+		builder = _filter.Apply(builder);
+
+		fanOut.MarkPairsHandedOff();
+		ref var core = ref Unsafe.AsRef(in builder._leftQuery);
+		if (fanOut.SingleLeftPerRight) {
+			// No right is shared, so a pair's JoinedKey is its whole chain: the plain paired execute (the
+			// store calls Add(pair.JoinedKey, value)) delivers exactly what a Delivery would, without the
+			// wrapper, the right key or the slot lookup.
+			core.ExecutePaired(ref container);
+			return;
+		}
+
+		var delivery = new JoinManyFanOut<TLeftKey, TRightKey>.Delivery<TRightValue, TContainer>(
+			container, core._candidates, fanOut.Heads, fanOut.NodeLefts, fanOut.NodeNexts);
+		core.ExecutePairedJoined(ref delivery);
+		container = delivery.Inner;
+	}
+
+	/// <summary>
 	/// Walks the right index per leftKey, records its (leftKey, rightKey) pairs, calls
 	/// <c>container.Init(leftKey, pairsRecorded)</c> for keyed-init, then <c>PrepareSharedBuffer</c>,
-	/// then runs the paired-core <c>ExecutePaired</c> which dispatches <c>Add(leftKey, rightValue)</c>
-	/// per pair. Filter narrowing can only reduce pairs — the recorded counts are upper bounds.
+	/// then runs the single paired execute which dispatches <c>Add(leftKey, rightValue)</c> per pair. A
+	/// right shared by several lefts — a non-injective selector folding lefts onto one bucket, or a
+	/// collection-backed index whose buckets overlap — reaches every left that recorded it. Filter
+	/// narrowing can only reduce pairs — the recorded counts are upper bounds.
 	/// </summary>
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	private void ExecuteReverse<TContainer>(ref TContainer container, ReadOnlySpan<TLeftKey> leftKeys)
@@ -157,13 +211,12 @@ public struct JoinManyRightListIndexResolver<TLeftKey, TLeftValue, TRightCache, 
 		if (leftKeys.IsEmpty)
 			return;
 
-		// ── 1. Walk index, keyed-init container, build pair set ────────────────
+		// ── 1. Walk index, keyed-init container, record the pairs ─────────────
 		// Inline rather than calling _rightIndex.IntersectValuesInit because that
 		// helper requires the container to be parameterized on TIndexKey (not
 		// TLeftKey), and reinterpreting refs to ref structs across generic params
 		// is brittle. The inline loop is identical work and avoids the gymnastics.
-		var pairs = new ValueSet<JoinedKeyPair<TLeftKey, TRightKey>, DefaultKeyComparer<JoinedKeyPair<TLeftKey, TRightKey>>>(leftKeys.Length);
-		var handedOff = false;
+		var fanOut = new JoinManyFanOut<TLeftKey, TRightKey>(leftKeys.Length);
 		try {
 			foreach (var leftKey in leftKeys) {
 				TIndexKey indexKey;
@@ -178,43 +231,18 @@ public struct JoinManyRightListIndexResolver<TLeftKey, TLeftValue, TRightCache, 
 
 				// Size the slot from the pairs this walk recorded, not from bucket.Count: the bucket
 				// is written concurrently, and a right published between the two reads would leave
-				// the slot short of the pairs ExecutePaired later delivers to it.
-				var before = pairs.Count;
-				pairs.UnionWith(JoinedKeyPair<TLeftKey, TRightKey>.IntoKeyed(leftKey), bucket);
-				container.Init(leftKey, pairs.Count - before);
+				// the slot short of the pairs the execute later delivers to it.
+				container.Init(leftKey, fanOut.RecordBucket(leftKey, bucket));
 			}
 
 			// PrepareSharedBuffer allocates the contiguous TRightValue[] partitioned per-leftKey.
 			container.PrepareSharedBuffer();
 
-			if (!pairs.IsInitlized || pairs.Count == 0)
-				return;
-
-			// ── 2. Construct paired core + wrap in CacheQueryBuilderCombined ──────
-			var dataCache = _rightCache.Cache;
-			var pairedCore = new PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>(dataCache, pairs);
-			var builder = new CacheQueryBuilderCombined<
-				NonExecutableQuery<TRightCache>,
-				PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>,
-				TRightKey, TRightValue,
-				Resolvers<BaseResolver<TRightKey, TRightValue>>,
-				TRightValue>(
-				new NonExecutableQuery<TRightCache>(_rightCache),
-				pairedCore,
-				new Resolvers<BaseResolver<TRightKey, TRightValue>>(new BaseResolver<TRightKey, TRightValue>()),
-				0);
-
-			// ── 3. Apply the user filter strategy ─────────────────────────────────
-			// NoFilter.Apply() is JIT-elided. Filter narrows pairs but cannot add.
-			builder = _filter.Apply(builder);
-
-			// ── 4. Native paired Execute — walks pairs, calls container.Add ───────
-			handedOff = true;
-			Unsafe.AsRef(in builder._leftQuery).ExecutePaired(ref container);
+			// ── 2. One paired execute — walks the pairs, calls container.Add ──────
+			ExecutePairs(ref fanOut, ref container);
 		}
 		finally {
-			if (!handedOff && pairs.IsInitlized)
-				pairs.Dispose();
+			fanOut.Dispose();
 		}
 	}
 
@@ -273,8 +301,7 @@ public struct JoinManyRightListIndexResolver<TLeftKey, TLeftValue, TRightCache, 
 			return;
 
 		// Same flow as outer ExecuteReverse, but operate on candidates (not accessor.GetKeys).
-		var pairs = new ValueSet<JoinedKeyPair<TLeftKey, TRightKey>, DefaultKeyComparer<JoinedKeyPair<TLeftKey, TRightKey>>>(candidates.Count);
-		var handedOff = false;
+		var fanOut = new JoinManyFanOut<TLeftKey, TRightKey>(candidates.Count);
 		var container = new UnsafeResolverContainer<TAccessor>(accessor, cloneOnAdd, disposer.IsActive);
 		try {
 			foreach (var leftKey in candidates) {
@@ -292,12 +319,10 @@ public struct JoinManyRightListIndexResolver<TLeftKey, TLeftValue, TRightCache, 
 				// leaving PrepareSharedBuffer with a zero-length buffer.
 				_ = accessor.GetValueRefOrAddDefault<TLeftKey, QueryResults<TRightValue>>(leftKey, out _);
 				// Sized from the recorded pairs, not bucket.Count — see ExecuteReverse.
-				var before = pairs.Count;
-				pairs.UnionWith(JoinedKeyPair<TLeftKey, TRightKey>.IntoKeyed(leftKey), bucket);
-				container.Init(leftKey, pairs.Count - before);
+				container.Init(leftKey, fanOut.RecordBucket(leftKey, bucket));
 			}
 
-			if (!pairs.IsInitlized || pairs.Count == 0) {
+			if (fanOut.DistinctRights == 0) {
 				// No left has any right — Inner semantic narrows to empty.
 				candidates.IntersectWith(ReadOnlySpan<TLeftKey>.Empty);
 				return;
@@ -306,49 +331,44 @@ public struct JoinManyRightListIndexResolver<TLeftKey, TLeftValue, TRightCache, 
 			container.PrepareSharedBuffer();
 			RegisterPooledBuffer(ref disposer, container.GetSharedBuffer());
 
-			// Wrap pairs, apply filter, run paired execute (Add per surviving pair).
-			var dataCache = _rightCache.Cache;
-			var pairedCore = new PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>(dataCache, pairs);
-			var builder = new CacheQueryBuilderCombined<
-				NonExecutableQuery<TRightCache>,
-				PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>,
-				TRightKey, TRightValue,
-				Resolvers<BaseResolver<TRightKey, TRightValue>>,
-				TRightValue>(
-				new NonExecutableQuery<TRightCache>(_rightCache),
-				pairedCore,
-				new Resolvers<BaseResolver<TRightKey, TRightValue>>(new BaseResolver<TRightKey, TRightValue>()),
-				0);
-			builder = _filter.Apply(builder);
-			handedOff = true;
-			Unsafe.AsRef(in builder._leftQuery).ExecutePaired(ref container);
+			// One paired execute (Add per surviving right, to every left that recorded it).
+			ExecutePairs(ref fanOut, ref container);
 
 			// Post-walk: drop slots with QueryResults.Count == 0 (no rights or all filtered out)
 			// and narrow candidates to surviving keys. Subsequent base execute fills Left for survivors.
 			accessor.RetainNonEmptyManySlots<TLeftKey, TRightValue>(ref candidates);
 		}
 		finally {
-			if (!handedOff && pairs.IsInitlized)
-				pairs.Dispose();
+			fanOut.Dispose();
 		}
 	}
 }
 
 // ── JoinMany left-symmetric-index resolver ────────────────────────────────
 //
-// Mirrors JoinOne's LeftSym pattern: when multiple lefts share the same
-// lookupKey, the pair set's JoinedKey is a LeftKeySetView wrapping the index's
-// internal PooledSet (borrowed, zero-alloc). At Add time the fan-out container
-// iterates the set and writes each left's slot. This avoids the dedup pitfall
-// where ValueSet<JoinedKeyPair<TLeftKey, TRightKey>, DefaultKeyComparer<JoinedKeyPair<TLeftKey, TRightKey>>> would collapse pairs
-// sharing rightKey across multiple lefts.
+// Lefts reach their rights through a lookup group: the left symmetric index's
+// Reverse half maps a left to its lookup key, the (optionally selector-translated)
+// lookup key addresses a bucket of right keys in the right list index. Every left
+// of a group shares that bucket, and a non-injective selector folds several groups
+// onto one bucket — so pairs sharing a right key are the norm here and the plain
+// right-key-identity pair set cannot hold them all. The resolver records every
+// (left, right) pair into a JoinManyFanOut — one pair per distinct right plus a chain
+// of the lefts sharing it — and runs ONE paired execute that delivers each surviving
+// right to every left in its chain. Each left's bucket is enumerated exactly once and
+// Init(left) receives exactly the number of pairs recorded for it, so a slot can never
+// receive more Adds than it reserved, whatever the index writer does concurrently. A
+// right whose bucket membership is removed and re-added while that left's bucket is
+// being walked can be yielded twice by the enumerator; the fan-out sees the repeat (the
+// right's latest recorder is this left), records it once and delivers it once.
 
 /// <summary>
-/// Resolver for JoinMany driven by a symmetric many index on the LEFT side
-/// plus a list index on the RIGHT side. Each lookupKey maps to a set of
-/// lefts (forward) and a set of rights (via right index, optionally selector-
-/// translated); fan-out emits all (left × right) cross pairs through a single
-/// LeftKeySetView-wrapped pair per right.
+/// Resolver for JoinMany driven by a symmetric many index on the LEFT side plus a list index on
+/// the RIGHT side. Per input left: <c>Reverse</c> → lookup key → (selector) → right bucket; each
+/// (left, right) pair is recorded into the fan-out (one pair per distinct right, a chain of lefts
+/// per pair), the slot is sized from the pairs recorded, and one paired execute delivers every
+/// surviving right to all of its lefts. The user filter therefore runs once per query and its
+/// predicate once per distinct right; rights inside a slot come out in pair-set order
+/// (first-recording order of the distinct rights).
 /// </summary>
 public struct JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookupKey, TRightIndexKey, TRightKey, TRightValue, TFilter, TSelector>
 	: IJoinManyResolver<TLeftKey, TLeftValue, TRightValue>
@@ -360,7 +380,7 @@ public struct JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookup
 	where TRightValue : ICacheEquatable<TRightValue>, ICacheClonable<TRightValue>
 	where TRightCache : IDataCache<TRightCache, TRightKey, TRightValue>
 	where TFilter : struct, IJoinFilter<
-		CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>
+		CacheQueryBuilderCombined<NonExecutableQuery<TRightCache>, PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>, TRightKey, TRightValue, Resolvers<BaseResolver<TRightKey, TRightValue>>, TRightValue>>
 	where TSelector : struct, IKeySelector<TLookupKey, TRightIndexKey> {
 
 	// ── Fields ───────────────────────────────────────────────────────────────
@@ -411,135 +431,111 @@ public struct JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookup
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	public void Clone(ref QueryResults<TRightValue> value) => CloneValue(ref value);
 
-	// ── Fan-out containers ────────────────────────────────────────────────────
+	// ── Pair recording ───────────────────────────────────────────────────────
 
 	/// <summary>
-	/// Outer fan-out wrapper around a keyed inner container. ExecutePaired
-	/// calls <c>Add(LeftKeySetView, rightValue)</c>; we reinterpret the view
-	/// back to <see cref="PooledSet{T}"/>, iterate, and forward per-leftKey
-	/// to the inner's <c>Add(leftKey, rightValue)</c>. Lefts whose slot was
-	/// not pre-initialized (no outer base execute created them) silently skip
-	/// (inner.Add finds NullRef and returns 0).
+	/// Resolves a left to its right bucket: <c>Reverse</c> → lookup key → selector → right index
+	/// key → bucket. False when the left has no lookup key or the bucket is empty.
 	/// </summary>
-	private ref struct OuterFanOutContainer<TInner>
-		: IJoinedResultContainer<LeftKeySetView<TLeftKey>, TRightValue>
-		where TInner : struct, IJoinedKeyedResultContainer<TLeftKey, TRightValue>, allows ref struct {
-		// Stored by value, not by ref — ref-to-ref-struct fields are illegal.
-		// The inner container's mutating state (e.g. _totalCount) is already finalized
-		// by the time we wrap (PrepareSharedBuffer was called); Add doesn't mutate it.
-		// Slot writes go through the shared accessor ref which the copy still owns.
-		private TInner _inner;
-		public int TotalCount => 1;
-
-		public OuterFanOutContainer(TInner inner) {
-			_inner = inner;
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	private readonly bool TryGetBucket(TLeftKey leftKey, out PooledSet<TRightKey, DefaultKeyComparer<TRightKey>> bucket) {
+		if (!_leftIndex.Reverse.TryGetValue(leftKey, out var lookupKey)) {
+			bucket = null!;
+			return false;
 		}
 
-		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public int Add(LeftKeySetView<TLeftKey> lefts, TRightValue result) {
-			var pooled = Unsafe.As<LeftKeySetView<TLeftKey>, PooledSet<TLeftKey, DefaultKeyComparer<TLeftKey>>>(ref lefts);
-			foreach (var lk in pooled)
-				_inner.Add(lk, result);
-			return 0;
-		}
+		var rightIndexKey = TSelector.IsIdentity
+			? Unsafe.As<TLookupKey, TRightIndexKey>(ref lookupKey)
+			: _selector.Select(lookupKey);
+		bucket = _rightIndex.GetValuesUnsafe(rightIndexKey);
+		return bucket.Count > 0;
 	}
 
+	// ── Execution ────────────────────────────────────────────────────────────
+
 	/// <summary>
-	/// Inner fan-out wrapper — additionally filters by the outer query's
-	/// candidate set. Lefts outside <c>candidates</c> appear in the borrowed
-	/// PooledSet but must be skipped, since the candidate-narrow walk above
-	/// only Init'd slots for lefts in candidates.
+	/// One paired execute over every recorded right: builds the paired core over the fan-out's pair
+	/// set, applies the user filter once, then hands the set to the core and delivers each surviving
+	/// right to all of its lefts — through the plain paired execute when no right is shared, through a
+	/// <see cref="JoinManyFanOut{TLeftKey,TRightKey}.Delivery{TRightValue,TContainer}"/> otherwise.
+	/// The set is marked handed off right before the execute — after the
+	/// filter ran — so a throw inside the user lambda leaves it to
+	/// <see cref="JoinManyFanOut{TLeftKey,TRightKey}.Dispose"/>, while a set that reached the core is
+	/// never disposed twice.
 	/// </summary>
-	private ref struct InnerFanOutContainer<TInner>
-		: IJoinedResultContainer<LeftKeySetView<TLeftKey>, TRightValue>
-		where TInner : struct, IJoinedKeyedResultContainer<TLeftKey, TRightValue>, allows ref struct {
-		private TInner _inner;
-		private ref ValueSet<TLeftKey, DefaultKeyComparer<TLeftKey>> _candidates;
-		public int TotalCount => 1;
-
-		public InnerFanOutContainer(TInner inner, ref ValueSet<TLeftKey, DefaultKeyComparer<TLeftKey>> candidates) {
-			_inner = inner;
-			_candidates = ref candidates;
+	private void ExecutePairs<TContainer>(ref JoinManyFanOut<TLeftKey, TRightKey> fanOut, ref TContainer container)
+		where TContainer : struct, IJoinedResultContainer<TLeftKey, TRightValue>, allows ref struct {
+		if (fanOut.DistinctRights == 0) {
+			return;
 		}
 
-		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public int Add(LeftKeySetView<TLeftKey> lefts, TRightValue result) {
-			var pooled = Unsafe.As<LeftKeySetView<TLeftKey>, PooledSet<TLeftKey, DefaultKeyComparer<TLeftKey>>>(ref lefts);
-			foreach (var lk in pooled) {
-				if (!_candidates.Contains(lk))
-					continue;
-				_inner.Add(lk, result);
-			}
-			return 0;
+		var pairedCore = new PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>(_rightCache.Cache, fanOut.Pairs);
+		var builder = new CacheQueryBuilderCombined<
+			NonExecutableQuery<TRightCache>,
+			PairedCacheQueryBuilderCoreCombined<TLeftKey, TRightKey, TRightValue>,
+			TRightKey, TRightValue,
+			Resolvers<BaseResolver<TRightKey, TRightValue>>,
+			TRightValue>(
+			new NonExecutableQuery<TRightCache>(_rightCache),
+			pairedCore,
+			new Resolvers<BaseResolver<TRightKey, TRightValue>>(new BaseResolver<TRightKey, TRightValue>()),
+			0);
+
+		// NoFilter.Apply() is JIT-elided. The filter narrows pairs in place; it cannot add or renumber
+		// them. A throw here (user lambda) must leave disposal to the fan-out.
+		builder = _filter.Apply(builder);
+
+		fanOut.MarkPairsHandedOff();
+		ref var core = ref Unsafe.AsRef(in builder._leftQuery);
+		if (fanOut.SingleLeftPerRight) {
+			// No right is shared, so a pair's JoinedKey is its whole chain: the plain paired execute (the
+			// store calls Add(pair.JoinedKey, value)) delivers exactly what a Delivery would, without the
+			// wrapper, the right key or the slot lookup.
+			core.ExecutePaired(ref container);
+			return;
 		}
+
+		var delivery = new JoinManyFanOut<TLeftKey, TRightKey>.Delivery<TRightValue, TContainer>(
+			container, core._candidates, fanOut.Heads, fanOut.NodeLefts, fanOut.NodeNexts);
+		core.ExecutePairedJoined(ref delivery);
+		container = delivery.Inner;
 	}
 
 	// ── Core outer execution ─────────────────────────────────────────────────
 
 	/// <summary>
-	/// Walks input lefts: per-leftKey resolve Reverse → lookupKey → selector →
-	/// rightIndexKey → right bucket; Init the keyed buffer for THIS left; emit
-	/// a pair per right with the borrowed LeftKeySetView. When multiple input
-	/// lefts share a lookupKey the pair-set's rightKey dedup collapses the
-	/// duplicate emissions naturally (same forward-bucket view, same rights →
-	/// same pairs). ExecutePaired walks pairs and OuterFanOutContainer iterates
-	/// the set to write per-left. No distinct-lookup pre-pass needed.
+	/// Walks input lefts: per left resolve the right bucket, record its pairs and <c>Init</c> the slot
+	/// with the pairs recorded; then <c>PrepareSharedBuffer</c>, register the pooled buffer with
+	/// <paramref name="disposer"/> (before any user code can throw) and run the single paired execute.
 	/// </summary>
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	private void ExecuteOuter<TContainer>(ref TContainer container, ReadOnlySpan<TLeftKey> leftKeys)
+	private void ExecuteOuter<TContainer>(ref TContainer container, ReadOnlySpan<TLeftKey> leftKeys,
+		ref QueryResultsDisposer disposer)
 		where TContainer : struct, IJoinedKeyedResultContainer<TLeftKey, TRightValue>, allows ref struct {
 
 		if (leftKeys.IsEmpty)
 			return;
 
-		var pairs = new ValueSet<JoinedKeyPair<LeftKeySetView<TLeftKey>, TRightKey>, DefaultKeyComparer<JoinedKeyPair<LeftKeySetView<TLeftKey>, TRightKey>>>(leftKeys.Length);
-		var handedOff = false;
+		var fanOut = new JoinManyFanOut<TLeftKey, TRightKey>(leftKeys.Length);
 		try {
 			foreach (var leftKey in leftKeys) {
-				if (!_leftIndex.Reverse.TryGetValue(leftKey, out var lookupKey))
+				if (!TryGetBucket(leftKey, out var bucket))
 					continue;
 
-				TRightIndexKey rightIndexKey = TSelector.IsIdentity
-					? Unsafe.As<TLookupKey, TRightIndexKey>(ref lookupKey)
-					: _selector.Select(lookupKey);
-
-				var rightsBucket = _rightIndex.GetValuesUnsafe(rightIndexKey);
-				if (rightsBucket is null || rightsBucket.Count == 0)
-					continue;
-
-				container.Init(leftKey, rightsBucket.Count);
-
-				var leftsBucket = _leftIndex.GetValuesUnsafe(lookupKey);
-				if (leftsBucket is null) continue;
-				var view = new LeftKeySetView<TLeftKey>(leftsBucket);
-				pairs.UnionWith(JoinedKeyPair<LeftKeySetView<TLeftKey>, TRightKey>.IntoKeyed(view), rightsBucket);
+				var added = fanOut.RecordBucket(leftKey, bucket);
+				if (added > 0)
+					container.Init(leftKey, added);
 			}
 
+			// PrepareSharedBuffer allocates the contiguous TRightValue[] partitioned per left;
+			// register it for pooled return BEFORE the execute so a throw inside the user filter
+			// cannot strand the rental.
 			container.PrepareSharedBuffer();
+			RegisterPooledBuffer(ref disposer, container.GetSharedBuffer());
 
-			if (!pairs.IsInitlized || pairs.Count == 0)
-				return;
-
-			var dataCache = _rightCache.Cache;
-			var pairedCore = new PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>(dataCache, pairs);
-			var builder = new CacheQueryBuilderCombined<
-				NonExecutableQuery<TRightCache>,
-				PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>,
-				TRightKey, TRightValue,
-				Resolvers<BaseResolver<TRightKey, TRightValue>>,
-				TRightValue>(
-				new NonExecutableQuery<TRightCache>(_rightCache),
-				pairedCore,
-				new Resolvers<BaseResolver<TRightKey, TRightValue>>(new BaseResolver<TRightKey, TRightValue>()),
-				0);
-			builder = _filter.Apply(builder);
-
-			var wrapper = new OuterFanOutContainer<TContainer>(container);
-			handedOff = true;
-			Unsafe.AsRef(in builder._leftQuery).ExecutePaired(ref wrapper);
+			ExecutePairs(ref fanOut, ref container);
 		}
 		finally {
-			if (!handedOff && pairs.IsInitlized) pairs.Dispose();
+			fanOut.Dispose();
 		}
 	}
 
@@ -547,18 +543,14 @@ public struct JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookup
 		ref TAccessor accessor, bool cloneOnAdd, bool shouldPool, ref QueryResultsDisposer disposer) {
 		// Pool the per-left child buffer only when a disposer exists to return it (pooled execution).
 		var inner = new InnerKeyedContainer<TAccessor>(accessor, cloneOnAdd, disposer.IsActive);
-		try {
-			ExecuteOuter(ref inner, accessor.GetKeys<TLeftKey>());
-		} finally {
-			// Register even on a user-filter throw mid-ExecuteOuter — only the disposer can
-			// still return the already-rented buffer on that path.
-			RegisterPooledBuffer(ref disposer, inner.GetSharedBuffer());
-		}
+		ExecuteOuter(ref inner, accessor.GetKeys<TLeftKey>(), ref disposer);
 	}
 
 	void IJoinManyResolver<TLeftKey, TLeftValue, TRightValue>.ExecuteReverseMany<TContainer>(
 		ref TContainer container, ReadOnlySpan<TLeftKey> keys) {
-		ExecuteOuter(ref container, keys);
+		// The caller owns the container's buffer; an inert disposer makes registration a no-op.
+		var disposer = default(QueryResultsDisposer);
+		ExecuteOuter(ref container, keys, ref disposer);
 	}
 
 	// Register the rented contiguous child buffer for return to the pool on result Dispose.
@@ -574,6 +566,13 @@ public struct JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookup
 		_ = leftQuery.GetCandidates<TLeftKey>();
 	}
 
+	/// <summary>
+	/// Inner-join attach path: the same recording flow as <c>ExecuteOuter</c> over the candidate set,
+	/// materialising each candidate's result slot before <c>Init</c>; a post-walk
+	/// <c>RetainNonEmptyManySlots</c> drops lefts whose per-left <see cref="QueryResults{TRightValue}"/>
+	/// stayed empty (no rights, or the filter rejected all of them) and narrows candidates to the
+	/// survivors.
+	/// </summary>
 	void IJoinResolver.UnsafeExecuteIndexedInner<TAccessor, TExecutor>(
 		ref TAccessor accessor,
 		ref TExecutor leftQuery,
@@ -584,42 +583,29 @@ public struct JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookup
 		if (!candidates.IsInitlized || candidates.Count == 0)
 			return;
 
-		var distinctLookups = new ValueSet<TLookupKey, DefaultKeyComparer<TLookupKey>>(candidates.Count);
-		var pairs = new ValueSet<JoinedKeyPair<LeftKeySetView<TLeftKey>, TRightKey>, DefaultKeyComparer<JoinedKeyPair<LeftKeySetView<TLeftKey>, TRightKey>>>(candidates.Count);
-		var handedOff = false;
 		var inner = new InnerKeyedContainer<TAccessor>(accessor, cloneOnAdd, disposer.IsActive);
+		var fanOut = new JoinManyFanOut<TLeftKey, TRightKey>(candidates.Count);
 		try {
-			foreach (var leftKey in candidates)
-				if (_leftIndex.Reverse.TryGetValue(leftKey, out var lookupKey))
-					distinctLookups.Add(lookupKey);
-
-			foreach (var lookupKey in distinctLookups) {
-				var leftsBucket = _leftIndex.GetValuesUnsafe(lookupKey);
-				if (leftsBucket is null || leftsBucket.Count == 0)
+			var anyPairs = false;
+			foreach (var leftKey in candidates) {
+				if (!TryGetBucket(leftKey, out var bucket))
 					continue;
 
-				var lookupKeyLocal = lookupKey;
-				TRightIndexKey rightIndexKey = TSelector.IsIdentity
-					? Unsafe.As<TLookupKey, TRightIndexKey>(ref lookupKeyLocal)
-					: _selector.Select(lookupKey);
+				// For inner mode, the slot doesn't pre-exist (no outer base execute ran yet).
+				// Materialise it via GetValueRefOrAddDefault BEFORE Init — otherwise Init's
+				// GetValueRef call returns NullRef and silently skips _totalCount tracking,
+				// leaving PrepareSharedBuffer with a zero-length buffer.
+				_ = accessor.GetValueRefOrAddDefault<TLeftKey, QueryResults<TRightValue>>(leftKey, out _);
 
-				var rightsBucket = _rightIndex.GetValuesUnsafe(rightIndexKey);
-				if (rightsBucket is null || rightsBucket.Count == 0)
-					continue;
-
-				// Init slots only for lefts inside candidates — others won't get a buffer.
-				foreach (var lk in leftsBucket) {
-					if (!candidates.Contains(lk))
-						continue;
-					_ = accessor.GetValueRefOrAddDefault<TLeftKey, QueryResults<TRightValue>>(lk, out _);
-					inner.Init(lk, rightsBucket.Count);
+				var added = fanOut.RecordBucket(leftKey, bucket);
+				if (added > 0) {
+					inner.Init(leftKey, added);
+					anyPairs = true;
 				}
-
-				var view = new LeftKeySetView<TLeftKey>(leftsBucket);
-				pairs.UnionWith(JoinedKeyPair<LeftKeySetView<TLeftKey>, TRightKey>.IntoKeyed(view), rightsBucket);
 			}
 
-			if (!pairs.IsInitlized || pairs.Count == 0) {
+			if (!anyPairs) {
+				// No left has any right — Inner semantic narrows to empty.
 				candidates.IntersectWith(ReadOnlySpan<TLeftKey>.Empty);
 				return;
 			}
@@ -627,36 +613,21 @@ public struct JoinManyLeftSymResolver<TLeftKey, TLeftValue, TRightCache, TLookup
 			inner.PrepareSharedBuffer();
 			RegisterPooledBuffer(ref disposer, inner.GetSharedBuffer());
 
-			var dataCache = _rightCache.Cache;
-			var pairedCore = new PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>(dataCache, pairs);
-			var builder = new CacheQueryBuilderCombined<
-				NonExecutableQuery<TRightCache>,
-				PairedCacheQueryBuilderCoreCombined<LeftKeySetView<TLeftKey>, TRightKey, TRightValue>,
-				TRightKey, TRightValue,
-				Resolvers<BaseResolver<TRightKey, TRightValue>>,
-				TRightValue>(
-				new NonExecutableQuery<TRightCache>(_rightCache),
-				pairedCore,
-				new Resolvers<BaseResolver<TRightKey, TRightValue>>(new BaseResolver<TRightKey, TRightValue>()),
-				0);
-			builder = _filter.Apply(builder);
+			ExecutePairs(ref fanOut, ref inner);
 
-			var wrapper = new InnerFanOutContainer<InnerKeyedContainer<TAccessor>>(inner, ref candidates);
-			handedOff = true;
-			Unsafe.AsRef(in builder._leftQuery).ExecutePaired(ref wrapper);
-
+			// Post-walk: drop slots with QueryResults.Count == 0 (no rights or all filtered out)
+			// and narrow candidates to surviving keys. Subsequent base execute fills Left for survivors.
 			accessor.RetainNonEmptyManySlots<TLeftKey, TRightValue>(ref candidates);
 		}
 		finally {
-			if (distinctLookups.IsInitlized) distinctLookups.Dispose();
-			if (!handedOff && pairs.IsInitlized) pairs.Dispose();
+			fanOut.Dispose();
 		}
 	}
 
 	/// <summary>
-	/// Keyed inner container used during inner-mode execution. Same shape as
-	/// the legacy ManyResolver's container — Init tracks per-left capacity,
-	/// PrepareSharedBuffer allocates the contiguous TRightValue[] partition.
+	/// Keyed inner container used during execution. Same shape as the legacy ManyResolver's
+	/// container — Init tracks per-left capacity, PrepareSharedBuffer allocates the contiguous
+	/// TRightValue[] partition.
 	/// </summary>
 	private ref struct InnerKeyedContainer<TAccessor> : IJoinedKeyedResultContainer<TLeftKey, TRightValue>
 		where TAccessor : struct, IUnsafeValueAccessor, allows ref struct {

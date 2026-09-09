@@ -6,7 +6,6 @@ using Prague.Core.TypeSystem;
 using NUnit.Framework;
 
 /// <summary>
-///   <b>These tests document a known defect, so they assert the broken numbers.</b>
 ///
 ///   <see cref="JoinManyCollectionResolver{TLeftKey,TLeftValue,TRightCache,TRightKey,TRightValue,TOwnerValue,TFilter}"/>
 ///   sizes each left's slot from a live <c>rights.Count</c> and then enumerates that same set to
@@ -15,10 +14,9 @@ using NUnit.Framework;
 ///   a slot can be over-delivered two ways: an element added to the walked collection between the
 ///   count and the walk, and an owner gaining the element after its own slot was sized.
 ///
-///   <see cref="QueryResults{T}.UnsafeAdd"/> drops the surplus rather than failing the query, so
-///   this is lossy, never fatal (see context/joins.md, "Concurrency"). Fixing the sizing is #59's
-///   job; when it lands, the reserved and delivered counts below become equal and these tests fail
-///   — that is the point of them.
+///   The fan-out fixed that: the resolver records explicit (left, right) pairs from the same walk it
+///   sizes the slot from, and no longer consults a live lefts set at delivery time, so reserved and
+///   delivered are equal by construction. These tests asserted the broken numbers until then.
 /// </summary>
 [TestFixture]
 public class JoinManyCollectionSlotSizingTests {
@@ -37,7 +35,7 @@ public class JoinManyCollectionSlotSizingTests {
 	// tag 10's slot has been sized for one book. Tag 10's own walk then finds two, and both fan out
 	// back to tag 10.
 	[Test]
-	public void ExecuteOuter_OwnerGainsAnElementAfterSlotSized_OverfillsThatOwnersSlot() {
+	public void ExecuteOuter_OwnerGainsAnElementAfterSlotSized_DeliversExactlyWhatItReserved() {
 		_tagCache.AddOrUpdate(10, new MnTag { Id = 10, Name = "fantasy" });
 		_tagCache.AddOrUpdate(20, new MnTag { Id = 20, Name = "classic" });
 		_bookCache.AddOrUpdate(1, new MnTaggedBook { Id = 1, Title = "Hobbit", TagIds = new List<int> { 10, 20 } });
@@ -51,19 +49,15 @@ public class JoinManyCollectionSlotSizingTests {
 
 		Resolver().ExecuteReverseMany(ref container, new[] { 10, 20 });
 
-		Assert.Multiple(() => {
-			Assert.That(log.Capacity[10], Is.EqualTo(1), "tag 10 was sized when only book 1 carried it");
-			Assert.That(log.Adds[10], Is.EqualTo(2), "…and was then handed book 2 as well");
-			Assert.That(log.Capacity[20], Is.EqualTo(2), "tag 20 was sized after, so its slot is right");
-			Assert.That(log.Adds[20], Is.EqualTo(2));
-		});
+		Assert.That(log.Adds, Is.EqualTo(log.Capacity),
+			"every left must be delivered exactly the rows its own walk reserved for it");
 	}
 
 	// The same defect through real per-left QueryResults over one shared buffer: the surplus row is
 	// dropped, and the query does not fail.
 	[Test]
 	[NonParallelizable]
-	public void JoinManyCollection_SurplusRowIsDroppedNotThrown() {
+	public void JoinManyCollection_NothingIsDropped() {
 		QueryResultsDiagnostics.ResetDroppedRows();
 		QueryResultsDiagnostics.ThrowOnSlotOverflowInDebug = false;
 		try {
@@ -79,8 +73,8 @@ public class JoinManyCollectionSlotSizingTests {
 			var container = new SlotSizingContainer(log, new SlotState(10, 20));
 
 			Assert.That(() => Resolver().ExecuteReverseMany(ref container, new[] { 10, 20 }), Throws.Nothing);
-			Assert.That(QueryResultsDiagnostics.DroppedRows, Is.EqualTo(1),
-				"tag 10's slot had room for 1 and the fan-out delivered 2");
+			Assert.That(QueryResultsDiagnostics.DroppedRows, Is.Zero,
+				"a slot was handed more rows than it reserved");
 		} finally {
 			QueryResultsDiagnostics.ThrowOnSlotOverflowInDebug = true;
 		}
@@ -88,8 +82,8 @@ public class JoinManyCollectionSlotSizingTests {
 
 	private IJoinManyResolver<int, MnTag, MnTaggedBook> Resolver()
 		=> new JoinManyCollectionResolver<int, MnTag, InMemoryDataCache<int, MnTaggedBook>, int, MnTaggedBook, MnTaggedBook,
-			NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<InMemoryDataCache<int, MnTaggedBook>>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<int>, int, MnTaggedBook>, int, MnTaggedBook, Resolvers<BaseResolver<int, MnTaggedBook>>, MnTaggedBook>>>(
-			_index.Forward, _index.Reverse, _bookCache, default);
+			NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<InMemoryDataCache<int, MnTaggedBook>>, PairedCacheQueryBuilderCoreCombined<int, int, MnTaggedBook>, int, MnTaggedBook, Resolvers<BaseResolver<int, MnTaggedBook>>, MnTaggedBook>>>(
+			_index.Forward, _bookCache, default);
 
 	private sealed class SlotLog {
 		public readonly Dictionary<int, int> Capacity = new();
