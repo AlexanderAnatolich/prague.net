@@ -163,13 +163,13 @@
         "dotnet": ".NET 9.0.19",
         "coreCount": 12
       },
-      "commit": "5d5a794",
-      "timestampUtc": "2026-09-08T23:50:19.5225000Z",
+      "commit": "089952f",
+      "timestampUtc": "2026-09-09T00:25:53.6858940Z",
       "metrics": [
         {
           "id": "query.sortDistinct.p50",
           "unit": "ns",
-          "value": 18912.300117492676,
+          "value": 18872.01869506836,
           "higherIsBetter": false
         },
         {
@@ -181,7 +181,7 @@
         {
           "id": "query.sortTied.p50",
           "unit": "ns",
-          "value": 16050.099188232422,
+          "value": 16124.145523071289,
           "higherIsBetter": false
         },
         {
@@ -193,13 +193,31 @@
         {
           "id": "query.sortTiedJoined.p50",
           "unit": "ns",
-          "value": 218185.44399414063,
+          "value": 210544.06528320312,
+          "higherIsBetter": false
+        },
+        {
+          "id": "query.sortTiedJoinedBoundedPage.p50",
+          "unit": "ns",
+          "value": 209213.56203613282,
+          "higherIsBetter": false
+        },
+        {
+          "id": "query.sortTiedLeftThenJoinClassic.p50",
+          "unit": "ns",
+          "value": 55902.03372192383,
+          "higherIsBetter": false
+        },
+        {
+          "id": "query.sortTiedLeftThenJoinBounded.p50",
+          "unit": "ns",
+          "value": 20091.56450653076,
           "higherIsBetter": false
         },
         {
           "id": "query.sortBoundedPage.p50",
           "unit": "ns",
-          "value": 7950.4854736328125,
+          "value": 7981.916040039063,
           "higherIsBetter": false
         },
         {
@@ -211,13 +229,7 @@
         {
           "id": "query.sortBoundedFullPage.p50",
           "unit": "ns",
-          "value": 34954.201416015625,
-          "higherIsBetter": false
-        },
-        {
-          "id": "query.sortBoundedFullPage.alloc",
-          "unit": "bytes",
-          "value": 1,
+          "value": 35101.19071044922,
           "higherIsBetter": false
         }
       ]

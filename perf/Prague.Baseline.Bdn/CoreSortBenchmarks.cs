@@ -86,6 +86,37 @@ public class CoreSortBenchmarks {
 		return r.Count;
 	}
 
+	// The bounded plan on the joined path, at a page far smaller than the result. Its win here is not
+	// the sort: join slots are filled for page rows only, so it skips the fill for everything outside
+	// the page, and the fill dominates. Paired with SortTiedJoined this says what the bounded plan is
+	// actually worth on a joined query.
+	[Benchmark] public int SortTiedJoinedBoundedPage() {
+		using var r = _products.Query()
+			.JoinMany(_offers.Cache, _offers.ProductIdIndex)
+			.SortBounded(new ByJoinedPrimaryValue())
+			.ExecutePooled(0, 20);
+		return r.Count;
+	}
+
+	// Sort declared BEFORE the join with a left-value comparer. This is the only joined shape the
+	// bounded plan can take: canBound requires SorterOrdersByLeftValues, so a comparer over the joined
+	// row falls back to the classic plan without saying so.
+	[Benchmark] public int SortTiedLeftThenJoinClassic() {
+		using var r = _products.Query()
+			.Sort(new ByPrimaryValue())
+			.JoinMany(_offers.Cache, _offers.ProductIdIndex)
+			.ExecutePooled(0, 20);
+		return r.Count;
+	}
+
+	[Benchmark] public int SortTiedLeftThenJoinBounded() {
+		using var r = _products.Query()
+			.SortBounded(new ByPrimaryValue())
+			.JoinMany(_offers.Cache, _offers.ProductIdIndex)
+			.ExecutePooled(0, 20);
+		return r.Count;
+	}
+
 	// Bounded plan at a page small enough that selecting beats sorting.
 	[Benchmark] public int SortBoundedPage() {
 		using var r = _products.Query().SortBounded(new ByPrimaryValue()).ExecutePooled(0, 20);
