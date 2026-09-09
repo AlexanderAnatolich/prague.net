@@ -163,13 +163,13 @@
         "dotnet": ".NET 9.0.19",
         "coreCount": 12
       },
-      "commit": "ced408d",
-      "timestampUtc": "2026-09-09T09:07:31.5354460Z",
+      "commit": "49e7ae8",
+      "timestampUtc": "2026-09-09T09:43:05.3722360Z",
       "metrics": [
         {
           "id": "query.sortDistinct.p50",
           "unit": "ns",
-          "value": 11541.756397501627,
+          "value": 11536.027284749349,
           "higherIsBetter": false
         },
         {
@@ -181,7 +181,7 @@
         {
           "id": "query.sortTied.p50",
           "unit": "ns",
-          "value": 9269.230269368489,
+          "value": 9272.753356933594,
           "higherIsBetter": false
         },
         {
@@ -193,7 +193,7 @@
         {
           "id": "query.sortTiedJoined.p50",
           "unit": "ns",
-          "value": 227422.35597446986,
+          "value": 199247.8007405599,
           "higherIsBetter": false
         },
         {
@@ -205,7 +205,7 @@
         {
           "id": "query.sortTiedJoinedBoundedPage.p50",
           "unit": "ns",
-          "value": 223486.94361979168,
+          "value": 197713.88201497396,
           "higherIsBetter": false
         },
         {
@@ -217,7 +217,7 @@
         {
           "id": "query.sortTiedLeftThenJoinClassic.p50",
           "unit": "ns",
-          "value": 61954.24733189174,
+          "value": 30592.630708821616,
           "higherIsBetter": false
         },
         {
@@ -229,7 +229,7 @@
         {
           "id": "query.sortTiedLeftThenJoinBounded.p50",
           "unit": "ns",
-          "value": 20467.062109810966,
+          "value": 20385.110032301684,
           "higherIsBetter": false
         },
         {
@@ -241,7 +241,7 @@
         {
           "id": "query.sortBoundedPage.p50",
           "unit": "ns",
-          "value": 7497.363519396101,
+          "value": 7673.812334187825,
           "higherIsBetter": false
         },
         {
@@ -253,7 +253,7 @@
         {
           "id": "query.sortBoundedFullPage.p50",
           "unit": "ns",
-          "value": 32740.308663504464,
+          "value": 33111.34709472656,
           "higherIsBetter": false
         },
         {
