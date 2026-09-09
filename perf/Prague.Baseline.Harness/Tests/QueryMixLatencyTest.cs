@@ -29,7 +29,7 @@ public sealed class QueryMixLatencyTest : ILatencyTest {
 		for (var i = 0; i < iterations; i++) {
 			var id = (i % ScenarioSpec.ProductCount) + 1;
 			var t0 = StopwatchUtil.GetTimestamp();
-			using var r = products.Query().WithRange(q => q.Gte(id))
+			using var r = products.Query().WithRange(static (q, a) => q.Gte(a), id)
 				.JoinWithBaselineProductInfo()
 				.JoinMany(offers.Cache, offers.ProductIdIndex)
 				.ExecutePooled();

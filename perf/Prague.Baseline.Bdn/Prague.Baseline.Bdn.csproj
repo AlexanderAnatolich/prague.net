@@ -11,6 +11,20 @@
   <ItemGroup>
     <PackageReference Include="BenchmarkDotNet" Version="0.15.8" />
   </ItemGroup>
+  <!--
+    ArrayPool<T>.Shared trims on every gen2 collection, and when the runtime reports High memory
+    load (system-wide load at or above 90% of the GC's high-memory threshold, itself 90% of physical
+    RAM by default) the trim clears every thread-local pool slot. BDN forces a gen2 right before its
+    allocation-measurement iteration, so on a busy laptop the pooled query shapes re-rented every
+    buffer they touch inside the measured iteration: ~1.7 MB on JoinMany, read as ~204 B/op, coming
+    and going with the host's memory load (issue #74). Raising the threshold to 99% keeps the pool
+    out of High unless the machine is genuinely swapping, so the tripwire measures Prague's steady
+    state (0 B on every pooled shape) instead of the host. Below High the trim only drops slots idle
+    for 15-30 s, which never happens inside a run.
+  -->
+  <ItemGroup>
+    <RuntimeHostConfigurationOption Include="System.GC.HighMemoryPercent" Value="99" />
+  </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Prague.Baseline.Scenario\Prague.Baseline.Scenario.csproj" />
     <ProjectReference Include="..\..\src\Prague.Core\Prague.Core.csproj" />

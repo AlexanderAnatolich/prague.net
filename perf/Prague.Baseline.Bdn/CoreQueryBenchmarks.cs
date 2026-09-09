@@ -51,24 +51,24 @@ public class CoreQueryBenchmarks {
 	}
 
 	[Benchmark] public int RangeScan() {
-		using var r = _products.Query().WithRange(q => q.Gte(NextId())).ExecutePooled();
+		using var r = _products.Query().WithRange(static (q, id) => q.Gte(id), NextId()).ExecutePooled();
 		return r.Count;
 	}
 
 	[Benchmark] public int JoinOne() {
-		using var r = _products.Query().WithRange(q => q.Gte(NextId()))
+		using var r = _products.Query().WithRange(static (q, id) => q.Gte(id), NextId())
 			.JoinWithBaselineProductInfo().ExecutePooled();
 		return r.Count;
 	}
 
 	[Benchmark] public int JoinMany() {
-		using var r = _products.Query().WithRange(q => q.Gte(NextId()))
+		using var r = _products.Query().WithRange(static (q, id) => q.Gte(id), NextId())
 			.JoinMany(_offers.Cache, _offers.ProductIdIndex).ExecutePooled();
 		return r.Count;
 	}
 
 	[Benchmark] public int MultiJoin() {
-		using var r = _products.Query().WithRange(q => q.Gte(NextId()))
+		using var r = _products.Query().WithRange(static (q, id) => q.Gte(id), NextId())
 			.JoinWithBaselineProductInfo()
 			.JoinMany(_offers.Cache, _offers.ProductIdIndex)
 			.ExecutePooled();

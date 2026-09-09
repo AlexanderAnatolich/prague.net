@@ -28,13 +28,12 @@ internal static class BdnResultExport {
 					// core-only (BDN) has no percentile: `.p50` carries BDN's Mean as a
 					// stable per-op proxy; true percentiles come from the harness config.
 					metrics.Add(new Metric($"query.{type}.p50", "ns", meanNs, false));
-					// A joined shape's allocation is not reproducible across runs in this harness —
-					// measured 64 B and 268 B for the same code on consecutive runs — so gating it
-					// would fail the tripwire at random. p50 for that shape is stable to ~1%.
-					// query.joinMany.alloc and query.multiJoin.alloc predate this and have the same
-					// problem; they are left as they are rather than silently dropped.
-					if (!SkipAllocMetric(name))
-						metrics.Add(new Metric($"query.{type}.alloc", "bytes", allocBytes, false));
+					// Every shape's allocation is gated. The joined shapes used to flap between runs
+					// (64 B vs 268 B for the same code) because ArrayPool<T>.Shared re-rented its buffers
+					// inside BDN's measured iteration whenever the host's memory load was high; the
+					// project's System.GC.HighMemoryPercent setting keeps the pool warm, so the reading
+					// is Prague's steady state and deterministic (issue #74).
+					metrics.Add(new Metric($"query.{type}.alloc", "bytes", allocBytes, false));
 				}
 			}
 		}
@@ -47,16 +46,6 @@ internal static class BdnResultExport {
 		ResultWriter.Write(outPath, result);
 		Console.WriteLine($"[baseline] wrote {outPath} ({metrics.Count} metrics)");
 	}
-
-	// Joined shapes measure 224 B and 24 B on consecutive identical runs, the way
-	// query.joinMany.alloc flips between 64 B and ~268 B. SortBoundedFullPage allocates a fraction of
-	// a byte per op, which BDN rounds to 0 or 1 from run to run — gated against a zero baseline, that
-	// reads as an infinite regression. Neither is a number worth failing a build over; their p50s are
-	// stable to ~1%.
-	private static bool SkipAllocMetric(string method)
-		=> method is "SortTiedJoined" or "SortTiedJoinedBoundedPage"
-			or "SortTiedLeftThenJoinClassic" or "SortTiedLeftThenJoinBounded"
-			or "SortBoundedFullPage";
 
 	private static string MapQueryType(string method) => method switch {
 		"UniqueLookup" => "uniqueLookup",

@@ -67,10 +67,19 @@ silently, both now hard errors:
 - **A baselined metric missing from the run.** A renamed or dropped benchmark is
   simply not compared, so a whole scenario can silently stop being watched.
 
-A note on noise: the `*.alloc` metrics on the JoinMany-family shapes have been
-observed to vary run-to-run on a laptop (65 B on one run, 268 B on the next at the
-same commit) against a 2% band. Confirm a suspected regression with a second run
-before treating it as real, and prefer a quiet machine.
+A note on the `*.alloc` metrics: the BDN process runs with
+`System.GC.HighMemoryPercent=99` (set in `Prague.Baseline.Bdn.csproj`).
+`ArrayPool<T>.Shared` trims on gen2, and when the runtime reports High memory
+load it clears every thread-local pool slot; BDN forces a gen2 right before its
+allocation-measurement iteration, so on a busy laptop the pooled shapes re-rented
+every buffer they touch inside that iteration. That re-warm read as ~204 B/op on
+`joinMany`/`multiJoin`, appearing and disappearing with the host's memory load
+(the 65 B ↔ 268 B flip; issue #74). With the threshold raised the pool stays warm
+and every pooled query shape reads a flat 0 B, which `compare.py` gates strictly:
+against a zero baseline any byte is a regression. If a pooled shape reads
+non-zero, it is a real per-query allocation — a `this`- or local-capturing lambda
+at the call site is the usual cause (use the `TArgs` overloads with a `static`
+lambda).
 
 ## Metrics
 
