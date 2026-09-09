@@ -155,6 +155,72 @@
           "higherIsBetter": false
         }
       ]
+    },
+    "core-sort": {
+      "env": {
+        "cpu": "cpu",
+        "os": "Darwin 25.2.0 Darwin Kernel Version 25.2.0: Tue Nov 18 21:09:56 PST 2025; root:xnu-12377.61.12~1/RELEASE_ARM64_T6041",
+        "dotnet": ".NET 9.0.19",
+        "coreCount": 12
+      },
+      "commit": "5d5a794",
+      "timestampUtc": "2026-09-08T23:50:19.5225000Z",
+      "metrics": [
+        {
+          "id": "query.sortDistinct.p50",
+          "unit": "ns",
+          "value": 18912.300117492676,
+          "higherIsBetter": false
+        },
+        {
+          "id": "query.sortDistinct.alloc",
+          "unit": "bytes",
+          "value": 88,
+          "higherIsBetter": false
+        },
+        {
+          "id": "query.sortTied.p50",
+          "unit": "ns",
+          "value": 16050.099188232422,
+          "higherIsBetter": false
+        },
+        {
+          "id": "query.sortTied.alloc",
+          "unit": "bytes",
+          "value": 88,
+          "higherIsBetter": false
+        },
+        {
+          "id": "query.sortTiedJoined.p50",
+          "unit": "ns",
+          "value": 218185.44399414063,
+          "higherIsBetter": false
+        },
+        {
+          "id": "query.sortBoundedPage.p50",
+          "unit": "ns",
+          "value": 7950.4854736328125,
+          "higherIsBetter": false
+        },
+        {
+          "id": "query.sortBoundedPage.alloc",
+          "unit": "bytes",
+          "value": 0,
+          "higherIsBetter": false
+        },
+        {
+          "id": "query.sortBoundedFullPage.p50",
+          "unit": "ns",
+          "value": 34954.201416015625,
+          "higherIsBetter": false
+        },
+        {
+          "id": "query.sortBoundedFullPage.alloc",
+          "unit": "bytes",
+          "value": 1,
+          "higherIsBetter": false
+        }
+      ]
     }
   }
 }
