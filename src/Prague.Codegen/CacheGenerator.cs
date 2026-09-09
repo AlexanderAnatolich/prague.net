@@ -6688,7 +6688,7 @@ public class CacheGenerator : IIncrementalGenerator {
 					var collCacheFqn = $"global::{allCacheInfo.First(c => c.CacheClassName == otherCacheName).Namespace}.{otherCacheName}";
 
 					var nonExecBuilderColl = $"CacheQueryBuilderCombined<Prague.Core.TypeSystem.NonExecutableQuery<{collCacheFqn}>, " +
-					                         $"PairedCacheQueryBuilderCoreCombined<LeftKeySetView<{keyTypeName}>, {otherKeyTypeName}, {otherTypeFullName}>, " +
+					                         $"PairedCacheQueryBuilderCoreCombined<{keyTypeName}, {otherKeyTypeName}, {otherTypeFullName}>, " +
 					                         $"{otherKeyTypeName}, {otherTypeFullName}, " +
 					                         $"Resolvers<BaseResolver<{otherKeyTypeName}, {otherTypeFullName}>>, {otherTypeFullName}>";
 
@@ -6881,7 +6881,7 @@ public class CacheGenerator : IIncrementalGenerator {
 					var fwdIndexFieldName = $"{fwdForeignKeyPropertyName}Index";
 
 					var nonExecBuilderFwdColl = $"CacheQueryBuilderCombined<Prague.Core.TypeSystem.NonExecutableQuery<{fwdReferencedCacheClassFqn}>, " +
-					                            $"PairedCacheQueryBuilderCoreCombined<LeftKeySetView<{keyTypeName}>, {fwdReferencedKeyTypeName}, {fwdReferencedTypeFullName}>, " +
+					                            $"PairedCacheQueryBuilderCoreCombined<{keyTypeName}, {fwdReferencedKeyTypeName}, {fwdReferencedTypeFullName}>, " +
 					                            $"{fwdReferencedKeyTypeName}, {fwdReferencedTypeFullName}, " +
 					                            $"Resolvers<BaseResolver<{fwdReferencedKeyTypeName}, {fwdReferencedTypeFullName}>>, {fwdReferencedTypeFullName}>";
 

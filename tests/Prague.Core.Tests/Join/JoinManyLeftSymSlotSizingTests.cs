@@ -6,7 +6,6 @@ using Prague.Core.TypeSystem;
 using NUnit.Framework;
 
 /// <summary>
-///   <b>These tests document a known defect, so they assert the broken numbers.</b>
 ///
 ///   <see cref="JoinManyLeftSymResolver{TLeftKey,TLeftValue,TRightCache,TLookupKey,TRightIndexKey,TRightKey,TRightValue,TFilter,TSelector}"/>
 ///   sizes each left's slot from a live <c>rightsBucket.Count</c> but delivers rows by fanning every
@@ -16,10 +15,9 @@ using NUnit.Framework;
 ///   reserved. Unlike the right-list resolver, recording the pairs is not enough to fix it — one
 ///   recorded pair fans out to N lefts with N read later.
 ///
-///   <see cref="QueryResults{T}.UnsafeAdd"/> drops the surplus rather than failing the query, so
-///   this is lossy, never fatal (see context/joins.md, "Concurrency"). Fixing the sizing is #59's
-///   job; when it lands, the reserved and delivered counts below become equal and these tests fail
-///   — that is the point of them.
+///   The fan-out fixed that: the resolver records explicit (left, right) pairs during the walk and
+///   sizes each left's slot from the pairs recorded for it, so reserved and delivered are equal by
+///   construction and no row is ever dropped. These tests asserted the broken numbers until then.
 /// </summary>
 [TestFixture]
 public class JoinManyLeftSymSlotSizingTests {
@@ -37,10 +35,10 @@ public class JoinManyLeftSymSlotSizingTests {
 	}
 
 	// A right added between two lefts of one lookup group. Deterministic: the container's Init hook
-	// stands in for the writer, landing the book after author 1's slot is sized and before author 2's
-	// walk picks it up — after which the fan-out delivers it to author 1 as well.
+	// stands in for the writer, landing the book after author 1's slot has been sized. Author 1 keeps
+	// the slot its own walk recorded, so the late book cannot overfill it.
 	[Test]
-	public void ExecuteOuter_RightAddedBetweenTwoLeftsOfAGroup_OverfillsTheFirstLeftsSlot() {
+	public void ExecuteOuter_RightAddedBetweenTwoLeftsOfAGroup_DeliversExactlyWhatItReserved() {
 		_authors.AddOrUpdate(1, new MlsAuthor { Id = 1, Country = "UK", Name = "Tolkien" });
 		_authors.AddOrUpdate(2, new MlsAuthor { Id = 2, Country = "UK", Name = "Lewis" });
 		_books.AddOrUpdate(101, new MlsBook { Id = 101, Country = "UK", Title = "Hobbit" });
@@ -53,19 +51,15 @@ public class JoinManyLeftSymSlotSizingTests {
 
 		Resolver().ExecuteReverseMany(ref container, new[] { 1, 2 });
 
-		Assert.Multiple(() => {
-			Assert.That(log.Capacity[1], Is.EqualTo(2), "author 1 was sized before the late book existed");
-			Assert.That(log.Adds[1], Is.EqualTo(3), "…and was then handed it anyway by the fan-out");
-			Assert.That(log.Capacity[2], Is.EqualTo(3), "author 2 was sized after, so its slot is right");
-			Assert.That(log.Adds[2], Is.EqualTo(3));
-		});
+		Assert.That(log.Adds, Is.EqualTo(log.Capacity),
+			"every left must be delivered exactly the rows its own walk reserved for it");
 	}
 
-	// The same defect through the real query pipeline: the surplus row is dropped, the slot says so,
-	// and the query does not fail. This is the behaviour the never-overflow floor guarantees.
+	// The same interleaving through real per-left QueryResults over one shared buffer: nothing
+	// overflows, so the never-overflow floor never has to drop anything.
 	[Test]
 	[NonParallelizable]
-	public void JoinMany_LeftSym_SurplusRowIsDroppedNotThrown() {
+	public void JoinMany_LeftSym_NothingIsDropped() {
 		QueryResultsDiagnostics.ResetDroppedRows();
 		QueryResultsDiagnostics.ThrowOnSlotOverflowInDebug = false;
 		try {
@@ -80,8 +74,8 @@ public class JoinManyLeftSymSlotSizingTests {
 			var container = new SlotSizingContainer(log, new SlotState(1, 2));
 
 			Assert.That(() => Resolver().ExecuteReverseMany(ref container, new[] { 1, 2 }), Throws.Nothing);
-			Assert.That(QueryResultsDiagnostics.DroppedRows, Is.EqualTo(1),
-				"author 1's slot had room for 2 and the fan-out delivered 3");
+			Assert.That(QueryResultsDiagnostics.DroppedRows, Is.Zero,
+				"a slot was handed more rows than it reserved");
 		} finally {
 			QueryResultsDiagnostics.ThrowOnSlotOverflowInDebug = true;
 		}
@@ -89,7 +83,7 @@ public class JoinManyLeftSymSlotSizingTests {
 
 	private IJoinManyResolver<int, MlsAuthor, MlsBook> Resolver()
 		=> new JoinManyLeftSymResolver<int, MlsAuthor, InMemoryDataCache<int, MlsBook>, string, string, int, MlsBook,
-			NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<InMemoryDataCache<int, MlsBook>>, PairedCacheQueryBuilderCoreCombined<LeftKeySetView<int>, int, MlsBook>, int, MlsBook, Resolvers<BaseResolver<int, MlsBook>>, MlsBook>>,
+			NoFilter<CacheQueryBuilderCombined<NonExecutableQuery<InMemoryDataCache<int, MlsBook>>, PairedCacheQueryBuilderCoreCombined<int, int, MlsBook>, int, MlsBook, Resolvers<BaseResolver<int, MlsBook>>, MlsBook>>,
 			IdentitySelector<string>>(_authorCountrySymIdx, _books, _bookCountryIdx, default, default);
 
 	private sealed class SlotLog {

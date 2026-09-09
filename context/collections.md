@@ -26,6 +26,7 @@ Pooled set; `Dispose()` returns the rented array. Surface: `RetainOnly`, `Inters
 **`internal`** struct (was public; made internal by converting `SortResults` to explicit interface impls + deleting dead code — `Result<T>`, `Test`, `IChainedResolvers`). It's still forced into public *generic signatures* across resolver-chain infra, but the type itself is internal.
 - `Intersect(HashSet<TKey>)` — compact-and-rebuild intersect (matching entries compacted via write pointer, metadata table rebuilt with `Array.Fill(-1)` + re-probe). Zero temp alloc.
 - `Filter<TFilter>(TFilter)` where `TFilter : struct, IValueDictionaryFilter<TKey,TValue>` — compact-and-rebuild keyed on `filter.Keep(ref value)`; JIT-inlined per closed generic. Backs `RetainNonNullSlots`.
+- **Two `Dispose` overloads:** `Dispose()` returns metadata + keys only — the values array is the hand-off payload (result maps, `SortResults`). An owner that never hands its values on must call `Dispose(withValues: true)`, otherwise a pooled values array leaks on every call.
 
 ## PooledSet&lt;T&gt; / LeftKeySetView&lt;T&gt;
 
@@ -48,7 +49,7 @@ Pooled set; `Dispose()` returns the rented array. Surface: `RetainOnly`, `Inters
   memory in a limbo batch stamped with pinned slots' sequence numbers and reclaim once
   each has unpinned (store-buffer-litmus fences on both sides; slots recycle through a
   finalizer-backed free list).
-- `LeftKeySetView<T>` (`src/Prague.Core/LeftKeySetView.cs`) — `public readonly struct`, single `internal PooledSet<T> Set` field, internal-only ctor, **zero public members**. Exists only so the LeftSym join resolver's generic signatures can appear publicly without CS0703. Inside Core it's reinterpreted back via `Unsafe.As<LeftKeySetView<T>, PooledSet<T>>(ref view)` — zero-cost (identical single-reference layout). **Do not add public members** unless intentionally exposing set contents.
+- `LeftKeySetView<T>` (`src/Prague.Core/LeftKeySetView.cs`) — `public readonly struct`, single `internal PooledSet<T> Set` field, internal-only ctor, **zero public members**. Exists only so the JoinOne LeftSym resolver's generic signatures can appear publicly without CS0703 (the JoinMany resolvers carry plain `TLeftKey` pairs — see `joins.md`, "JoinMany fan-out"). Inside Core it's reinterpreted back via `Unsafe.As<LeftKeySetView<T>, PooledSet<T>>(ref view)` — zero-cost (identical single-reference layout). **Do not add public members** unless intentionally exposing set contents.
 
 ## IncrementalIntersecter&lt;TKey,TInto&gt;
 
