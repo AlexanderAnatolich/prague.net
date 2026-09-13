@@ -48,6 +48,8 @@ public class PreparedGeneratedFrozenJoinTests {
 		_books.AddOrUpdate(new Book { Id = 100, Title = "orphan", AuthorId = 500, Year = 2000 });
 		for (var p = 0; p < 6; p++)
 			_profiles.AddOrUpdate(new AuthorProfile { Id = p, AuthorId = p, Bio = $"bio{p}", Website = "" });
+		// One profile whose author does not exist — the forward one-to-one join needs a miss.
+		_profiles.AddOrUpdate(new AuthorProfile { Id = 6, AuthorId = 500, Bio = "orphan", Website = "" });
 
 		// Authors 1..3 exist; a quarter of the books point at author 0, who does not.
 		for (var a = 1; a <= 3; a++)
@@ -120,8 +122,9 @@ public class PreparedGeneratedFrozenJoinTests {
 		public int Compare(Author? x, Author? y) => (y?.Id ?? 0).CompareTo(x?.Id ?? 0);
 	}
 
-	// The forward and the inner JoinWith bind on ICacheCarrier, which a SortedQuery discriminator does not
-	// carry (eager too); the reverse outer one-to-one join after a SortBounded is the generated bounded shape.
+	// InnerJoinWith and the filtered flavors bind on ICacheCarrier, which a SortedQuery discriminator does
+	// not carry (eager too), so Sort→JoinWith stays outer-and-no-filter-only; the outer directions all have
+	// a sorted twin since #92. The reverse one-to-one after a SortBounded is the original bounded shape.
 	[Test]
 	public void SortBounded_ThenJoinWith_Outer_FrozenIsBoundedPipeline_LikeEager() {
 		var cmp = new AuthorByIdDesc();
@@ -132,6 +135,94 @@ public class PreparedGeneratedFrozenJoinTests {
 				AssertSame(_authors.Query().WithId(id).SortBounded(cmp).JoinWithAuthorProfile().Execute(skip, take), outer.Execute(id, skip, take), OneRow);
 				AssertSame(_authors.Query().WithId(id).SortBounded(cmp).JoinWithAuthorProfile().ExecutePooledCloned(skip, take), outer.ExecutePooledCloned(id, skip, take), OneRow);
 			}
+	}
+
+	// ── #92: the forward one-to-one JoinWith, and Sort → JoinWith for the scalar forward many-to-one ──
+
+	private static string ForwardOneToOneRow(JoinResult<AuthorProfile, Author?> r)
+		=> $"{r.Left.Id}|{(r.Right is null ? "-" : r.Right.Id.ToString())}";
+
+	private readonly struct ProfileByIdDesc : IComparer<AuthorProfile> {
+		public int Compare(AuthorProfile? x, AuthorProfile? y) => (y?.Id ?? 0).CompareTo(x?.Id ?? 0);
+	}
+
+	private readonly struct M2OBookByIdDesc : IComparer<M2OBook> {
+		public int Compare(M2OBook? x, M2OBook? y) => (y?.Id ?? 0).CompareTo(x?.Id ?? 0);
+	}
+
+	// AuthorProfile.AuthorId is a non-selector [DataCacheForeignKey<Author>(OneToOne)] — a left-unique
+	// resolver over the symmetric unique index. It is not a fan-out, so the inner direction fuses too.
+	[Test]
+	public void ForwardOneToOne_AfterWithId_Outer_Inner_FrozenFuses_LikeEager() {
+		var outer = _profiles.Prepare<int>().WithId(static id => id).JoinWithAuthor().BuildFrozen();
+		var inner = _profiles.Prepare<int>().WithId(static id => id).InnerJoinWithAuthor().BuildFrozen();
+		var eagerOrder = _profiles.Prepare<int>().WithId(static id => id).JoinWithAuthor().BuildFrozen(new FrozenOptions { PreserveEagerOrder = true });
+		Assert.That(outer.Explain(), Does.Contain("executor: Pipeline").And.Contain("joins: 1 (fused: 1, unfused: 0"));
+		Assert.That(inner.Explain(), Does.Contain("executor: Pipeline").And.Contain("joins: 1 (fused: 1, unfused: 0"));
+		// Profile 6 points at author 500, who does not exist: outer keeps it with a null right, inner drops it.
+		foreach (var id in new[] { 0, 3, 5, 6, 99 }) {
+			AssertSame(_profiles.Query().WithId(id).JoinWithAuthor().Execute(), outer.Execute(id), ForwardOneToOneRow);
+			AssertSame(_profiles.Query().WithId(id).JoinWithAuthor().ExecutePooledCloned(), outer.ExecutePooledCloned(id), ForwardOneToOneRow);
+			AssertSame(_profiles.Query().WithId(id).JoinWithAuthor().Execute(), eagerOrder.Execute(id), ForwardOneToOneRow);
+			AssertSame(_profiles.Query().WithId(id).InnerJoinWithAuthor().Execute(), inner.Execute(id), ForwardOneToOneRow);
+			AssertSame(_profiles.Query().WithId(id).InnerJoinWithAuthor().ExecutePooled(), inner.ExecutePooled(id), ForwardOneToOneRow);
+			Assert.That(outer.Count(id), Is.EqualTo(_profiles.Query().WithId(id).JoinWithAuthor().Count()), "outer Count " + id);
+			Assert.That(inner.Count(id), Is.EqualTo(_profiles.Query().WithId(id).InnerJoinWithAuthor().Count()), "inner Count " + id);
+		}
+
+		using var orphanOuter = outer.Execute(6);
+		Assert.That(orphanOuter.Count, Is.EqualTo(1));
+		Assert.That(orphanOuter[0].Right, Is.Null);
+		using var orphanInner = inner.Execute(6);
+		Assert.That(orphanInner.Count, Is.Zero);
+		Assert.That(inner.Count(6), Is.Zero);
+	}
+
+	// The prepared (non-frozen) twin of the same shape.
+	[Test]
+	public void ForwardOneToOne_PreparedBuild_MatchesEager() {
+		var outer = _profiles.Prepare<int>().WithId(static id => id).JoinWithAuthor().Build();
+		var inner = _profiles.Prepare<int>().WithId(static id => id).InnerJoinWithAuthor().Build();
+		foreach (var id in new[] { 0, 3, 6, 99 }) {
+			AssertSame(_profiles.Query().WithId(id).JoinWithAuthor().Execute(), outer.Execute(id), ForwardOneToOneRow);
+			AssertSame(_profiles.Query().WithId(id).InnerJoinWithAuthor().Execute(), inner.Execute(id), ForwardOneToOneRow);
+			Assert.That(outer.Count(id), Is.EqualTo(_profiles.Query().WithId(id).JoinWithAuthor().Count()), "outer Count " + id);
+			Assert.That(inner.Count(id), Is.EqualTo(_profiles.Query().WithId(id).InnerJoinWithAuthor().Count()), "inner Count " + id);
+		}
+	}
+
+	// Gap 2: the scalar forward many-to-one had no SortedQuery twin at all, so this shape did not compile.
+	[Test]
+	public void SortBounded_ThenForwardManyToOne_FrozenIsBoundedPipeline_LikeEager() {
+		var cmp = new M2OBookByIdDesc();
+		var bounded = _m2oBooks.Prepare<int>().WithAuthorId(static a => a).SortBounded(cmp).JoinWithM2OAuthor().BuildFrozen();
+		Assert.That(bounded.Explain(), Does.Contain("executor: Pipeline").And.Contain("sort: bounded").And.Contain("fused: 1"));
+		foreach (var author in new[] { 0, 1, 3, 9 })
+			foreach (var (skip, take) in new[] { (0, 2), (1, 2), (0, int.MaxValue) }) {
+				AssertSame(_m2oBooks.Query().WithAuthorId(author).SortBounded(cmp).JoinWithM2OAuthor().Execute(skip, take),
+					bounded.Execute(author, skip, take), ForwardRow);
+				AssertSame(_m2oBooks.Query().WithAuthorId(author).SortBounded(cmp).JoinWithM2OAuthor().ExecutePooledCloned(skip, take),
+					bounded.ExecutePooledCloned(author, skip, take), ForwardRow);
+			}
+	}
+
+	[Test]
+	public void Sort_ThenForwardManyToOne_FrozenMatchesEager() {
+		var cmp = new M2OBookByIdDesc();
+		var sorted = _m2oBooks.Prepare<int>().WithAuthorId(static a => a).Sort(cmp).JoinWithM2OAuthor().BuildFrozen();
+		foreach (var author in new[] { 0, 1, 3, 9 })
+			AssertSame(_m2oBooks.Query().WithAuthorId(author).Sort(cmp).JoinWithM2OAuthor().Execute(), sorted.Execute(author), ForwardRow);
+	}
+
+	[Test]
+	public void SortBounded_ThenForwardOneToOne_FrozenIsBoundedPipeline_LikeEager() {
+		var cmp = new ProfileByIdDesc();
+		var bounded = _profiles.Prepare<int>().WithId(static id => id).SortBounded(cmp).JoinWithAuthor().BuildFrozen();
+		Assert.That(bounded.Explain(), Does.Contain("executor: Pipeline").And.Contain("sort: bounded").And.Contain("fused: 1"));
+		foreach (var id in new[] { 0, 3, 6, 99 })
+			foreach (var (skip, take) in new[] { (0, 2), (1, 2), (0, int.MaxValue) })
+				AssertSame(_profiles.Query().WithId(id).SortBounded(cmp).JoinWithAuthor().Execute(skip, take),
+					bounded.Execute(id, skip, take), ForwardOneToOneRow);
 	}
 
 	[Test]

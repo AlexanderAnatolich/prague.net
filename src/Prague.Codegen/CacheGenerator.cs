@@ -1039,10 +1039,20 @@ public class CacheGenerator : IIncrementalGenerator {
 				continue;
 			}
 
-			foreignKeyIndexes.Add((prop, indexType, indexName, isSymmetric, null, false));
+			// A non-selector OneToOne FK on a non-PK property drives the forward JoinWith{T}
+			// through JoinOneLeftUniqueIndexResolver, which reads the index's .Reverse — so the
+			// auto index has to be the symmetric variant (same shape the selector form already
+			// emits). A OneToOne FK ON the PK joins PK-to-PK and needs no reverse map, so it
+			// keeps the plain unique index.
+			var fkOnPkPlain = keyPropertyName != null && prop.Name == keyPropertyName;
+			var isSymmetricUnique = indexType == "Unique" && !fkOnPkPlain;
+			foreignKeyIndexes.Add((prop, indexType, indexName, isSymmetric || isSymmetricUnique, null, fkOnPkPlain));
 
 			sb.AppendLine();
-			if (indexType == "Unique")
+			if (isSymmetricUnique) // Unique + Symmetric (OneToOne on a non-PK property)
+				sb.AppendLine(
+					$"        public readonly CacheSymmetricUniqueIndex<{keyTypeName}, {documentTypeName}, {propertyType}> {indexName};");
+			else if (indexType == "Unique")
 				sb.AppendLine(
 					$"        public readonly CacheUniqueIndex<{keyTypeName}, {documentTypeName}, {propertyType}> {indexName};");
 			else if (isSymmetric) // Many + Symmetric (ManyToOne)
@@ -1227,6 +1237,12 @@ public class CacheGenerator : IIncrementalGenerator {
 					$"            {indexName} = Cache.CacheCollectionSymmetricKeyValueListIndex(static (key, doc) => doc.{prop.Name});");
 				sb.AppendLine(
 					$"            DataCacheStatisticsMarshall.AddIndex(_statistics, \"{indexName}\", DataCacheIndexType.Many, {indexName});");
+			}
+			else if (indexType == "Unique" && isSymmetricFk) {
+				// OneToOne on a non-PK property: the forward JoinWith{T} reads .Reverse.
+				sb.AppendLine($"            {indexName} = Cache.AddSymmetricKeyValueIndex(static (key, doc) => doc.{prop.Name});");
+				sb.AppendLine(
+					$"            DataCacheStatisticsMarshall.AddIndex(_statistics, \"{indexName}\", DataCacheIndexType.Unique, {indexName});");
 			}
 			else if (indexType == "Unique") {
 				sb.AppendLine($"            {indexName} = Cache.AddKeyValueIndex(static (key, doc) => doc.{prop.Name});");
@@ -6706,17 +6722,11 @@ public class CacheGenerator : IIncrementalGenerator {
 						"JoinManyCollection", fkJoinArgsColl);
 
 					// Sort->JoinWith parallel - outer, no-filter only.
-					var joinReturnTypeCollSorted = $"CacheQueryBuilderCombined<Prague.Core.TypeSystem.SortedQuery<TInner>, TExecutor, {keyTypeName}, {documentTypeName}, Resolvers<TResolverChain, {resolverColl($"NoFilter<{nonExecBuilderColl}>")}>, {newResultTypeColl}>";
-					sb.AppendLine();
-					sb.AppendLine($"        /// <summary>Join with {otherTypeFullName} via reverse collection FK (many-to-many) after a Sort.</summary>");
-					sb.AppendLine("        [MethodImpl(MethodImplOptions.AggressiveInlining)]");
-					sb.AppendLine($"        public static {joinReturnTypeCollSorted}");
-					sb.AppendLine($"            {methodName}<{joinGenericParamsSorted}>({joinBuilderParamSorted})");
-					sb.AppendLine($"        {joinConstraintsSorted}");
-					sb.AppendLine("        {");
-					sb.AppendLine($"            var cache = {getCacheCodeSorted};");
-					sb.AppendLine($"            return Unsafe.AsRef(in builder).JoinManyCollection({fkJoinArgsColl});");
-					sb.AppendLine("        }");
+					EmitFkSortedJoinWithOverload(sb,
+						$"Join with {otherTypeFullName} via reverse collection FK (many-to-many) after a Sort.",
+						methodName, joinGenericParamsSorted, joinBuilderParamSorted, joinConstraintsSorted, getCacheCodeSorted,
+						keyTypeName, documentTypeName, newResultTypeColl, nonExecBuilderColl, resolverColl,
+						"JoinManyCollection", fkJoinArgsColl);
 
 					EmitFkJoinWithOverloads(sb,
 						$"Inner join with {otherTypeFullName} via reverse collection FK (many-to-many) - drops lefts with no matching owners.",
@@ -6754,17 +6764,11 @@ public class CacheGenerator : IIncrementalGenerator {
 					"JoinMany", fkJoinArgsRev);
 
 				// Sort→JoinWith parallel — accepts SortedQuery<TInner>-wrapped discriminator. Outer, no-filter only.
-				var joinReturnTypeRevSorted = $"CacheQueryBuilderCombined<Prague.Core.TypeSystem.SortedQuery<TInner>, TExecutor, {keyTypeName}, {documentTypeName}, Resolvers<TResolverChain, {resolverRev($"NoFilter<{nonExecBuilderRev}>")}>, {newResultTypeRev}>";
-				sb.AppendLine();
-				sb.AppendLine($"        /// <summary>Join with {otherTypeFullName} via reverse FK (one-to-many) after a Sort.</summary>");
-				sb.AppendLine("        [MethodImpl(MethodImplOptions.AggressiveInlining)]");
-				sb.AppendLine($"        public static {joinReturnTypeRevSorted}");
-				sb.AppendLine($"            {methodName}<{joinGenericParamsSorted}>({joinBuilderParamSorted})");
-				sb.AppendLine($"        {joinConstraintsSorted}");
-				sb.AppendLine("        {");
-				sb.AppendLine($"            var cache = {getCacheCodeSorted};");
-				sb.AppendLine($"            return Unsafe.AsRef(in builder).JoinMany({fkJoinArgsRev});");
-				sb.AppendLine("        }");
+				EmitFkSortedJoinWithOverload(sb,
+					$"Join with {otherTypeFullName} via reverse FK (one-to-many) after a Sort.",
+					methodName, joinGenericParamsSorted, joinBuilderParamSorted, joinConstraintsSorted, getCacheCodeSorted,
+					keyTypeName, documentTypeName, newResultTypeRev, nonExecBuilderRev, resolverRev,
+					"JoinMany", fkJoinArgsRev);
 
 				// InnerJoinWith{TOther} — drops lefts whose per-left QueryResults is empty. No-filter / filter / filter+arg flavors.
 				EmitFkJoinWithOverloads(sb,
@@ -6829,17 +6833,11 @@ public class CacheGenerator : IIncrementalGenerator {
 					"JoinOne", fkJoinArgsRev1);
 
 				// Sort→JoinWith parallel — outer, no-filter only.
-				var joinReturnTypeRev1Sorted = $"CacheQueryBuilderCombined<Prague.Core.TypeSystem.SortedQuery<TInner>, TExecutor, {keyTypeName}, {documentTypeName}, Resolvers<TResolverChain, {resolverRev1($"NoFilter<{nonExecBuilderRev1}>")}>, {newResultTypeRev1}>";
-				sb.AppendLine();
-				sb.AppendLine($"        /// <summary>Join with {otherTypeFullName} via reverse FK (one-to-one) after a Sort.</summary>");
-				sb.AppendLine("        [MethodImpl(MethodImplOptions.AggressiveInlining)]");
-				sb.AppendLine($"        public static {joinReturnTypeRev1Sorted}");
-				sb.AppendLine($"            {methodName}<{joinGenericParamsSorted}>({joinBuilderParamSorted})");
-				sb.AppendLine($"        {joinConstraintsSorted}");
-				sb.AppendLine("        {");
-				sb.AppendLine($"            var cache = {getCacheCodeSorted};");
-				sb.AppendLine($"            return Unsafe.AsRef(in builder).JoinOne({fkJoinArgsRev1});");
-				sb.AppendLine("        }");
+				EmitFkSortedJoinWithOverload(sb,
+					$"Join with {otherTypeFullName} via reverse FK (one-to-one) after a Sort.",
+					methodName, joinGenericParamsSorted, joinBuilderParamSorted, joinConstraintsSorted, getCacheCodeSorted,
+					keyTypeName, documentTypeName, newResultTypeRev1, nonExecBuilderRev1, resolverRev1,
+					"JoinOne", fkJoinArgsRev1);
 
 				// InnerJoinWith{TOther} — drops lefts whose right slot is null. No-filter / filter / filter+arg flavors.
 				EmitFkJoinWithOverloads(sb,
@@ -6849,18 +6847,27 @@ public class CacheGenerator : IIncrementalGenerator {
 					"InnerJoinOne", fkJoinArgsRev1);
 			}
 
-			// Forward JoinWith{TOther} for [DataCacheForeignKey<TOther>(ManyToOne)] FKs.
-			// Uses JoinOneLeftSymResolver Shape A1 via the auto-emitted CacheSymmetricKeyValueListIndex
-			// on the FK property. The lookup key (FK value) equals TOther's PK.
-			// Selector-form ManyToOne FKs are emitted by the separate selector loop below.
+			// Forward JoinWith{TOther} for non-selector [DataCacheForeignKey<TOther>] FKs. Whatever the
+			// declared cardinality, a scalar FK property holds at most one right key, so the forward
+			// direction is always a one-row lookup — only the driving index differs:
+			//   ManyToOne          → JoinOneLeftSymResolver Shape A1 over CacheSymmetricKeyValueListIndex
+			//   OneToOne on non-PK → JoinOneLeftUniqueIndexResolver Shape L1 over CacheSymmetricUniqueIndex
+			//   OneToOne on the PK → JoinOneResolver (PK-to-PK, no left-side index at all)
+			// OneToMany is deliberately NOT emitted forward: its auto index is the non-symmetric
+			// CacheKeyValueListIndex, and upgrading it would put a reverse map on every OneToMany FK
+			// for a join the declared cardinality says points the other way (see InvertJoinType — a
+			// user who wants the forward scalar lookup declares ManyToOne, or the dual form which
+			// inverts into it). The reverse JoinWith on the target cache already covers OneToMany.
+			// Selector-form FKs are emitted by the separate selector loop below.
 			foreach (var fkRaw in foreignKeyPropertiesRaw) {
-				if (fkRaw.JoinType != "ManyToOne") continue;
+				if (fkRaw.JoinType != "ManyToOne" && fkRaw.JoinType != "OneToOne") continue;
 				if (fkRaw.SelectorType != null) continue;
 
 				// Collection FK (List<TKey> ManyToOne): the driving cache OWNS the collection. Forward
 				// join fans each owner out to its referenced elements via JoinManyCollectionForward over
 				// this cache's own symmetric collection index. Result is per-owner QueryResults<TOther>.
-				if (IsCollectionType(fkRaw.Property.Type, out _)) {
+				// (A collection OneToOne is rejected upstream by CACHE050, so this stays ManyToOne-only.)
+				if (fkRaw.JoinType == "ManyToOne" && IsCollectionType(fkRaw.Property.Type, out _)) {
 					var fwdReferencedType = fkRaw.ReferencedType;
 					if (fwdReferencedType == null) continue;
 					var fwdReferencedCacheInfo = GetReferencedCacheInfo(fwdReferencedType);
@@ -6899,17 +6906,11 @@ public class CacheGenerator : IIncrementalGenerator {
 						"JoinManyCollectionForward", fkJoinArgsFwdColl);
 
 					// Sort->JoinWith parallel - outer, no-filter only.
-					var joinReturnTypeFwdCollSorted = $"CacheQueryBuilderCombined<Prague.Core.TypeSystem.SortedQuery<TInner>, TExecutor, {keyTypeName}, {documentTypeName}, Resolvers<TResolverChain, {resolverFwdColl($"NoFilter<{nonExecBuilderFwdColl}>")}>, {newResultTypeFwdColl}>";
-					sb.AppendLine();
-					sb.AppendLine($"        /// <summary>Join with {fwdReferencedTypeFullName} via {fwdForeignKeyPropertyName} (collection many-to-one) after a Sort.</summary>");
-					sb.AppendLine("        [MethodImpl(MethodImplOptions.AggressiveInlining)]");
-					sb.AppendLine($"        public static {joinReturnTypeFwdCollSorted}");
-					sb.AppendLine($"            {fwdMethodName}<{joinGenericParamsSorted}>({joinBuilderParamSorted})");
-					sb.AppendLine($"        {joinConstraintsSorted}");
-					sb.AppendLine("        {");
-					sb.AppendLine($"            var cache = {getCacheCodeSorted};");
-					sb.AppendLine($"            return Unsafe.AsRef(in builder).JoinManyCollectionForward({fkJoinArgsFwdColl});");
-					sb.AppendLine("        }");
+					EmitFkSortedJoinWithOverload(sb,
+						$"Join with {fwdReferencedTypeFullName} via {fwdForeignKeyPropertyName} (collection many-to-one) after a Sort.",
+						fwdMethodName, joinGenericParamsSorted, joinBuilderParamSorted, joinConstraintsSorted, getCacheCodeSorted,
+						keyTypeName, documentTypeName, newResultTypeFwdColl, nonExecBuilderFwdColl, resolverFwdColl,
+						"JoinManyCollectionForward", fkJoinArgsFwdColl);
 
 					EmitFkJoinWithOverloads(sb,
 						$"Inner join with {fwdReferencedTypeFullName} via {fwdForeignKeyPropertyName} (collection many-to-one) - drops owners with no referenced elements.",
@@ -6938,13 +6939,51 @@ public class CacheGenerator : IIncrementalGenerator {
 				var methodName = $"JoinWith{referencedClassName}";
 				var indexFieldName = $"{foreignKeyPropertyName}Index";
 
-				// NonExec builder type for the resolver's TFilter param (NoFilter wraps this).
-				var nonExecBuilder = $"CacheQueryBuilderCombined<Prague.Core.TypeSystem.NonExecutableQuery<{referencedCacheClassFqn}>, " +
-				                     $"PairedCacheQueryBuilderCoreCombined<LeftKeySetView<{keyTypeName}>, {referencedKeyTypeName}, {referencedTypeFullName}>, " +
-				                     $"{referencedKeyTypeName}, {referencedTypeFullName}, " +
-				                     $"Resolvers<BaseResolver<{referencedKeyTypeName}, {referencedTypeFullName}>>, {referencedTypeFullName}>";
+				var fkPropertyTypeFwd = fkRaw.Property.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+				var fkOnPkFwd = keyPropertyName != null && foreignKeyPropertyName == keyPropertyName;
 
-				Func<string, string> resolverFwd = f => $"JoinOneLeftSymResolver<{keyTypeName}, {documentTypeName}, {referencedCacheClassFqn}, {referencedKeyTypeName}, {referencedKeyTypeName}, {referencedKeyTypeName}, {referencedTypeFullName}, {f}, IdentitySelector<{referencedKeyTypeName}>>";
+				// Resolver family + driving index, by cardinality and placement. The PK-to-PK form has
+				// no index argument at all; the two indexed forms differ only in the index they read.
+				string nonExecBuilder;
+				Func<string, string> resolverFwd;
+				string fkJoinArgsFwd;
+				string joinKindLabelFwd;
+				if (fkRaw.JoinType == "ManyToOne") {
+					// Shape A1: LeftSym over the symmetric key-value-list index. TLeft is the borrowed
+					// key-set view, so the paired core's TLeft differs from the other two families.
+					nonExecBuilder = $"CacheQueryBuilderCombined<Prague.Core.TypeSystem.NonExecutableQuery<{referencedCacheClassFqn}>, " +
+					                 $"PairedCacheQueryBuilderCoreCombined<LeftKeySetView<{keyTypeName}>, {referencedKeyTypeName}, {referencedTypeFullName}>, " +
+					                 $"{referencedKeyTypeName}, {referencedTypeFullName}, " +
+					                 $"Resolvers<BaseResolver<{referencedKeyTypeName}, {referencedTypeFullName}>>, {referencedTypeFullName}>";
+					resolverFwd = f => $"JoinOneLeftSymResolver<{keyTypeName}, {documentTypeName}, {referencedCacheClassFqn}, {referencedKeyTypeName}, {referencedKeyTypeName}, {referencedKeyTypeName}, {referencedTypeFullName}, {f}, IdentitySelector<{referencedKeyTypeName}>>";
+					fkJoinArgsFwd = $"cache.{indexFieldName}, cache.{referencedFieldName}!";
+					joinKindLabelFwd = "many-to-one";
+				}
+				else {
+					// OneToOne. Both forms run the unpaired-left paired core over TKey.
+					nonExecBuilder = $"CacheQueryBuilderCombined<Prague.Core.TypeSystem.NonExecutableQuery<{referencedCacheClassFqn}>, " +
+					                 $"PairedCacheQueryBuilderCoreCombined<{keyTypeName}, {referencedKeyTypeName}, {referencedTypeFullName}>, " +
+					                 $"{referencedKeyTypeName}, {referencedTypeFullName}, " +
+					                 $"Resolvers<BaseResolver<{referencedKeyTypeName}, {referencedTypeFullName}>>, {referencedTypeFullName}>";
+					if (fkOnPkFwd) {
+						// The FK IS the primary key: the left candidate key already is the right PK.
+						// PK-to-PK JoinOneResolver, no index step. Cross-key PKs have no identity
+						// overload, so skip rather than emit an uncompilable call.
+						if (keyTypeName != referencedKeyTypeName) continue;
+						resolverFwd = f => $"JoinOneResolver<{keyTypeName}, {documentTypeName}, {referencedCacheClassFqn}, {referencedKeyTypeName}, {referencedTypeFullName}, {f}, IdentitySelector<{keyTypeName}>>";
+						fkJoinArgsFwd = $"cache.{referencedFieldName}!";
+						joinKindLabelFwd = "one-to-one, primary key";
+					}
+					else {
+						// Shape L1: LeftUnique over the symmetric unique index emitted for this FK.
+						// The index is keyed by the FK property's type, which must be the right PK for
+						// the identity overload to bind.
+						if (fkPropertyTypeFwd != referencedKeyTypeName) continue;
+						resolverFwd = f => $"JoinOneLeftUniqueIndexResolver<{keyTypeName}, {documentTypeName}, {referencedCacheClassFqn}, {referencedKeyTypeName}, {referencedKeyTypeName}, {referencedTypeFullName}, {f}, IdentitySelector<{referencedKeyTypeName}>>";
+						fkJoinArgsFwd = $"cache.{indexFieldName}, cache.{referencedFieldName}!";
+						joinKindLabelFwd = "one-to-one";
+					}
+				}
 
 				string newResultTypeFwd;
 				if (level == 0) {
@@ -6954,18 +6993,23 @@ public class CacheGenerator : IIncrementalGenerator {
 					newResultTypeFwd = $"JoinResult<{documentTypeName}, {resultTypeParams}, {referencedTypeFullName}?>";
 				}
 
-				var fkJoinArgsFwd = $"cache.{indexFieldName}, cache.{referencedFieldName}!";
-
 				// JoinWith{TOther} — no-filter / filter / filter+arg flavors.
 				EmitFkJoinWithOverloads(sb,
-					$"Join with {referencedTypeFullName} via {foreignKeyPropertyName} (many-to-one).",
+					$"Join with {referencedTypeFullName} via {foreignKeyPropertyName} ({joinKindLabelFwd}).",
 					methodName, joinGenericParams, joinBuilderParam, joinConstraints, getCacheCode,
+					keyTypeName, documentTypeName, newResultTypeFwd, nonExecBuilder, resolverFwd,
+					"JoinOne", fkJoinArgsFwd);
+
+				// Sort→JoinWith parallel — outer, no-filter only.
+				EmitFkSortedJoinWithOverload(sb,
+					$"Join with {referencedTypeFullName} via {foreignKeyPropertyName} ({joinKindLabelFwd}) after a Sort.",
+					methodName, joinGenericParamsSorted, joinBuilderParamSorted, joinConstraintsSorted, getCacheCodeSorted,
 					keyTypeName, documentTypeName, newResultTypeFwd, nonExecBuilder, resolverFwd,
 					"JoinOne", fkJoinArgsFwd);
 
 				// InnerJoinWith{TOther} — reuses the IBaseJoinable constraint (Inner semantics are carried by the resolver, not the discriminator). No-filter / filter / filter+arg flavors.
 				EmitFkJoinWithOverloads(sb,
-					$"Inner join with {referencedTypeFullName} via {foreignKeyPropertyName} (many-to-one), filtering out null results.",
+					$"Inner join with {referencedTypeFullName} via {foreignKeyPropertyName} ({joinKindLabelFwd}), filtering out null results.",
 					$"InnerJoin{methodName.Substring(4)}", joinGenericParams, joinBuilderParam, joinConstraints, getCacheCode,
 					keyTypeName, documentTypeName, newResultTypeFwd, nonExecBuilder, resolverFwd,
 					"InnerJoinOne", fkJoinArgsFwd);
@@ -7343,6 +7387,42 @@ public class CacheGenerator : IIncrementalGenerator {
 		sb.AppendLine("        {");
 		sb.AppendLine($"            var cache = {getCacheCode};");
 		sb.AppendLine($"            return Unsafe.AsRef(in builder).{delegateName}({baseDelegateArgs}, filter, arg);");
+		sb.AppendLine("        }");
+	}
+
+	/// <summary>
+	/// Emits the <c>Sort</c>/<c>SortBounded</c> twin of a single JoinWith/InnerJoinWith direction.
+	/// A sorted builder carries <c>SortedQuery&lt;TInner&gt;</c> as its discriminator, which is
+	/// <c>IBaseJoinable</c> but not <c>ICacheCarrier</c>, so the regular overload cannot bind and the
+	/// cache is reached one hop deeper (<c>disc.Inner.Cache</c>). Outer and no-filter only — the
+	/// filter flavors and <c>InnerJoinWith</c> are intentionally not emitted for the sorted shape.
+	/// </summary>
+	private static void EmitFkSortedJoinWithOverload(
+		StringBuilder sb,
+		string summary,
+		string methodName,
+		string methodGenericParamsSorted,
+		string builderParamSorted,
+		string constraintsSorted,
+		string getCacheCodeSorted,
+		string keyTypeName,
+		string documentTypeName,
+		string resultType,
+		string nonExec,
+		Func<string, string> resolverFor,
+		string delegateName,
+		string baseDelegateArgs) {
+		var returnType = $"CacheQueryBuilderCombined<Prague.Core.TypeSystem.SortedQuery<TInner>, TExecutor, {keyTypeName}, {documentTypeName}, Resolvers<TResolverChain, {resolverFor($"NoFilter<{nonExec}>")}>, {resultType}>";
+
+		sb.AppendLine();
+		sb.AppendLine($"        /// <summary>{summary}</summary>");
+		sb.AppendLine("        [MethodImpl(MethodImplOptions.AggressiveInlining)]");
+		sb.AppendLine($"        public static {returnType}");
+		sb.AppendLine($"            {methodName}<{methodGenericParamsSorted}>({builderParamSorted})");
+		sb.AppendLine($"        {constraintsSorted}");
+		sb.AppendLine("        {");
+		sb.AppendLine($"            var cache = {getCacheCodeSorted};");
+		sb.AppendLine($"            return Unsafe.AsRef(in builder).{delegateName}({baseDelegateArgs});");
 		sb.AppendLine("        }");
 	}
 

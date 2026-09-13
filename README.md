@@ -346,10 +346,16 @@ pooledResults.Dispose();             // Return buffers to pool
 
 #### **Join Types**
 
-| Type | Attribute | Result Type | Use Case |
-|------|-----------|-------------|----------|
-| **OneToOne** | `DataCacheJoinType.OneToOne` | `TRight?` | Product → ProductInfo |
-| **OneToMany** | `DataCacheJoinType.OneToMany` | `ReadOnlySpan<TRight>` | Product → Offers |
+The attribute goes on the entity that *holds* the foreign key. Which cache gets `JoinWith{T}` depends on the cardinality:
+
+| Type | Attribute | Emitted on | Result Type | Use Case |
+|------|-----------|------------|-------------|----------|
+| **OneToOne** | `DataCacheJoinType.OneToOne` | both directions | `TRight?` | `ProductInfo.ProductId` → `ProductCache.JoinWithProductInfo()` **and** `ProductInfoCache.JoinWithProduct()` |
+| **OneToMany** | `DataCacheJoinType.OneToMany` | the target cache | `QueryResults<TRight>` | `Offer.ProductId` → `ProductCache.JoinWithOffer()` |
+| **ManyToOne** | `DataCacheJoinType.ManyToOne` | the declaring cache | `TRight?` | `Offer.ProductId` → `OfferCache.JoinWithProduct()` |
+| **ManyToOne** on a `List<TKey>` | `DataCacheJoinType.ManyToOne` | both directions | `QueryResults<TRight>` | `Doc.TagIds` → `DocCache.JoinWithTag()` and `TagCache.JoinWithDoc()` |
+
+Each of these also has an `InnerJoinWith{T}()` form (drops lefts with no match) and three filter flavors: no filter, a filter callback over the joined-in right side, and that callback plus a user-state argument. After a `.Sort()` / `.SortBounded()` only the outer, unfiltered `JoinWith{T}()` is available.
 
 #### **Performance**
 

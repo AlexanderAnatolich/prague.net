@@ -15,7 +15,7 @@ Driven by `[DataCache]` POCOs. For each it emits a `partial XxxCache` with: inde
 | `[DataCache]` | Marks a POCO as a cache item; emits its `XxxCache`. |
 | `[DataCacheKey]` | Primary key property. |
 | `[DataCacheIndex(type, Symmetric=)]` | Secondary index — impl + semantics in [`indexes.md`](indexes.md). |
-| `[DataCacheForeignKey<T>(DataCacheJoinType)]` | FK → emits `JoinWith{T}` / `InnerJoinWith{T}` (`OneToOne` / `OneToMany`). |
+| `[DataCacheForeignKey<T>(DataCacheJoinType)]` | FK → emits `JoinWith{T}` / `InnerJoinWith{T}` (`OneToOne` / `OneToMany` / `ManyToOne`). |
 | `[DataCacheValueIndex]` / `[DataCacheNoValueIndex]` / `[DataCacheHasValueIndex]` / `[DataCacheHasNotValueIndex]` | Key-set indices — see [`indexes.md`](indexes.md). |
 | `[DataCacheGlobalLastUpdateIndex]` | Group key for a global LastUpdated index. |
 | `[DataCacheSort]` | Custom sort comparer. |
@@ -27,7 +27,26 @@ Driven by `[DataCache]` POCOs. For each it emits a `partial XxxCache` with: inde
 
 ## FK join-convenience methods
 
-`[DataCacheForeignKey<T>]` emits `.JoinWith{T}()` / `.InnerJoinWith{T}()` for all five FK shapes (reverse Many, reverse OneToOne, forward ManyToOne raw, selector OneToOne-on-PK, selector ManyToOne/OneToOne-non-PK), outer + inner, at every chain level. Three overloads each: no-filter, filter lambda, filter + user-state `TArg` — forwarding to the lower-level join extensions and their `NoFilter`/`JoinFilter`/`JoinFilterWithArg` strategy structs ([`joins.md`](joins.md)). `Sort → JoinWith` stays outer-and-no-filter-only, and only for the reverse and collection families — see the prepared section below for the exact set.
+`[DataCacheForeignKey<T>]` emits `.JoinWith{T}()` / `.InnerJoinWith{T}()`, outer + inner, at every chain level. Three overloads each: no-filter, filter lambda, filter + user-state `TArg` — forwarding to the lower-level join extensions and their `NoFilter`/`JoinFilter`/`JoinFilterWithArg` strategy structs ([`joins.md`](joins.md)).
+
+Which method lands on which cache, by declared cardinality and FK shape. "Forward" = on the declaring cache; "reverse" = on the target cache. Every row emits all three filter flavors of both `JoinWith{T}` and `InnerJoinWith{T}`; the last column is the `Sort`/`SortBounded` twin, which is **outer and no-filter only** (a `SortedQuery<TInner>` discriminator is `IBaseJoinable` but not `ICacheCarrier`, so `InnerJoinWith` and the filtered flavors cannot bind — eager too).
+
+| FK declaration | Direction | Auto index | Resolver | `Sort →` twin |
+|---|---|---|---|---|
+| `OneToMany` on a scalar | reverse (target cache) | `CacheKeyValueListIndex` on the declaring cache | `JoinManyRightListIndexResolver` | yes |
+| `OneToOne` on a scalar | reverse (target cache) | `CacheUniqueIndex` / `CacheSymmetricUniqueIndex` on the declaring cache | `JoinOneRightUniqueIndexResolver` | yes |
+| `ManyToOne` on a scalar | forward | `CacheSymmetricKeyValueListIndex` | `JoinOneLeftSymResolver` (shape A1) | yes (#92) |
+| `OneToOne` on a scalar, **not** the PK | forward (#92) | `CacheSymmetricUniqueIndex` | `JoinOneLeftUniqueIndexResolver` (shape L1) | yes (#92) |
+| `OneToOne` on the **PK** property | forward (#92) | plain `CacheUniqueIndex` (unused by the join) | `JoinOneResolver` (PK-to-PK, no index step) | yes (#92) |
+| `ManyToOne` on a `List<TKey>` | forward + reverse | `CacheCollectionSymmetricKeyValueListIndex` | `JoinManyCollectionResolver` | yes (both directions) |
+| selector `OneToOne` on the PK | forward | none | `JoinOneResolver` + `KeySelector` (static method group) | no |
+| selector `OneToOne` on a non-PK | forward | `CacheSymmetricUniqueIndex` (raw FK type) | `JoinOneLeftUniqueIndexResolver` + `KeySelector` | no |
+| selector `ManyToOne` | forward | `CacheSymmetricKeyValueListIndex` (raw FK type) | `JoinOneLeftSymResolver` + `KeySelector` | no |
+
+Notes:
+- **`OneToMany` has no forward method.** A scalar FK holds one right key, so the forward direction would be the same one-row lookup — but driving it needs the auto index upgraded to the symmetric variant, i.e. a reverse map on every `OneToMany` FK for a join the declared cardinality points away from. Declare `ManyToOne` (or the dual form, which `InvertJoinType` flips into it) to get the forward join.
+- The non-PK `OneToOne` auto index **is** the symmetric variant since #92 — the forward join reads its `.Reverse`. `CacheSymmetricUniqueIndex` derives from `CacheUniqueIndex`, so `With{FkProperty}` and the reverse join are unchanged. A `OneToOne` FK on the PK keeps the plain index (PK-to-PK needs no reverse map).
+- A forward `OneToOne` is skipped silently when its types cannot bind the identity overload: FK-on-PK with a different right PK type, or a non-PK FK whose property type is not the right PK type.
 
 Selector-form FK (`DataCacheForeignKey<T, TSelector>`): the auto-index is keyed by the FK property's **raw type** (selector applied at *join* time, not index-build), so `With{FkProperty}(rawType)` is usable as a plain standalone filter.
 
@@ -44,7 +63,7 @@ Next to the eager `Query()` the generator emits, per `[DataCache]` wrapper, the 
 - **Carrier scoping rule** (same as eager): every prepared overload is constrained `TDiscriminator : struct, IIndexNarrower, ICacheCarrier<XxxCache>`, so it binds only on this wrapper's builders — a `WithXxx` of cache A on cache B's prepared builder is CS0315 — and reaches the index through `GetDiscriminator(ref …).Cache.XxxIndex`.
 - **Branch rule**: `Or` / `If` / `IfElse` / `Match` branch and arm builders are discriminated by `PreparedNarrowOnly<XxxCache>` / `PreparedConditionalBranch<XxxCache>` carrying the **same** wrapper, so every generated `WithXxx` binds inside a branch or arm (bound and parameterized). `Match` / `If` / `Or` themselves are hand-written generic extensions that already bind on generated builders — nothing is emitted for them. `Where` binds in `If` branches and `Match` arms only; joins, sort and `Build()` never bind inside a branch (CS0315, exactly as eager `Or`).
 - **FK `JoinWith{T}` / `InnerJoinWith{T}` need no twin.** The eager emission binds on `TExecutor : ICandidatesExecutor` (the recorder implements it) and `TDiscriminator : IBaseJoinable, ICacheCarrier<XxxCache>` (the top-level prepared discriminator implements both), so `Prepare().WithXxx(..).JoinWith{T}().Build()` compiles as-is for every FK shape, outer and inner, all three filter overloads.
-- **`Sort`/`SortBounded` → `JoinWith{T}` is only partly emitted** (a pre-existing eager gap the prepared surface inherits, → #92). The `SortedQuery<TInner>`-discriminated twin is emitted for the **reverse many**, **reverse one-to-one**, **reverse collection** and **forward collection** families, **outer and no-filter only** — `InnerJoinWith` is intentionally skipped, and the **scalar forward many-to-one** has no sorted twin at all. So `Prepare().SortBounded(cmp).JoinWith{T}()` compiles for a reverse or collection FK and is CS1061 for a scalar forward one or any `InnerJoinWith`; `FrozenFkJoinBenchmarks` carries the working case as `Fk_SortBounded_OneToOneReverse`.
+- **`Sort`/`SortBounded` → `JoinWith{T}` is emitted for every non-selector family** (#92 closed the two gaps), **outer and no-filter only**: the `SortedQuery<TInner>` discriminator is `IBaseJoinable` but not `ICacheCarrier`, so `InnerJoinWith` and the filtered flavors still cannot bind (CS1061 / CS0315, eager too). So `Prepare().SortBounded(cmp).JoinWith{T}()` compiles for reverse many, reverse one-to-one, both collection directions, the scalar forward many-to-one and both forward one-to-one shapes. Selector-form FKs have no sorted twin. `FrozenFkJoinBenchmarks` carries two of them, `Fk_SortBounded_OneToOneReverse` and `Fk_SortBounded_ManyToOne`.
 - Query-string API (`TryApplyParam` / `StringQueryInternal`) is eager-only.
 
 Tests: `tests/Prague.Generated.Tests/Prepared/` (differential vs eager per overload family, joins, branches, `Match` + optional range, allocation).

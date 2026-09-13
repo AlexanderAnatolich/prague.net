@@ -6,7 +6,7 @@ Compile-time-safe joins over the query builder. Spans Core (resolvers, paired co
 
 ## Public surface
 
-- **FK convenience (preferred):** `.JoinWith{T}()` / `.InnerJoinWith{T}()` — emitted from `[DataCacheForeignKey<T>]` (see `generated.md`). Three overloads each: no-filter, filter, filter + `TArg`.
+- **FK convenience (preferred):** `.JoinWith{T}()` / `.InnerJoinWith{T}()` — emitted from `[DataCacheForeignKey<T>]` (which method per cardinality: the table in `generated.md`). Three overloads each: no-filter, filter, filter + `TArg`. After a `Sort`/`SortBounded` only the outer, no-filter `JoinWith{T}` binds.
 - **Lower-level:** `.JoinOne(...)`, `.InnerJoinOne(...)` (1:1 / outer + inner), `.JoinMany(...)`, `.InnerJoinMany(...)` (1:N). **Pass the cache wrapper directly — no `.Query()` at the call site.** Extension parameter is the `IDataCache<…>` interface (so C# can infer `TRightValue`), cast to the concrete cache inside.
 - Pooled join results: zero-allocation, caller `Dispose()`s. `result.Left`, `result.Right1` (1:1), `result.Right2` (1:N list), etc.
 
@@ -30,7 +30,7 @@ Filter callbacks receive a `NonExecutableQuery<TRightCache>` discriminator (`Wit
 |--------|---------|----------|-------|
 | **PK-to-PK** | `TLeftKey == TRightKey` | `JoinOneResolver` | No index step; stays **unpaired**. Optional key selector for cross-key joins. |
 | **Right-unique-index** (FK-on-right) | `[DataCacheIndex(Unique)]` on right FK → `CacheUniqueIndex<TRightKey,TRightValue,TLeftKey>` | `JoinOneRightUniqueIndexResolver` | e.g. `Book → BookInfo` where `BookInfo.BookId` is unique. |
-| **Left-unique-index** (FK-on-left, 1:1) | `[DataCacheIndex(Unique, Symmetric=true)]` on left → `CacheSymmetricUniqueIndex` (`.Reverse` supports `IntersectValues`) | `JoinOneLeftUniqueIndexResolver` | Bijective, no fan-out. e.g. `Author.BookId`. |
+| **Left-unique-index** (FK-on-left, 1:1) | `[DataCacheIndex(Unique, Symmetric=true)]` on left, or a `[DataCacheForeignKey<T>(OneToOne)]` on a non-PK property (#92 — its auto index is the symmetric variant) → `CacheSymmetricUniqueIndex` (`.Reverse` supports `IntersectValues`) | `JoinOneLeftUniqueIndexResolver` | Bijective, no fan-out. e.g. `Author.BookId`. |
 | **Left-symmetric-index** | `[DataCacheIndex(Many, Symmetric=true)]` on left → `CacheSymmetricKeyValueListIndex` | `JoinOneLeftSymResolver` | Index-driven; fans out (many lefts share one index value). |
 
 Each family has identity + key-selector overloads × {no-filter, filter, filter+arg}; identity overloads pass `IdentitySelector` (zero cost).

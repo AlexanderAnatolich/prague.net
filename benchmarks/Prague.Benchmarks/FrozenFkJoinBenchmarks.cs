@@ -19,16 +19,16 @@ using Prague.Core;
 ///     <item><c>Fk_OneToManyReverse</c> — <c>JoinWithFfkLine</c>, the right-list <c>JoinMany</c>.</item>
 ///     <item><c>Fk_Collection</c> — <c>JoinWithFfkTag</c> over a <c>List&lt;int&gt;</c> FK, the collection <c>JoinMany</c>.</item>
 ///     <item><c>Fk_SortBounded_OneToOneReverse</c> — list → <c>SortBounded</c> page → reverse one-to-one join, the bounded joined container.</item>
+///     <item><c>Fk_SortBounded_ManyToOne</c> — the same bounded page into the FORWARD many-to-one join (#92; the shape had no sorted overload before).</item>
 ///     <item><c>Fk_ManyToOne_Filtered</c> — a right-side filter callback; the replay fallback today.</item>
 ///   </list>
 ///   Data: 100k customers (segments of 1k), 100k orders (groups of 1k; a quarter point at a customer that
 ///   does not exist, so the inner join drops them), a profile for three customers in four, two lines per
 ///   order for three orders in four, and 10k documents (buckets of 1k) with three tags each, a quarter
 ///   untagged. Every body executes pooled and disposes.
-///   The bounded category joins reverse one-to-one, not forward: the forward and inner <c>JoinWith{T}</c>
-///   bind on <c>ICacheCarrier</c>, which a <c>SortedQuery</c> discriminator does not carry — eager too —
-///   so <c>SortBounded().JoinWithFfkCustomer()</c> does not compile. The reverse outer one-to-one join
-///   after a <c>SortBounded</c> is the generated bounded shape.
+///   Both bounded categories are OUTER and unfiltered: <c>InnerJoinWith{T}</c> and the filtered flavors
+///   bind on <c>ICacheCarrier</c>, which a <c>SortedQuery</c> discriminator does not carry — eager too — so
+///   only the outer, no-filter directions have a sorted twin.
 /// </summary>
 [MemoryDiagnoser]
 [GroupBenchmarksBy(BenchmarkLogicalGroupRule.ByCategory)]
@@ -53,6 +53,7 @@ public class FrozenFkJoinBenchmarks {
 	private FrozenQuery<int, JoinResult<FfkOrder, QueryResults<FfkLine>>> _oneToManyReverseFrozen = null!;
 	private FrozenQuery<int, JoinResult<FfkDoc, QueryResults<FfkTag>>> _collectionFrozen = null!;
 	private FrozenQuery<int, JoinResult<FfkCustomer, FfkProfile?>> _sortBoundedOneToOneReverseFrozen = null!;
+	private FrozenQuery<int, JoinResult<FfkOrder, FfkCustomer?>> _sortBoundedManyToOneFrozen = null!;
 	private FrozenQuery<int, JoinResult<FfkOrder, FfkCustomer?>> _manyToOneFilteredFrozen = null!;
 
 	// Arguments are fields, not constants, so no side gets a constant folded into the query.
@@ -110,6 +111,8 @@ public class FrozenFkJoinBenchmarks {
 		_collectionFrozen = _docs.Prepare<int>().WithBucket(static b => b).JoinWithFfkTag().BuildFrozen();
 		_sortBoundedOneToOneReverseFrozen = _customers.Prepare<int>().WithSegment(static s => s)
 			.SortBounded(new FfkCustomerByScoreTies()).JoinWithFfkProfile().BuildFrozen();
+		_sortBoundedManyToOneFrozen = _orders.Prepare<int>().WithGroup(static g => g)
+			.SortBounded(new FfkOrderByScoreTies()).JoinWithFfkCustomer().BuildFrozen();
 		_manyToOneFilteredFrozen = _orders.Prepare<int>().WithGroup(static g => g)
 			.JoinWithFfkCustomer(static q => q.Where(static c => c.Region == "EU")).BuildFrozen();
 	}
@@ -198,6 +201,20 @@ public class FrozenFkJoinBenchmarks {
 		return r.Count;
 	}
 
+	// ── Fk_SortBounded_ManyToOne: list (1k) → SortBounded page of 20 → FORWARD many-to-one (#92) ─────
+
+	[BenchmarkCategory("Fk_SortBounded_ManyToOne"), Benchmark(Baseline = true)]
+	public int Fk_SortBounded_ManyToOne_Eager() {
+		using var r = _orders.Query().WithGroup(_group).SortBounded(new FfkOrderByScoreTies()).JoinWithFfkCustomer().ExecutePooled(20, 20);
+		return r.Count;
+	}
+
+	[BenchmarkCategory("Fk_SortBounded_ManyToOne"), Benchmark]
+	public int Fk_SortBounded_ManyToOne_Frozen() {
+		using var r = _sortBoundedManyToOneFrozen.ExecutePooled(_group, 20, 20);
+		return r.Count;
+	}
+
 	// ── Fk_ManyToOne_Filtered: a right-side filter callback — the replay fallback today ──────────────
 
 	[BenchmarkCategory("Fk_ManyToOne_Filtered"), Benchmark(Baseline = true)]
@@ -281,4 +298,9 @@ public partial class FfkDoc {
 /// <summary>Struct comparer with ties, carried as a type parameter by both sort plans.</summary>
 public readonly struct FfkCustomerByScoreTies : IComparer<FfkCustomer> {
 	public int Compare(FfkCustomer? x, FfkCustomer? y) => ((x?.Score ?? 0) & 7).CompareTo((y?.Score ?? 0) & 7);
+}
+
+/// <summary>The same tie-heavy comparer on the order side, for the forward bounded category.</summary>
+public readonly struct FfkOrderByScoreTies : IComparer<FfkOrder> {
+	public int Compare(FfkOrder? x, FfkOrder? y) => ((x?.Score ?? 0) & 7).CompareTo((y?.Score ?? 0) & 7);
 }
