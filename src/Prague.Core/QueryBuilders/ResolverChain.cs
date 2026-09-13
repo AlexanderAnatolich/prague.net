@@ -11,11 +11,6 @@ using Utils;
    	=> throw new InvalidOperationException("Join resolver is not sortable");
  */
 
-public interface ISingleResolver {
-	internal bool IsSorter { get; }
-	internal void UnsafeSortResults<TFullResult>(ref QueryResults<TFullResult> results, int skip, int take);
-}
-
 public interface IResolvers {
 	/// <summary>Walks the resolver chain bottom-up (forward order), calling executor.Process for each resolver.</summary>
 	int Execute<TExecutor>(ref TExecutor executor)

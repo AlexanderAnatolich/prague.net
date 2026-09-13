@@ -8,12 +8,6 @@ using System.Runtime.InteropServices;
 using Collections;
 using Utils;
 
-public interface IQueryResultDisposePolicy<T> {
-	public bool CanDispose { get; set; }
-	public void Dispose(ref T item);
-}
-
-
 /// <summary>
 /// Non-generic interface for query results that can be enumerated as objects and disposed.
 /// </summary>
