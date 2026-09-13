@@ -610,7 +610,7 @@ public class FrozenPipelineJoinTests {
 	}
 
 	/// <summary>
-	///   Step 7: a joined <c>SortBounded</c> page runs through <c>FrozenTopKJoinedContainer</c>, which the
+	///   Step 7: a joined <c>SortBounded</c> page runs through <c>TopKJoinedBaseContainer</c>, which the
 	///   chain hands its sorter through <c>IResolvers.WithSorter</c> instead of comparing through the chain.
 	///   The dispatch has to find the same sorter whatever the chain's depth and whatever the comparer's
 	///   own kind, and the page it produces has to stay eager's byte for byte — rows, joined slots,

@@ -602,7 +602,7 @@ internal readonly struct PipelineCore<TKey, TValue, TArgs>
 ///   <c>Sort</c>, or under <c>SortBounded</c> (design §8): the <see cref="PipelineCore{TKey,TValue,TArgs}" />
 ///   pass drives the eager <see cref="SimpleResultContainer{TKey,TValue,TResolver}" /> (whose
 ///   <c>BuildResults</c> also runs the classic sorter) or, for a finite page of a sorted plan, the eager
-///   <see cref="TopKSimpleResultContainer{TKey,TValue,TResolver}" /> — the eager <c>ExecuteCoreSimpleTop</c>
+///   <see cref="TopKSimpleResultContainer{TKey,TValue,TPageComparer}" /> — the eager <c>ExecuteCoreSimpleTop</c>
 ///   page gate, so an unbounded or negative page takes the classic container exactly as eager does. A
 ///   classic <c>Sort</c> takes the bounded flow too (step 8): the bounded container breaks ties by
 ///   encounter ordinal, which is the stable sort's tie order for the same input sequence, and a
@@ -665,18 +665,68 @@ internal readonly struct PipelineExecutor<TKey, TValue, TArgs, TResolver> : IFro
 	}
 
 	// The eager ExecuteCoreSimpleTop body with the pipeline pass in place of the candidate walk: the
-	// resolver carries the comparison into the container as a struct type parameter, nothing is boxed.
+	// sorter carries its own comparer into the container as a struct type parameter, nothing is boxed.
 	private QueryResults<TValue> ExecuteTop(in TArgs args, scoped ref PipelineFrame<TKey> frame, bool pool, bool clone, int skip, int take) {
 		var sampled = _core.BeginSampling();
-		var container = new TopKSimpleResultContainer<TKey, TValue, TResolver>(_resolvers.Resolver, pool, clone, skip, take);
-		try {
-			container.Init(frame.Seed.Count);
-			container.Seal(_core.Walk(in args, frame.Seed.Keys, frame.KeyProbeList, frame.ValueProbeList, frame.ActiveFilterList, frame.Bindings, sampled, ref container));
-			var results = container.BuildResults();
-			_core.EndSampling(sampled);
-			return results;
-		} finally {
-			container.Dispose();
+		var feeder = new BoundedFeeder(in _core, in args, frame.Seed.Keys, frame.KeyProbeList, frame.ValueProbeList,
+			frame.ActiveFilterList, frame.Bindings, sampled, pool, clone, skip, take);
+		_resolvers.Resolver.WithLeftComparer(ref feeder);
+		_core.EndSampling(sampled);
+		return feeder.Results;
+	}
+
+	/// <summary>
+	///   The bounded flow's container feed, run once the sorter has handed over its own comparer
+	///   (<see cref="IJoinResolver.WithLeftComparer{TVisitor}" />, the eager <c>ExecuteCoreSimpleTop</c>
+	///   construct): every comparison in the heap and the page selection calls it directly instead of
+	///   through the sorter's generic <c>CompareLeftValues</c>, whose reference-type instantiation is a
+	///   runtime generic-dictionary lookup and an indirect call per compare. The frame's spans travel by
+	///   value, so nothing stack-bound escapes.
+	/// </summary>
+	private ref struct BoundedFeeder : ILeftComparerVisitor {
+		private readonly PipelineCore<TKey, TValue, TArgs> _core;
+		private readonly ref readonly TArgs _args;
+		private readonly ReadOnlySpan<TKey> _keys;
+		private readonly ReadOnlySpan<byte> _keyProbes;
+		private readonly ReadOnlySpan<byte> _valueProbes;
+		private readonly ReadOnlySpan<byte> _branchFilters;
+		private readonly ReadOnlySpan<StepBinding> _bindings;
+		private readonly bool _sampled;
+		private readonly bool _pool;
+		private readonly bool _clone;
+		private readonly int _skip;
+		private readonly int _take;
+
+		internal QueryResults<TValue> Results;
+
+		internal BoundedFeeder(in PipelineCore<TKey, TValue, TArgs> core, in TArgs args, ReadOnlySpan<TKey> keys, ReadOnlySpan<byte> keyProbes,
+			ReadOnlySpan<byte> valueProbes, ReadOnlySpan<byte> branchFilters, ReadOnlySpan<StepBinding> bindings,
+			bool sampled, bool pool, bool clone, int skip, int take) {
+			_core = core;
+			_args = ref args;
+			_keys = keys;
+			_keyProbes = keyProbes;
+			_valueProbes = valueProbes;
+			_branchFilters = branchFilters;
+			_bindings = bindings;
+			_sampled = sampled;
+			_pool = pool;
+			_clone = clone;
+			_skip = skip;
+			_take = take;
+		}
+
+		// TSortResult == TValue: the gate is the sorter's own OrdersByLeftValues<TValue>, read at build.
+		public void Visit<TSortResult, TComparer>(ref TComparer comparer) where TComparer : IComparer<TSortResult> {
+			var container = new TopKSimpleResultContainer<TKey, TValue, TopKLeftValueComparer<TValue, TSortResult, TComparer>>(
+				new(comparer), _pool, _clone, _skip, _take);
+			try {
+				container.Init(_keys.Length);
+				container.Seal(_core.Walk(in _args, _keys, _keyProbes, _valueProbes, _branchFilters, _bindings, _sampled, ref container));
+				Results = container.BuildResults();
+			} finally {
+				container.Dispose();
+			}
 		}
 	}
 }

@@ -1939,13 +1939,14 @@ public struct CacheQueryBuilderCombined<TDiscriminator, TLeftQuery, TLeftKey, TL
 
 		var container = new JoinedResultContaier<TLeftKey, TLeftValue, TResolverChain, TJoinResult>(
 			ref _resolverChain, pool, clone, _manyCount, bounded: true);
-		var topK = new TopKJoinedBaseContainer<TLeftKey, TLeftValue, TResolverChain>(ref _resolverChain, skip, take);
 		try {
 			container.PrepareIndexedInnerBounded(ref this);
 			container.NarrowIndexedInner(ref this);
-			_leftQuery.ExecuteBase(ref topK);
-			var kept = topK.Drain();
-			container.MaterializeTopK(topK.Buffer, skip, Math.Max(kept - skip, 0), topK.TotalCount);
+			// The heap and the page selection run inside the feeder, which the chain hands its sorter and
+			// the sorter its own comparer — both walks once per execution, where comparing through them
+			// was once per link per comparison. The feeder owns the heap and returns it on any throw.
+			var feeder = new JoinedTopKFeeder<TJoinResult>(ref _leftQuery, ref container, skip, take);
+			_resolverChain.WithSorter(ref feeder);
 			container.ExecuteJoinsBounded();
 			return container.BuildResults();
 		} finally {
@@ -1954,19 +1955,15 @@ public struct CacheQueryBuilderCombined<TDiscriminator, TLeftQuery, TLeftKey, TL
 			// swallows a double-return), so a single throw in a flat sequence would strand the
 			// narrowed inner maps and the candidate set for good.
 			try {
-				topK.Dispose();
+				container.Dispose();
 			} finally {
 				try {
-					container.Dispose();
+					// Inner resolvers keep the right values they validated in the narrow pass until
+					// the fill; return those maps whether or not the fill ran.
+					var release = new ReleaseNarrowedInnerProcessor();
+					_resolverChain.Execute(ref release);
 				} finally {
-					try {
-						// Inner resolvers keep the right values they validated in the narrow pass until
-						// the fill; return those maps whether or not the fill ran.
-						var release = new ReleaseNarrowedInnerProcessor();
-						_resolverChain.Execute(ref release);
-					} finally {
-						ReleaseUnconsumedCandidates();
-					}
+					ReleaseUnconsumedCandidates();
 				}
 			}
 		}
@@ -2053,14 +2050,90 @@ public struct CacheQueryBuilderCombined<TDiscriminator, TLeftQuery, TLeftKey, TL
 			return ExecuteCoreSimple(ref resolver, pool, clone, skip, take);
 		}
 
-		// The resolver itself carries the comparison into the container as a struct type parameter —
-		// nothing is erased to IComparer<T>, so the bounded plan allocates nothing per query.
-		var container = new TopKSimpleResultContainer<TLeftKey, TLeftValue, TResolver>(resolver, pool, clone, skip, take);
-		try {
-			_leftQuery.ExecuteBase(ref container);
-			return container.BuildResults();
-		} finally {
-			container.Dispose();
+		// The sorter hands its own comparer into the container as a struct type parameter — nothing is
+		// erased to IComparer<T>, so the bounded plan allocates nothing per query, and a comparison is
+		// the user comparer's Compare rather than the sorter's generic CompareLeftValues.
+		var feeder = new SimpleTopKFeeder(ref _leftQuery, pool, clone, skip, take);
+		resolver.WithLeftComparer(ref feeder);
+		return feeder.Results;
+	}
+
+	/// <summary>
+	///   The bounded simple page with the comparer hop removed: the sorter hands over its own comparer
+	///   once per execution (<see cref="IJoinResolver.WithLeftComparer{TVisitor}" />) and the container is
+	///   closed over it, so a comparison is the user comparer's <c>Compare</c> instead of the sorter's
+	///   generic <c>CompareLeftValues</c> — over a reference-type left value the shared-canonical
+	///   instantiation, a runtime generic-dictionary lookup and an indirect call per comparison.
+	/// </summary>
+	private ref struct SimpleTopKFeeder : ILeftComparerVisitor {
+		private readonly ref TLeftQuery _leftQuery;
+		private readonly bool _pool;
+		private readonly bool _clone;
+		private readonly int _skip;
+		private readonly int _take;
+
+		internal QueryResults<TLeftValue> Results;
+
+		internal SimpleTopKFeeder(ref TLeftQuery leftQuery, bool pool, bool clone, int skip, int take) {
+			_leftQuery = ref leftQuery;
+			_pool = pool;
+			_clone = clone;
+			_skip = skip;
+			_take = take;
+		}
+
+		// TSortResult == TLeftValue: the gate is the sorter's own OrdersByLeftValues<TLeftValue>.
+		public void Visit<TSortResult, TComparer>(ref TComparer comparer) where TComparer : IComparer<TSortResult> {
+			var container = new TopKSimpleResultContainer<TLeftKey, TLeftValue, TopKLeftValueComparer<TLeftValue, TSortResult, TComparer>>(
+				new(comparer), _pool, _clone, _skip, _take);
+			try {
+				_leftQuery.ExecuteBase(ref container);
+				Results = container.BuildResults();
+			} finally {
+				// No-op once BuildResults hands the buffer over; returns the rented heap otherwise.
+				container.Dispose();
+			}
+		}
+	}
+
+	/// <summary>
+	///   The bounded joined page's heap feed, run once the chain has handed over its sorter
+	///   (<c>IResolvers.WithSorter</c>) and the sorter its comparer
+	///   (<see cref="IJoinResolver.WithLeftComparer{TVisitor}" />): both walks are per execution, where
+	///   comparing through them was one JIT-folded <c>IsSorter</c> test per link plus one
+	///   <c>__Canon</c> generic-dictionary lookup per comparison. The bounded gate guarantees the sorter
+	///   is the chain base, so the walk always finds it. The joined container is a ref struct, so it
+	///   travels as a laundered pointer (the codebase's ref-struct-in-a-ref-struct pattern).
+	/// </summary>
+	private unsafe ref struct JoinedTopKFeeder<TJoinResult> : ISorterVisitor, ILeftComparerVisitor
+		where TJoinResult : struct, IJoinResult<TLeftValue> {
+		private readonly ref TLeftQuery _leftQuery;
+		private readonly void* _container;
+		private readonly int _skip;
+		private readonly int _take;
+
+		internal JoinedTopKFeeder(ref TLeftQuery leftQuery,
+			ref JoinedResultContaier<TLeftKey, TLeftValue, TResolverChain, TJoinResult> container, int skip, int take) {
+			_leftQuery = ref leftQuery;
+			_container = Unsafe.AsPointer(ref container);
+			_skip = skip;
+			_take = take;
+		}
+
+		public void Visit<TSorter>(ref TSorter sorter) where TSorter : struct, IJoinResolver
+			=> sorter.WithLeftComparer(ref this);
+
+		public void Visit<TSortResult, TComparer>(ref TComparer comparer) where TComparer : IComparer<TSortResult> {
+			var topK = new TopKJoinedBaseContainer<TLeftKey, TLeftValue, TopKLeftPairComparer<TLeftKey, TLeftValue, TSortResult, TComparer>>(
+				new(comparer), _skip, _take);
+			try {
+				_leftQuery.ExecuteBase(ref topK);
+				var kept = topK.Drain();
+				ref var container = ref Unsafe.AsRef<JoinedResultContaier<TLeftKey, TLeftValue, TResolverChain, TJoinResult>>(_container);
+				container.MaterializeTopK(topK.Buffer, _skip, Math.Max(kept - _skip, 0), topK.TotalCount);
+			} finally {
+				topK.Dispose();
+			}
 		}
 	}
 

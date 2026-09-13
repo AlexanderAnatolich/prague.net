@@ -404,7 +404,7 @@ public class FrozenCodegenCeilingBenchmarks {
 
 		Span<long> stack = stackalloc long[PipelineLimits.SeedStackLongs];
 		var keys = SeedKeys<int>.Over(stack);
-		var topK = new FrozenTopKJoinedContainer<int, PqbItem, TPairComparer>(comparer, skip, take);
+		var topK = new TopKJoinedBaseContainer<int, PqbItem, TPairComparer>(comparer, skip, take);
 		var rows = default(ValueDictionary<int, Row, DefaultKeyComparer<int>>);
 		var handedOff = false;
 		try {

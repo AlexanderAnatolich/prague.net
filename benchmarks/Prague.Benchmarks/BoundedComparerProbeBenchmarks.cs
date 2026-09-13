@@ -8,14 +8,15 @@ using Sorter = Prague.Core.SortResolver<int, Prague.Benchmarks.PqbRecord, Prague
 using Link = Prague.Core.BaseResolver<int, Prague.Benchmarks.PqbRecord>;
 
 /// <summary>
-///   Diagnostic probe for the frozen pipeline's step 7: the same bounded top-k workload (N candidates
-///   into a heap of K, then the ascending drain) driven through the three comparers the bounded
-///   containers use — the simple container's <see cref="TopKValueComparer{TValue,TResolver}" /> (the
-///   sorter as a struct type parameter, one hop), the joined container's
-///   <see cref="TopKPairComparer{TKey,TValue,TChain}" /> over a chain of one, two and three links (the
-///   sorter reached through <c>IResolvers.CompareLeftValues</c>, one hop per link), and a pair comparer
-///   that holds the sorter itself. Isolates the per-comparison chain dispatch from every other cost in
-///   the query.
+///   Diagnostic probe for the bounded containers' comparer: the same top-k workload (N candidates into a
+///   heap of K, then the ascending drain) driven through the ways the page selection can reach the user
+///   comparer — the sorter as a struct type parameter, its generic <c>CompareLeftValues</c> per
+///   comparison (<see cref="SorterValueComparer{TResolver}" /> / <see cref="SorterPairComparer{TResolver}" />,
+///   what the simple container did before the eager R1b); the sorter reached through the resolver chain,
+///   one hop per link on top of that (<see cref="ChainPairComparer{TChain}" />, what the joined container
+///   did); and the comparer carried directly, which is what
+///   <c>TopKLeftValueComparer</c> / <c>TopKLeftPairComparer</c> now give both containers on both the eager
+///   and the frozen path. Isolates the per-comparison dispatch from every other cost in the query.
 /// </summary>
 [MemoryDiagnoser]
 [BenchmarkCategory("BoundedComparerProbe")]
@@ -46,14 +47,15 @@ public class BoundedComparerProbeBenchmarks {
 		_chain3 = new Resolvers<Resolvers<Resolvers<Sorter>, Link>, Link>(_chain2, default);
 	}
 
-	/// <summary>The simple bounded container's comparer: the sorter is the type parameter.</summary>
+	/// <summary>What the simple bounded container's comparer was: the sorter is the type parameter.</summary>
 	[Benchmark(Baseline = true)]
-	public int ValueComparer_Sorter() {
-		var comparer = new TopKValueComparer<PqbRecord, Sorter>(_sorter);
-		return RunValue(comparer);
-	}
+	public int ValueComparer_Sorter() => RunValue(new SorterValueComparer<Sorter>(_sorter));
 
-	/// <summary>The proposed frozen joined comparer: the (key, left, ordinal) triple, the sorter by value.</summary>
+	/// <summary>What it is now: <c>TopKLeftValueComparer</c> over the sorter's own user comparer.</summary>
+	[Benchmark]
+	public int ValueComparer_DirectComparer() => RunValue(new TopKLeftValueComparer<PqbRecord, PqbRecord, PqbRecordByScoreTies>(new()));
+
+	/// <summary>The joined comparer with the sorter by value: the (key, left, ordinal) triple, one hop.</summary>
 	[Benchmark]
 	public int PairComparer_Sorter() => RunPair(new SorterPairComparer<Sorter>(_sorter));
 
@@ -69,21 +71,21 @@ public class BoundedComparerProbeBenchmarks {
 	[Benchmark]
 	public int PairComparer_Chain1() {
 		var chain = _chain1;
-		return RunPair(new TopKPairComparer<int, PqbRecord, Resolvers<Sorter>>(ref chain));
+		return RunPair(new ChainPairComparer<Resolvers<Sorter>>(ref chain));
 	}
 
 	/// <summary>Shape A's chain: the sorter plus one <c>JoinOne</c>.</summary>
 	[Benchmark]
 	public int PairComparer_Chain2() {
 		var chain = _chain2;
-		return RunPair(new TopKPairComparer<int, PqbRecord, Resolvers<Resolvers<Sorter>, Link>>(ref chain));
+		return RunPair(new ChainPairComparer<Resolvers<Resolvers<Sorter>, Link>>(ref chain));
 	}
 
 	/// <summary>Shape B's chain: the sorter plus two <c>JoinOne</c>s.</summary>
 	[Benchmark]
 	public int PairComparer_Chain3() {
 		var chain = _chain3;
-		return RunPair(new TopKPairComparer<int, PqbRecord, Resolvers<Resolvers<Resolvers<Sorter>, Link>, Link>>(ref chain));
+		return RunPair(new ChainPairComparer<Resolvers<Resolvers<Resolvers<Sorter>, Link>, Link>>(ref chain));
 	}
 
 	private int RunValue<TComparer>(TComparer comparer) where TComparer : struct, IComparer<(PqbRecord Left, int Ordinal)> {
@@ -115,6 +117,20 @@ public class BoundedComparerProbeBenchmarks {
 		}
 	}
 
+	/// <summary>The simple container's comparer before the eager R1b: the sorter's generic <c>CompareLeftValues</c> per comparison.</summary>
+	private readonly struct SorterValueComparer<TResolver> : IComparer<(PqbRecord Left, int Ordinal)>
+		where TResolver : struct, IJoinResolver {
+		private readonly TResolver _sorter;
+
+		public SorterValueComparer(TResolver sorter) => _sorter = sorter;
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public int Compare((PqbRecord Left, int Ordinal) x, (PqbRecord Left, int Ordinal) y) {
+			var order = _sorter.CompareLeftValues(x.Left, y.Left);
+			return order != 0 ? order : x.Ordinal.CompareTo(y.Ordinal);
+		}
+	}
+
 	private readonly struct SorterPairComparer<TResolver> : IComparer<(int Key, PqbRecord Left, int Ordinal)>
 		where TResolver : struct, IJoinResolver {
 		private readonly TResolver _sorter;
@@ -123,6 +139,24 @@ public class BoundedComparerProbeBenchmarks {
 
 		public int Compare((int Key, PqbRecord Left, int Ordinal) x, (int Key, PqbRecord Left, int Ordinal) y) {
 			var order = _sorter.CompareLeftValues(x.Left, y.Left);
+			return order != 0 ? order : x.Ordinal.CompareTo(y.Ordinal);
+		}
+	}
+
+	/// <summary>
+	///   The joined container's comparer before the eager R1b: the sorter reached through the chain, a
+	///   JIT-folded <c>IsSorter</c> test per link and then the same generic hop. A pointer, not the chain
+	///   by value — the comparer is copied into every sift and partition frame.
+	/// </summary>
+	private readonly unsafe struct ChainPairComparer<TChain> : IComparer<(int Key, PqbRecord Left, int Ordinal)>
+		where TChain : struct, IResolvers {
+		private readonly void* _chain;
+
+		public ChainPairComparer(ref TChain chain) => _chain = Unsafe.AsPointer(ref chain);
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public int Compare((int Key, PqbRecord Left, int Ordinal) x, (int Key, PqbRecord Left, int Ordinal) y) {
+			var order = Unsafe.AsRef<TChain>(_chain).CompareLeftValues(x.Left, y.Left);
 			return order != 0 ? order : x.Ordinal.CompareTo(y.Ordinal);
 		}
 	}

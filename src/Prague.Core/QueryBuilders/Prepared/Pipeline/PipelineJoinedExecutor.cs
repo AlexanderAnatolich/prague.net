@@ -23,13 +23,13 @@ using Collections;
 ///   lefts, the fused resolvers write their slots and prune, then <c>ExecuteJoins(fusedMask)</c> runs the
 ///   sorter, the crop and any unfused resolver — the fill first, because an inner join's rows must be gone
 ///   before the sorter sees them. <b>Bounded flow</b> (an innermost <c>SortBounded</c> over the left value
-///   and a finite page, the eager gate): the pass feeds <see cref="FrozenTopKJoinedContainer{TKey,TValue,TPairComparer}" />
+///   and a finite page, the eager gate): the pass feeds <see cref="TopKJoinedBaseContainer{TKey,TValue,TPairComparer}" />
 ///   — through a pooled <c>RowBuffer</c> that every inner fused resolver compacts first, so the dropped
 ///   lefts never reach the heap and the survivors keep eager's encounter ordinals — and the page rows are
-///   materialized before the fused resolvers fill them, so only page rows are looked up (§7.3). That
-///   container is the eager <see cref="TopKJoinedBaseContainer{TKey,TValue,TChain}" /> row for row, but it
-///   is handed the chain's sorter as a struct type parameter (<c>IResolvers.WithSorter</c>, step 7) instead
-///   of comparing through the chain, which costs a shared-generic hop per link per comparison.
+///   materialized before the fused resolvers fill them, so only page rows are looked up (§7.3). That is the
+///   eager container itself: both flows hand it the sorter's own user comparer as a struct type parameter
+///   (<c>IResolvers.WithSorter</c> then <see cref="IJoinResolver.WithLeftComparer{TVisitor}" />, step 7)
+///   instead of comparing through the chain, which costs a shared-generic hop per link per comparison.
 ///   </para>
 ///   The step-6 shape (an innermost <c>SortBounded</c> followed by outer <c>JoinOne</c>s) also admits
 ///   resolvers that cannot fuse (a filter callback): the mask leaves them their paired read over the page
@@ -240,7 +240,7 @@ internal readonly struct PipelineJoinedExecutor<TKey, TValue, TArgs, TResolverCh
 	/// <summary>
 	///   The bounded flow's heap feed, run once the chain has handed over its sorter as a struct type
 	///   parameter (<c>IResolvers.WithSorter</c>, design §13 step 7): fills
-	///   <see cref="FrozenTopKJoinedContainer{TKey,TValue,TPairComparer}" /> from the pass, drains the page and
+	///   <see cref="TopKJoinedBaseContainer{TKey,TValue,TPairComparer}" /> from the pass, drains the page and
 	///   materializes it into the joined container — everything whose cost is a comparison. The chain walk
 	///   that finds the sorter is paid once per execution, not once per link per comparison. The joined
 	///   container is a ref struct, so it travels as a laundered pointer (the codebase's ref-struct-in-a-
@@ -289,7 +289,7 @@ internal readonly struct PipelineJoinedExecutor<TKey, TValue, TArgs, TResolverCh
 		public void Visit<TSortResult, TComparer>(ref TComparer comparer) where TComparer : IComparer<TSortResult> {
 			// TValue == TSortResult: the bounded gate is JoinChainShape.BoundedCapable, whose
 			// SorterOrdersByLeftValues is the sorter's own OrdersByLeftValues<TValue>.
-			var topK = new FrozenTopKJoinedContainer<TKey, TValue, TopKLeftPairComparer<TKey, TValue, TSortResult, TComparer>>(new(comparer), _skip, _take);
+			var topK = new TopKJoinedBaseContainer<TKey, TValue, TopKLeftPairComparer<TKey, TValue, TSortResult, TComparer>>(new(comparer), _skip, _take);
 			try {
 				topK.Init(_keys.Length);
 				if (_hasInner) {

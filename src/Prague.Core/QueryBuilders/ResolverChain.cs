@@ -445,18 +445,25 @@ internal ref struct SimpleResultContainer<TKey, TValue, TResolver>
 ///   Clone semantics mirror the sliced classic path: survivors cloned once, after selection.
 ///   The heap buffer never transfers ownership — Dispose always returns it; the page rows are
 ///   copied into the result's own buffer.
+///   <para>
+///   The page comparer is a struct type parameter — in production
+///   <see cref="TopKLeftValueComparer{TValue,TResult,TComparer}" /> over the sorter's own user
+///   comparer, which the callers obtain once per execution through
+///   <see cref="IJoinResolver.WithLeftComparer{TVisitor}" /> rather than comparing through the sorter's
+///   generic <c>CompareLeftValues</c> per row.
+///   </para>
 /// </summary>
-internal ref struct TopKSimpleResultContainer<TKey, TValue, TResolver>
+internal ref struct TopKSimpleResultContainer<TKey, TValue, TPageComparer>
 	: IResultContainerInitializer<TKey, TValue>
 	where TKey : notnull, IEquatable<TKey>
-	where TResolver : struct, IJoinResolver
+	where TPageComparer : struct, IComparer<(TValue Left, int Ordinal)>
 	where TValue : ICacheEquatable<TValue>, ICacheClonable<TValue> {
 	private readonly bool _shouldPool;
 	private readonly bool _clone;
 	private readonly int _skip;
 	private readonly int _take;
 	private readonly int _k;
-	private readonly TopKValueComparer<TValue, TResolver> _comparer;
+	private readonly TPageComparer _comparer;
 	private (TValue Left, int Ordinal)[]? _heap;
 	private int _seen;
 	private bool _collectAll;
@@ -466,8 +473,8 @@ internal ref struct TopKSimpleResultContainer<TKey, TValue, TResolver>
 
 	public int TotalCount => _totalCount;
 
-	public TopKSimpleResultContainer(TResolver resolver, bool pool, bool clone, int skip, int take) {
-		_comparer = new TopKValueComparer<TValue, TResolver>(resolver);
+	public TopKSimpleResultContainer(TPageComparer comparer, bool pool, bool clone, int skip, int take) {
+		_comparer = comparer;
 		_shouldPool = pool;
 		// Bounded selection always slices, so cloning is always deferred to the survivors.
 		_clone = clone;
@@ -549,62 +556,28 @@ internal ref struct TopKSimpleResultContainer<TKey, TValue, TResolver>
 }
 
 /// <summary>
-///   Orders by the left value, then by encounter order so that ties resolve independently of the page
-///   size. The user comparer is invoked through a <see cref="Comparison{T}"/> delegate created once per
-///   query: the JIT devirtualizes and inlines a hot delegate target, while the same call through
-///   <see cref="IComparer{T}"/> stays an interface dispatch — measured 1.7× on the page sort and 1.8× on
-///   the heap loop for a class comparer. One 64-byte delegate per bounded query is the price, the same
-///   allocation the classic full-sort path pays inside the framework sort.
-/// </summary>
-internal readonly struct TopKValueComparer<TValue, TResolver> : IComparer<(TValue Left, int Ordinal)>
-	where TResolver : struct, IJoinResolver {
-	private readonly TResolver _resolver;
-
-	public TopKValueComparer(TResolver resolver) => _resolver = resolver;
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public int Compare((TValue Left, int Ordinal) x, (TValue Left, int Ordinal) y) {
-		var order = _resolver.CompareLeftValues(x.Left, y.Left);
-		return order != 0 ? order : x.Ordinal.CompareTo(y.Ordinal);
-	}
-}
-
-/// <summary>
-///   Joined-path twin of <see cref="TopKValueComparer{TValue,TResolver}"/>: orders (key, left, ordinal)
-///   triples by the left value, then by encounter order, comparing through the resolver chain so
-///   nothing is boxed and no delegate is created.
-/// </summary>
-internal readonly unsafe struct TopKPairComparer<TKey, TValue, TChain> : IComparer<(TKey Key, TValue Left, int Ordinal)>
-	where TChain : struct, IResolvers {
-	// A pointer, not the chain by value: this comparer is copied into every TopKSelect sift and
-	// partition frame, and a chain with several joins is a fat struct. The chain lives in the query
-	// builder for the whole query, which outlives every use here.
-	private readonly void* _chain;
-
-	public TopKPairComparer(ref TChain chain) => _chain = Unsafe.AsPointer(ref chain);
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public int Compare((TKey Key, TValue Left, int Ordinal) x, (TKey Key, TValue Left, int Ordinal) y) {
-		var order = Unsafe.AsRef<TChain>(_chain).CompareLeftValues(x.Left, y.Left);
-		return order != 0 ? order : x.Ordinal.CompareTo(y.Ordinal);
-	}
-}
-
-/// <summary>
 ///   Bounded base-walk container for the joined top-K path: receives every (key, left) match from the
 ///   base execution (post-Where, post-inner-narrowing), selects a small prefix with a pooled heap
 ///   or collects a large prefix and selects the page in place, and records the authoritative total
 ///   via Seal. Pairs are drained into the
 ///   real results dictionary. The heap buffer never transfers ownership — Dispose always returns it.
+///   <para>
+///   The pair comparer is a struct type parameter — in production
+///   <see cref="TopKLeftPairComparer{TKey,TValue,TResult,TComparer}" /> over the sorter's own user
+///   comparer, which both callers (the eager <c>ExecuteCoreJoinedTop</c> and the frozen pipeline's
+///   bounded flow) obtain once per execution through <c>IResolvers.WithSorter</c> then
+///   <see cref="IJoinResolver.WithLeftComparer{TVisitor}" />, rather than comparing through the chain
+///   per row.
+///   </para>
 /// </summary>
-internal ref struct TopKJoinedBaseContainer<TKey, TValue, TChain>
+internal ref struct TopKJoinedBaseContainer<TKey, TValue, TPairComparer>
 	: IResultContainerInitializer<TKey, TValue>
-	where TChain : struct, IResolvers
+	where TPairComparer : struct, IComparer<(TKey Key, TValue Left, int Ordinal)>
 	where TKey : notnull, IEquatable<TKey> {
 	private readonly int _skip;
 	private readonly int _take;
 	private readonly int _k;
-	private readonly TopKPairComparer<TKey, TValue, TChain> _comparer;
+	private readonly TPairComparer _comparer;
 	private (TKey Key, TValue Left, int Ordinal)[]? _heap;
 	private int _seen;
 	private bool _collectAll;
@@ -614,8 +587,8 @@ internal ref struct TopKJoinedBaseContainer<TKey, TValue, TChain>
 
 	public int TotalCount => _totalCount;
 
-	public TopKJoinedBaseContainer(ref TChain chain, int skip, int take) {
-		_comparer = new TopKPairComparer<TKey, TValue, TChain>(ref chain);
+	public TopKJoinedBaseContainer(TPairComparer comparer, int skip, int take) {
+		_comparer = comparer;
 		_skip = skip;
 		_take = take;
 		_k = skip + take;
