@@ -1860,8 +1860,9 @@ and the sugar commit at 103 twice; the row did not change. Shapes A / B flat on 
 
 `FrozenFkJoinBenchmarks`: `[DataCache]` + `[DataCacheForeignKey]` models, 100k customers / orders,
 10k docs, ~1k-row buckets. Every row is Pipeline `fused: 1` except the filtered one (Replay at this
-commit). Forward and inner `JoinWith{T}` cannot follow a `SortBounded` (no `ICacheCarrier` on the sorted
-discriminator, eager too — #92), so the bounded row is the reverse one-to-one.
+commit). At this commit no forward `JoinWith{T}` could follow a `SortBounded`, so the bounded row is the
+reverse one-to-one; #92 added the forward overload and the `Fk_SortBounded_ManyToOne` row below. `InnerJoinWith`
+and the filtered flavors still cannot follow a sort — no `ICacheCarrier` on the sorted discriminator, eager too.
 
 | Method | Eager | Frozen | Ratio | load |
 |---|---:|---:|---:|---|
@@ -1872,6 +1873,20 @@ discriminator, eager too — #92), so the bounded row is the reverse one-to-one.
 | Fk_Collection (M:N) | 96.55 us | **53.70 us** | 1.80× | 2.34 |
 | Fk_SortBounded_OneToOneReverse | 30.95 us | **19.23 us** | 1.61× | 2.36 |
 | Fk_ManyToOne_Filtered (Replay) | 43.28 us | 40.90 us | 1.06× | 3.80 |
+
+### `Fk_SortBounded_ManyToOne` — the forward bounded shape (#92, `2315f2f`)
+
+The scalar forward many-to-one had no `SortedQuery<TInner>` overload, so `SortBounded(cmp).JoinWith{T}()`
+did not compile and the category above could only measure the reverse one-to-one. The overload exists now;
+same fixture, same page (skip 20, take 20), `--inProcess -f net9.0`, load 2.54 at start / 4.29 at end.
+
+| Method | Mean | Error | StdDev | Ratio | Allocated |
+|---|---:|---:|---:|---:|---:|
+| Fk_SortBounded_ManyToOne_Eager | 29.27 us | 0.091 us | 0.081 us | 1.00 | — |
+| Fk_SortBounded_ManyToOne_Frozen | **14.39 us** | 0.084 us | 0.078 us | **0.49** | — |
+
+2.03×, which is the unbounded `Fk_ManyToOne` ratio (2.02×) — the bounded page costs the forward
+left-symmetric join what it costs the reverse one, and both sides stay at 0 B.
 
 (`2ccc76a`'s first filtered reading, 30.14 / 28.98, was a degenerate fixture — `i % 4` is constant within a
 bucket of stride 100 — fixed in `ad38e86`.)
