@@ -678,8 +678,16 @@ public struct CacheQueryBuilderCoreCombined<TKey, TValue>
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	void ICandidatesFilterer<TKey, TValue>.WhereInternal(Predicate<TValue> predicate) {
 		var currentFilter = _filter;
-		_filter = currentFilter == null ? predicate : v => currentFilter(v) && predicate(v);
+		_filter = currentFilter == null ? predicate : Compose(currentFilter, predicate);
 	}
+
+	// The composing lambda lives in its own method: Roslyn allocates a lambda's display class at the
+	// entry of the method that contains it, so an inline `v => current(v) && next(v)` cost 32 B on
+	// every Where, including a first Where that never composes. NoInlining keeps the JIT from hoisting
+	// the allocation back into the caller.
+	[MethodImpl(MethodImplOptions.NoInlining)]
+	private static Predicate<TValue> Compose(Predicate<TValue> current, Predicate<TValue> next)
+		=> v => current(v) && next(v);
 
 	internal int Count() {
 		if (_disposed)
@@ -945,6 +953,14 @@ public struct PairedCacheQueryBuilderCoreCombined<TLeft, TKey, TValue>
 	private bool _disposed;
 	private bool _isIntersecter;
 	internal bool _first;
+	// Probe mode (frozen build only, never an execution): every narrowing returns having counted itself
+	// instead of touching the candidates, so applying a join's filter callback to a probe core reports
+	// what the callback configured — the composed Where predicate, and whether anything narrowed by index.
+	// A callback that only filtered by value is then a per-right check the fused JoinOne fill can run
+	// itself (design §7.1; the frozen fill's filtered shapes). Counting rather than a bool keeps the
+	// completeness test (FrozenFusedFilterProbeTests) able to say WHICH call was seen.
+	private readonly bool _probe;
+	internal int _narrowings;
 	internal ValueSet<JoinedKeyPair<TLeft, TKey>, DefaultKeyComparer<JoinedKeyPair<TLeft, TKey>>> _candidates;
 	internal RefHolder<ValueSet<JoinedKeyPair<TLeft, TKey>, DefaultKeyComparer<JoinedKeyPair<TLeft, TKey>>>.IncrementalIntersecter<TKey, JoinedKeyPair<TLeft, TKey>.IntoTrait>> _incrementalIntersecter;
 
@@ -972,6 +988,33 @@ void ICandidatesExecutor<TKey, TValue>.ExecuteBase<TContainer>(ref TContainer c)
 		_first = false; // paired is always seeded
 		_isIntersecter = false;
 		_candidates = seededCandidates;
+		_probe = false;
+		_narrowings = 0;
+	}
+
+	/// <summary>
+	///   A core that narrows nothing and counts every attempt: the frozen planner applies a join's filter
+	///   callback to it once at build to learn whether the callback is a pure value predicate. It owns no
+	///   candidate set and rents nothing, so it needs no disposal.
+	/// </summary>
+	internal PairedCacheQueryBuilderCoreCombined(InMemoryDataCache<TKey, TValue> dataCache, bool probe) {
+		_dataCache = dataCache;
+		_filter = null;
+		_disposed = false;
+		_first = false;
+		_isIntersecter = false;
+		_probe = probe;
+		_narrowings = 0;
+	}
+
+	/// <summary>
+	///   What a probe run saw: the callback's composed <c>Where</c> predicate, and <c>false</c> when it also
+	///   narrowed by index (or opened an <c>Or</c>) — which no per-right check can reproduce, so such a join
+	///   keeps its paired read.
+	/// </summary>
+	internal bool TryGetProbedPredicate(out Predicate<TValue>? predicate) {
+		predicate = _filter;
+		return _narrowings == 0;
 	}
 
 	/// <summary>
@@ -987,6 +1030,8 @@ void ICandidatesExecutor<TKey, TValue>.ExecuteBase<TContainer>(ref TContainer c)
 		_first = true;
 		_incrementalIntersecter = new RefHolder<ValueSet<JoinedKeyPair<TLeft, TKey>, DefaultKeyComparer<JoinedKeyPair<TLeft, TKey>>>.IncrementalIntersecter<TKey, JoinedKeyPair<TLeft, TKey>.IntoTrait>>(ref incrementalIntersecter);
 		_isIntersecter = true;
+		_probe = false;
+		_narrowings = 0;
 	}
 
 	#region IOrCapable<PairedCacheQueryBuilderCoreCombined<TLeft, TKey, TValue>>
@@ -1003,7 +1048,9 @@ void ICandidatesExecutor<TKey, TValue>.ExecuteBase<TContainer>(ref TContainer c)
 		in TBranch b1, in TBranch b2)
 		where TResolverChain : struct, IResolvers
 		where TBranch : struct, IOrBranch<CacheQueryBuilderCombined<NarrowOnlyQuery<TCache>, PairedCacheQueryBuilderCoreCombined<TLeft, TKey, TValue>, TKey, TValue, TResolverChain, TResult>> {
+		if (_probe) { _narrowings++; return; }
 
+		if (_probe) { _narrowings++; return; }
 		Span<int> twoBuffers = stackalloc int[ValueSet<JoinedKeyPair<TLeft, TKey>, DefaultKeyComparer<JoinedKeyPair<TLeft, TKey>>>.StackAllocThreshold * 2];
 		var buffer1 = twoBuffers[..ValueSet<JoinedKeyPair<TLeft, TKey>, DefaultKeyComparer<JoinedKeyPair<TLeft, TKey>>>.StackAllocThreshold];
 		var buffer2 = twoBuffers[ValueSet<JoinedKeyPair<TLeft, TKey>, DefaultKeyComparer<JoinedKeyPair<TLeft, TKey>>>.StackAllocThreshold..];
@@ -1039,6 +1086,7 @@ void ICandidatesExecutor<TKey, TValue>.ExecuteBase<TContainer>(ref TContainer c)
 	void ICandidatesFilterer<TKey, TValue>.UseIndexInternal<TIndexKey>(
 		CacheKeyValueIndex<TKey, TValue, TIndexKey> index,
 		TIndexKey value) {
+		if (_probe) { _narrowings++; return; }
 		if (_isIntersecter) {
 			ref var intersector = ref _incrementalIntersecter.Value;
 			if (intersector.IsCleared) return;
@@ -1064,12 +1112,17 @@ void ICandidatesExecutor<TKey, TValue>.ExecuteBase<TContainer>(ref TContainer c)
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	void ICandidatesFilterer<TKey, TValue>.UseIndexInternal<TIndexKey>(
 		CacheKeyValueIndex<TKey, TValue, TIndexKey> index,
-		List<TIndexKey> values) =>
+		List<TIndexKey> values) {
+		// Guarded here rather than left to the span overload: the cast to the interface boxes this struct,
+		// so the probe counter the boxed copy bumps is thrown away with the copy.
+		if (_probe) { _narrowings++; return; }
 		((ICandidatesFilterer<TKey, TValue>)this).UseIndexInternal(index, CollectionsMarshal.AsSpan(values));
+	}
 
 	void ICandidatesFilterer<TKey, TValue>.UseIndexInternal<TIndexKey>(
 		CacheKeyValueIndex<TKey, TValue, TIndexKey> index,
 		ReadOnlySpan<TIndexKey> values) {
+		if (_probe) { _narrowings++; return; }
 		if (_isIntersecter) {
 			ref var intersector = ref _incrementalIntersecter.Value;
 			if (intersector.IsCleared) return;
@@ -1117,6 +1170,7 @@ void ICandidatesExecutor<TKey, TValue>.ExecuteBase<TContainer>(ref TContainer c)
 	void ICandidatesFilterer<TKey, TValue>.UseIndexInternal<TIndexKey>(
 		CacheKeyValueListIndex<TKey, TValue, TIndexKey> index,
 		TIndexKey value) {
+		if (_probe) { _narrowings++; return; }
 		if (_isIntersecter) {
 			ref var intersector = ref _incrementalIntersecter.Value;
 			if (intersector.IsCleared) return;
@@ -1141,12 +1195,17 @@ void ICandidatesExecutor<TKey, TValue>.ExecuteBase<TContainer>(ref TContainer c)
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	void ICandidatesFilterer<TKey, TValue>.UseIndexInternal<TIndexKey>(
 		CacheKeyValueListIndex<TKey, TValue, TIndexKey> index,
-		List<TIndexKey> values) =>
+		List<TIndexKey> values) {
+		// Guarded here rather than left to the span overload: the cast to the interface boxes this struct,
+		// so the probe counter the boxed copy bumps is thrown away with the copy.
+		if (_probe) { _narrowings++; return; }
 		((ICandidatesFilterer<TKey, TValue>)this).UseIndexInternal(index, CollectionsMarshal.AsSpan(values));
+	}
 
 	void ICandidatesFilterer<TKey, TValue>.UseIndexInternal<TIndexKey>(
 		CacheKeyValueListIndex<TKey, TValue, TIndexKey> index,
 		ReadOnlySpan<TIndexKey> values) {
+		if (_probe) { _narrowings++; return; }
 		if (_isIntersecter) {
 			ref var intersector = ref _incrementalIntersecter.Value;
 			if (intersector.IsCleared) return;
@@ -1204,6 +1263,7 @@ void ICandidatesExecutor<TKey, TValue>.ExecuteBase<TContainer>(ref TContainer c)
 		CacheKeyValueListIndex<TKey, TValue, TIndexKey> index,
 		ReadOnlySpan<TOtherValue> values,
 		Func<TOtherValue, TIndexKey> keySelector) {
+		if (_probe) { _narrowings++; return; }
 		if (_isIntersecter) {
 			ref var intersector = ref _incrementalIntersecter.Value;
 			if (intersector.IsCleared) return;
@@ -1280,6 +1340,7 @@ void ICandidatesExecutor<TKey, TValue>.ExecuteBase<TContainer>(ref TContainer c)
 		long updatedAfter,
 		out long max) {
 		max = 0;
+		if (_probe) { _narrowings++; return; }
 		UseIndexInternalLastUpdated(lastUpdatedIndex.Index, updatedAfter);
 	}
 
@@ -1306,6 +1367,7 @@ void ICandidatesExecutor<TKey, TValue>.ExecuteBase<TContainer>(ref TContainer c)
 		DateTime updatedAfter,
 		out long max) {
 		max = 0;
+		if (_probe) { _narrowings++; return; }
 		UseIndexInternalLastUpdated(lastUpdatedIndex, new DateTimeOffset(updatedAfter).ToUnixTimeMilliseconds());
 	}
 
@@ -1314,6 +1376,7 @@ void ICandidatesExecutor<TKey, TValue>.ExecuteBase<TContainer>(ref TContainer c)
 		DateTimeOffset updatedAfter,
 		out long max) {
 		max = 0;
+		if (_probe) { _narrowings++; return; }
 		UseIndexInternalLastUpdated(lastUpdatedIndex, updatedAfter.ToUnixTimeMilliseconds());
 	}
 
@@ -1322,10 +1385,12 @@ void ICandidatesExecutor<TKey, TValue>.ExecuteBase<TContainer>(ref TContainer c)
 		long updatedAfter,
 		out long max) {
 		max = 0;
+		if (_probe) { _narrowings++; return; }
 		UseIndexInternalLastUpdated(lastUpdatedIndex, updatedAfter);
 	}
 
 	private void UseIndexInternalLastUpdated(LastUpdatedIndex<TKey> lastUpdatedIndex, long updatedAfter) {
+		if (_probe) { _narrowings++; return; }
 		if (_isIntersecter) {
 			ref var intersector = ref _incrementalIntersecter.Value;
 			if (intersector.IsCleared) { _first = false; return; }
@@ -1405,6 +1470,7 @@ void ICandidatesExecutor<TKey, TValue>.ExecuteBase<TContainer>(ref TContainer c)
 		LastUpdatedIndex<TKey> lastUpdatedIndex,
 		long updatedAfter,
 		long updatedUntilInclusive) {
+		if (_probe) { _narrowings++; return; }
 		if (_isIntersecter) {
 			ref var intersector = ref _incrementalIntersecter.Value;
 			if (intersector.IsCleared) { _first = false; return; }
@@ -1449,6 +1515,7 @@ void ICandidatesExecutor<TKey, TValue>.ExecuteBase<TContainer>(ref TContainer c)
 		CacheRangeIndex<TKey, TValue, TIndexKey> index, TQueryBuilder f)
 		where TQueryBuilder : struct, IRangeQueryBuilder<TIndexKey>
 		where TIndexKey : IComparable<TIndexKey> {
+		if (_probe) { _narrowings++; return; }
 		if (_isIntersecter) {
 			ref var intersector = ref _incrementalIntersecter.Value;
 			if (intersector.IsCleared) { _first = false; return; }
@@ -1532,6 +1599,7 @@ void ICandidatesExecutor<TKey, TValue>.ExecuteBase<TContainer>(ref TContainer c)
 	}
 
 	void ICandidatesFilterer<TKey, TValue>.UseIndexInternal(CacheKeySetIndex<TKey, TValue> index) {
+		if (_probe) { _narrowings++; return; }
 		if (_isIntersecter) {
 			ref var intersector = ref _incrementalIntersecter.Value;
 			if (intersector.IsCleared) { _first = false; return; }
@@ -1561,8 +1629,16 @@ void ICandidatesExecutor<TKey, TValue>.ExecuteBase<TContainer>(ref TContainer c)
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	void ICandidatesFilterer<TKey, TValue>.WhereInternal(Predicate<TValue> predicate) {
 		var currentFilter = _filter;
-		_filter = currentFilter == null ? predicate : v => currentFilter(v) && predicate(v);
+		_filter = currentFilter == null ? predicate : Compose(currentFilter, predicate);
 	}
+
+	// The composing lambda lives in its own method: Roslyn allocates a lambda's display class at the
+	// entry of the method that contains it, so an inline `v => current(v) && next(v)` cost 32 B on
+	// every Where, including a first Where that never composes. NoInlining keeps the JIT from hoisting
+	// the allocation back into the caller.
+	[MethodImpl(MethodImplOptions.NoInlining)]
+	private static Predicate<TValue> Compose(Predicate<TValue> current, Predicate<TValue> next)
+		=> v => current(v) && next(v);
 
 	/// <summary>
 	/// Executes the paired query. Projects the paired candidates to an unpaired
@@ -1863,13 +1939,14 @@ public struct CacheQueryBuilderCombined<TDiscriminator, TLeftQuery, TLeftKey, TL
 
 		var container = new JoinedResultContaier<TLeftKey, TLeftValue, TResolverChain, TJoinResult>(
 			ref _resolverChain, pool, clone, _manyCount, bounded: true);
-		var topK = new TopKJoinedBaseContainer<TLeftKey, TLeftValue, TResolverChain>(ref _resolverChain, skip, take);
 		try {
 			container.PrepareIndexedInnerBounded(ref this);
 			container.NarrowIndexedInner(ref this);
-			_leftQuery.ExecuteBase(ref topK);
-			var kept = topK.Drain();
-			container.MaterializeTopK(topK.Buffer, skip, Math.Max(kept - skip, 0), topK.TotalCount);
+			// The heap and the page selection run inside the feeder, which the chain hands its sorter and
+			// the sorter its own comparer — both walks once per execution, where comparing through them
+			// was once per link per comparison. The feeder owns the heap and returns it on any throw.
+			var feeder = new JoinedTopKFeeder<TJoinResult>(ref _leftQuery, ref container, skip, take);
+			_resolverChain.WithSorter(ref feeder);
 			container.ExecuteJoinsBounded();
 			return container.BuildResults();
 		} finally {
@@ -1878,19 +1955,15 @@ public struct CacheQueryBuilderCombined<TDiscriminator, TLeftQuery, TLeftKey, TL
 			// swallows a double-return), so a single throw in a flat sequence would strand the
 			// narrowed inner maps and the candidate set for good.
 			try {
-				topK.Dispose();
+				container.Dispose();
 			} finally {
 				try {
-					container.Dispose();
+					// Inner resolvers keep the right values they validated in the narrow pass until
+					// the fill; return those maps whether or not the fill ran.
+					var release = new ReleaseNarrowedInnerProcessor();
+					_resolverChain.Execute(ref release);
 				} finally {
-					try {
-						// Inner resolvers keep the right values they validated in the narrow pass until
-						// the fill; return those maps whether or not the fill ran.
-						var release = new ReleaseNarrowedInnerProcessor();
-						_resolverChain.Execute(ref release);
-					} finally {
-						ReleaseUnconsumedCandidates();
-					}
+					ReleaseUnconsumedCandidates();
 				}
 			}
 		}
@@ -1977,14 +2050,90 @@ public struct CacheQueryBuilderCombined<TDiscriminator, TLeftQuery, TLeftKey, TL
 			return ExecuteCoreSimple(ref resolver, pool, clone, skip, take);
 		}
 
-		// The resolver itself carries the comparison into the container as a struct type parameter —
-		// nothing is erased to IComparer<T>, so the bounded plan allocates nothing per query.
-		var container = new TopKSimpleResultContainer<TLeftKey, TLeftValue, TResolver>(resolver, pool, clone, skip, take);
-		try {
-			_leftQuery.ExecuteBase(ref container);
-			return container.BuildResults();
-		} finally {
-			container.Dispose();
+		// The sorter hands its own comparer into the container as a struct type parameter — nothing is
+		// erased to IComparer<T>, so the bounded plan allocates nothing per query, and a comparison is
+		// the user comparer's Compare rather than the sorter's generic CompareLeftValues.
+		var feeder = new SimpleTopKFeeder(ref _leftQuery, pool, clone, skip, take);
+		resolver.WithLeftComparer(ref feeder);
+		return feeder.Results;
+	}
+
+	/// <summary>
+	///   The bounded simple page with the comparer hop removed: the sorter hands over its own comparer
+	///   once per execution (<see cref="IJoinResolver.WithLeftComparer{TVisitor}" />) and the container is
+	///   closed over it, so a comparison is the user comparer's <c>Compare</c> instead of the sorter's
+	///   generic <c>CompareLeftValues</c> — over a reference-type left value the shared-canonical
+	///   instantiation, a runtime generic-dictionary lookup and an indirect call per comparison.
+	/// </summary>
+	private ref struct SimpleTopKFeeder : ILeftComparerVisitor {
+		private readonly ref TLeftQuery _leftQuery;
+		private readonly bool _pool;
+		private readonly bool _clone;
+		private readonly int _skip;
+		private readonly int _take;
+
+		internal QueryResults<TLeftValue> Results;
+
+		internal SimpleTopKFeeder(ref TLeftQuery leftQuery, bool pool, bool clone, int skip, int take) {
+			_leftQuery = ref leftQuery;
+			_pool = pool;
+			_clone = clone;
+			_skip = skip;
+			_take = take;
+		}
+
+		// TSortResult == TLeftValue: the gate is the sorter's own OrdersByLeftValues<TLeftValue>.
+		public void Visit<TSortResult, TComparer>(ref TComparer comparer) where TComparer : IComparer<TSortResult> {
+			var container = new TopKSimpleResultContainer<TLeftKey, TLeftValue, TopKLeftValueComparer<TLeftValue, TSortResult, TComparer>>(
+				new(comparer), _pool, _clone, _skip, _take);
+			try {
+				_leftQuery.ExecuteBase(ref container);
+				Results = container.BuildResults();
+			} finally {
+				// No-op once BuildResults hands the buffer over; returns the rented heap otherwise.
+				container.Dispose();
+			}
+		}
+	}
+
+	/// <summary>
+	///   The bounded joined page's heap feed, run once the chain has handed over its sorter
+	///   (<c>IResolvers.WithSorter</c>) and the sorter its comparer
+	///   (<see cref="IJoinResolver.WithLeftComparer{TVisitor}" />): both walks are per execution, where
+	///   comparing through them was one JIT-folded <c>IsSorter</c> test per link plus one
+	///   <c>__Canon</c> generic-dictionary lookup per comparison. The bounded gate guarantees the sorter
+	///   is the chain base, so the walk always finds it. The joined container is a ref struct, so it
+	///   travels as a laundered pointer (the codebase's ref-struct-in-a-ref-struct pattern).
+	/// </summary>
+	private unsafe ref struct JoinedTopKFeeder<TJoinResult> : ISorterVisitor, ILeftComparerVisitor
+		where TJoinResult : struct, IJoinResult<TLeftValue> {
+		private readonly ref TLeftQuery _leftQuery;
+		private readonly void* _container;
+		private readonly int _skip;
+		private readonly int _take;
+
+		internal JoinedTopKFeeder(ref TLeftQuery leftQuery,
+			ref JoinedResultContaier<TLeftKey, TLeftValue, TResolverChain, TJoinResult> container, int skip, int take) {
+			_leftQuery = ref leftQuery;
+			_container = Unsafe.AsPointer(ref container);
+			_skip = skip;
+			_take = take;
+		}
+
+		public void Visit<TSorter>(ref TSorter sorter) where TSorter : struct, IJoinResolver
+			=> sorter.WithLeftComparer(ref this);
+
+		public void Visit<TSortResult, TComparer>(ref TComparer comparer) where TComparer : IComparer<TSortResult> {
+			var topK = new TopKJoinedBaseContainer<TLeftKey, TLeftValue, TopKLeftPairComparer<TLeftKey, TLeftValue, TSortResult, TComparer>>(
+				new(comparer), _skip, _take);
+			try {
+				_leftQuery.ExecuteBase(ref topK);
+				var kept = topK.Drain();
+				ref var container = ref Unsafe.AsRef<JoinedResultContaier<TLeftKey, TLeftValue, TResolverChain, TJoinResult>>(_container);
+				container.MaterializeTopK(topK.Buffer, _skip, Math.Max(kept - _skip, 0), topK.TotalCount);
+			} finally {
+				topK.Dispose();
+			}
 		}
 	}
 

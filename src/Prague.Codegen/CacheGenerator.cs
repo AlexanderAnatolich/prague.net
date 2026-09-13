@@ -1039,10 +1039,20 @@ public class CacheGenerator : IIncrementalGenerator {
 				continue;
 			}
 
-			foreignKeyIndexes.Add((prop, indexType, indexName, isSymmetric, null, false));
+			// A non-selector OneToOne FK on a non-PK property drives the forward JoinWith{T}
+			// through JoinOneLeftUniqueIndexResolver, which reads the index's .Reverse — so the
+			// auto index has to be the symmetric variant (same shape the selector form already
+			// emits). A OneToOne FK ON the PK joins PK-to-PK and needs no reverse map, so it
+			// keeps the plain unique index.
+			var fkOnPkPlain = keyPropertyName != null && prop.Name == keyPropertyName;
+			var isSymmetricUnique = indexType == "Unique" && !fkOnPkPlain;
+			foreignKeyIndexes.Add((prop, indexType, indexName, isSymmetric || isSymmetricUnique, null, fkOnPkPlain));
 
 			sb.AppendLine();
-			if (indexType == "Unique")
+			if (isSymmetricUnique) // Unique + Symmetric (OneToOne on a non-PK property)
+				sb.AppendLine(
+					$"        public readonly CacheSymmetricUniqueIndex<{keyTypeName}, {documentTypeName}, {propertyType}> {indexName};");
+			else if (indexType == "Unique")
 				sb.AppendLine(
 					$"        public readonly CacheUniqueIndex<{keyTypeName}, {documentTypeName}, {propertyType}> {indexName};");
 			else if (isSymmetric) // Many + Symmetric (ManyToOne)
@@ -1227,6 +1237,12 @@ public class CacheGenerator : IIncrementalGenerator {
 					$"            {indexName} = Cache.CacheCollectionSymmetricKeyValueListIndex(static (key, doc) => doc.{prop.Name});");
 				sb.AppendLine(
 					$"            DataCacheStatisticsMarshall.AddIndex(_statistics, \"{indexName}\", DataCacheIndexType.Many, {indexName});");
+			}
+			else if (indexType == "Unique" && isSymmetricFk) {
+				// OneToOne on a non-PK property: the forward JoinWith{T} reads .Reverse.
+				sb.AppendLine($"            {indexName} = Cache.AddSymmetricKeyValueIndex(static (key, doc) => doc.{prop.Name});");
+				sb.AppendLine(
+					$"            DataCacheStatisticsMarshall.AddIndex(_statistics, \"{indexName}\", DataCacheIndexType.Unique, {indexName});");
 			}
 			else if (indexType == "Unique") {
 				sb.AppendLine($"            {indexName} = Cache.AddKeyValueIndex(static (key, doc) => doc.{prop.Name});");
@@ -1879,11 +1895,6 @@ public class CacheGenerator : IIncrementalGenerator {
 			globalIndexOnKeyForField != null,
 			keyProperty?.Type.IsValueType ?? true,
 			keyTypeName, documentTypeName);
-
-		// Generate JoinWith extension methods as a top-level static class
-		// NOTE: Obsolete - JoinWith methods are now generated as extensions on CacheQueryBuilderCombined
-		// GenerateJoinQueryBuilders(sb, cacheClassName, classSymbol, keyTypeName, documentTypeName,
-		// 	joinableEntities, foreignKeyPropertiesRaw, allCacheInfo);
 
 		// Generate QueryParser class
 		GenerateQueryParserClass(sb, cacheClassName, classSymbol, documentTypeName, keyTypeName);
@@ -6711,17 +6722,11 @@ public class CacheGenerator : IIncrementalGenerator {
 						"JoinManyCollection", fkJoinArgsColl);
 
 					// Sort->JoinWith parallel - outer, no-filter only.
-					var joinReturnTypeCollSorted = $"CacheQueryBuilderCombined<Prague.Core.TypeSystem.SortedQuery<TInner>, TExecutor, {keyTypeName}, {documentTypeName}, Resolvers<TResolverChain, {resolverColl($"NoFilter<{nonExecBuilderColl}>")}>, {newResultTypeColl}>";
-					sb.AppendLine();
-					sb.AppendLine($"        /// <summary>Join with {otherTypeFullName} via reverse collection FK (many-to-many) after a Sort.</summary>");
-					sb.AppendLine("        [MethodImpl(MethodImplOptions.AggressiveInlining)]");
-					sb.AppendLine($"        public static {joinReturnTypeCollSorted}");
-					sb.AppendLine($"            {methodName}<{joinGenericParamsSorted}>({joinBuilderParamSorted})");
-					sb.AppendLine($"        {joinConstraintsSorted}");
-					sb.AppendLine("        {");
-					sb.AppendLine($"            var cache = {getCacheCodeSorted};");
-					sb.AppendLine($"            return Unsafe.AsRef(in builder).JoinManyCollection({fkJoinArgsColl});");
-					sb.AppendLine("        }");
+					EmitFkSortedJoinWithOverload(sb,
+						$"Join with {otherTypeFullName} via reverse collection FK (many-to-many) after a Sort.",
+						methodName, joinGenericParamsSorted, joinBuilderParamSorted, joinConstraintsSorted, getCacheCodeSorted,
+						keyTypeName, documentTypeName, newResultTypeColl, nonExecBuilderColl, resolverColl,
+						"JoinManyCollection", fkJoinArgsColl);
 
 					EmitFkJoinWithOverloads(sb,
 						$"Inner join with {otherTypeFullName} via reverse collection FK (many-to-many) - drops lefts with no matching owners.",
@@ -6759,17 +6764,11 @@ public class CacheGenerator : IIncrementalGenerator {
 					"JoinMany", fkJoinArgsRev);
 
 				// Sort→JoinWith parallel — accepts SortedQuery<TInner>-wrapped discriminator. Outer, no-filter only.
-				var joinReturnTypeRevSorted = $"CacheQueryBuilderCombined<Prague.Core.TypeSystem.SortedQuery<TInner>, TExecutor, {keyTypeName}, {documentTypeName}, Resolvers<TResolverChain, {resolverRev($"NoFilter<{nonExecBuilderRev}>")}>, {newResultTypeRev}>";
-				sb.AppendLine();
-				sb.AppendLine($"        /// <summary>Join with {otherTypeFullName} via reverse FK (one-to-many) after a Sort.</summary>");
-				sb.AppendLine("        [MethodImpl(MethodImplOptions.AggressiveInlining)]");
-				sb.AppendLine($"        public static {joinReturnTypeRevSorted}");
-				sb.AppendLine($"            {methodName}<{joinGenericParamsSorted}>({joinBuilderParamSorted})");
-				sb.AppendLine($"        {joinConstraintsSorted}");
-				sb.AppendLine("        {");
-				sb.AppendLine($"            var cache = {getCacheCodeSorted};");
-				sb.AppendLine($"            return Unsafe.AsRef(in builder).JoinMany({fkJoinArgsRev});");
-				sb.AppendLine("        }");
+				EmitFkSortedJoinWithOverload(sb,
+					$"Join with {otherTypeFullName} via reverse FK (one-to-many) after a Sort.",
+					methodName, joinGenericParamsSorted, joinBuilderParamSorted, joinConstraintsSorted, getCacheCodeSorted,
+					keyTypeName, documentTypeName, newResultTypeRev, nonExecBuilderRev, resolverRev,
+					"JoinMany", fkJoinArgsRev);
 
 				// InnerJoinWith{TOther} — drops lefts whose per-left QueryResults is empty. No-filter / filter / filter+arg flavors.
 				EmitFkJoinWithOverloads(sb,
@@ -6834,17 +6833,11 @@ public class CacheGenerator : IIncrementalGenerator {
 					"JoinOne", fkJoinArgsRev1);
 
 				// Sort→JoinWith parallel — outer, no-filter only.
-				var joinReturnTypeRev1Sorted = $"CacheQueryBuilderCombined<Prague.Core.TypeSystem.SortedQuery<TInner>, TExecutor, {keyTypeName}, {documentTypeName}, Resolvers<TResolverChain, {resolverRev1($"NoFilter<{nonExecBuilderRev1}>")}>, {newResultTypeRev1}>";
-				sb.AppendLine();
-				sb.AppendLine($"        /// <summary>Join with {otherTypeFullName} via reverse FK (one-to-one) after a Sort.</summary>");
-				sb.AppendLine("        [MethodImpl(MethodImplOptions.AggressiveInlining)]");
-				sb.AppendLine($"        public static {joinReturnTypeRev1Sorted}");
-				sb.AppendLine($"            {methodName}<{joinGenericParamsSorted}>({joinBuilderParamSorted})");
-				sb.AppendLine($"        {joinConstraintsSorted}");
-				sb.AppendLine("        {");
-				sb.AppendLine($"            var cache = {getCacheCodeSorted};");
-				sb.AppendLine($"            return Unsafe.AsRef(in builder).JoinOne({fkJoinArgsRev1});");
-				sb.AppendLine("        }");
+				EmitFkSortedJoinWithOverload(sb,
+					$"Join with {otherTypeFullName} via reverse FK (one-to-one) after a Sort.",
+					methodName, joinGenericParamsSorted, joinBuilderParamSorted, joinConstraintsSorted, getCacheCodeSorted,
+					keyTypeName, documentTypeName, newResultTypeRev1, nonExecBuilderRev1, resolverRev1,
+					"JoinOne", fkJoinArgsRev1);
 
 				// InnerJoinWith{TOther} — drops lefts whose right slot is null. No-filter / filter / filter+arg flavors.
 				EmitFkJoinWithOverloads(sb,
@@ -6854,18 +6847,27 @@ public class CacheGenerator : IIncrementalGenerator {
 					"InnerJoinOne", fkJoinArgsRev1);
 			}
 
-			// Forward JoinWith{TOther} for [DataCacheForeignKey<TOther>(ManyToOne)] FKs.
-			// Uses JoinOneLeftSymResolver Shape A1 via the auto-emitted CacheSymmetricKeyValueListIndex
-			// on the FK property. The lookup key (FK value) equals TOther's PK.
-			// Selector-form ManyToOne FKs are emitted by the separate selector loop below.
+			// Forward JoinWith{TOther} for non-selector [DataCacheForeignKey<TOther>] FKs. Whatever the
+			// declared cardinality, a scalar FK property holds at most one right key, so the forward
+			// direction is always a one-row lookup — only the driving index differs:
+			//   ManyToOne          → JoinOneLeftSymResolver Shape A1 over CacheSymmetricKeyValueListIndex
+			//   OneToOne on non-PK → JoinOneLeftUniqueIndexResolver Shape L1 over CacheSymmetricUniqueIndex
+			//   OneToOne on the PK → JoinOneResolver (PK-to-PK, no left-side index at all)
+			// OneToMany is deliberately NOT emitted forward: its auto index is the non-symmetric
+			// CacheKeyValueListIndex, and upgrading it would put a reverse map on every OneToMany FK
+			// for a join the declared cardinality says points the other way (see InvertJoinType — a
+			// user who wants the forward scalar lookup declares ManyToOne, or the dual form which
+			// inverts into it). The reverse JoinWith on the target cache already covers OneToMany.
+			// Selector-form FKs are emitted by the separate selector loop below.
 			foreach (var fkRaw in foreignKeyPropertiesRaw) {
-				if (fkRaw.JoinType != "ManyToOne") continue;
+				if (fkRaw.JoinType != "ManyToOne" && fkRaw.JoinType != "OneToOne") continue;
 				if (fkRaw.SelectorType != null) continue;
 
 				// Collection FK (List<TKey> ManyToOne): the driving cache OWNS the collection. Forward
 				// join fans each owner out to its referenced elements via JoinManyCollectionForward over
 				// this cache's own symmetric collection index. Result is per-owner QueryResults<TOther>.
-				if (IsCollectionType(fkRaw.Property.Type, out _)) {
+				// (A collection OneToOne is rejected upstream by CACHE050, so this stays ManyToOne-only.)
+				if (fkRaw.JoinType == "ManyToOne" && IsCollectionType(fkRaw.Property.Type, out _)) {
 					var fwdReferencedType = fkRaw.ReferencedType;
 					if (fwdReferencedType == null) continue;
 					var fwdReferencedCacheInfo = GetReferencedCacheInfo(fwdReferencedType);
@@ -6904,17 +6906,11 @@ public class CacheGenerator : IIncrementalGenerator {
 						"JoinManyCollectionForward", fkJoinArgsFwdColl);
 
 					// Sort->JoinWith parallel - outer, no-filter only.
-					var joinReturnTypeFwdCollSorted = $"CacheQueryBuilderCombined<Prague.Core.TypeSystem.SortedQuery<TInner>, TExecutor, {keyTypeName}, {documentTypeName}, Resolvers<TResolverChain, {resolverFwdColl($"NoFilter<{nonExecBuilderFwdColl}>")}>, {newResultTypeFwdColl}>";
-					sb.AppendLine();
-					sb.AppendLine($"        /// <summary>Join with {fwdReferencedTypeFullName} via {fwdForeignKeyPropertyName} (collection many-to-one) after a Sort.</summary>");
-					sb.AppendLine("        [MethodImpl(MethodImplOptions.AggressiveInlining)]");
-					sb.AppendLine($"        public static {joinReturnTypeFwdCollSorted}");
-					sb.AppendLine($"            {fwdMethodName}<{joinGenericParamsSorted}>({joinBuilderParamSorted})");
-					sb.AppendLine($"        {joinConstraintsSorted}");
-					sb.AppendLine("        {");
-					sb.AppendLine($"            var cache = {getCacheCodeSorted};");
-					sb.AppendLine($"            return Unsafe.AsRef(in builder).JoinManyCollectionForward({fkJoinArgsFwdColl});");
-					sb.AppendLine("        }");
+					EmitFkSortedJoinWithOverload(sb,
+						$"Join with {fwdReferencedTypeFullName} via {fwdForeignKeyPropertyName} (collection many-to-one) after a Sort.",
+						fwdMethodName, joinGenericParamsSorted, joinBuilderParamSorted, joinConstraintsSorted, getCacheCodeSorted,
+						keyTypeName, documentTypeName, newResultTypeFwdColl, nonExecBuilderFwdColl, resolverFwdColl,
+						"JoinManyCollectionForward", fkJoinArgsFwdColl);
 
 					EmitFkJoinWithOverloads(sb,
 						$"Inner join with {fwdReferencedTypeFullName} via {fwdForeignKeyPropertyName} (collection many-to-one) - drops owners with no referenced elements.",
@@ -6943,13 +6939,51 @@ public class CacheGenerator : IIncrementalGenerator {
 				var methodName = $"JoinWith{referencedClassName}";
 				var indexFieldName = $"{foreignKeyPropertyName}Index";
 
-				// NonExec builder type for the resolver's TFilter param (NoFilter wraps this).
-				var nonExecBuilder = $"CacheQueryBuilderCombined<Prague.Core.TypeSystem.NonExecutableQuery<{referencedCacheClassFqn}>, " +
-				                     $"PairedCacheQueryBuilderCoreCombined<LeftKeySetView<{keyTypeName}>, {referencedKeyTypeName}, {referencedTypeFullName}>, " +
-				                     $"{referencedKeyTypeName}, {referencedTypeFullName}, " +
-				                     $"Resolvers<BaseResolver<{referencedKeyTypeName}, {referencedTypeFullName}>>, {referencedTypeFullName}>";
+				var fkPropertyTypeFwd = fkRaw.Property.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+				var fkOnPkFwd = keyPropertyName != null && foreignKeyPropertyName == keyPropertyName;
 
-				Func<string, string> resolverFwd = f => $"JoinOneLeftSymResolver<{keyTypeName}, {documentTypeName}, {referencedCacheClassFqn}, {referencedKeyTypeName}, {referencedKeyTypeName}, {referencedKeyTypeName}, {referencedTypeFullName}, {f}, IdentitySelector<{referencedKeyTypeName}>>";
+				// Resolver family + driving index, by cardinality and placement. The PK-to-PK form has
+				// no index argument at all; the two indexed forms differ only in the index they read.
+				string nonExecBuilder;
+				Func<string, string> resolverFwd;
+				string fkJoinArgsFwd;
+				string joinKindLabelFwd;
+				if (fkRaw.JoinType == "ManyToOne") {
+					// Shape A1: LeftSym over the symmetric key-value-list index. TLeft is the borrowed
+					// key-set view, so the paired core's TLeft differs from the other two families.
+					nonExecBuilder = $"CacheQueryBuilderCombined<Prague.Core.TypeSystem.NonExecutableQuery<{referencedCacheClassFqn}>, " +
+					                 $"PairedCacheQueryBuilderCoreCombined<LeftKeySetView<{keyTypeName}>, {referencedKeyTypeName}, {referencedTypeFullName}>, " +
+					                 $"{referencedKeyTypeName}, {referencedTypeFullName}, " +
+					                 $"Resolvers<BaseResolver<{referencedKeyTypeName}, {referencedTypeFullName}>>, {referencedTypeFullName}>";
+					resolverFwd = f => $"JoinOneLeftSymResolver<{keyTypeName}, {documentTypeName}, {referencedCacheClassFqn}, {referencedKeyTypeName}, {referencedKeyTypeName}, {referencedKeyTypeName}, {referencedTypeFullName}, {f}, IdentitySelector<{referencedKeyTypeName}>>";
+					fkJoinArgsFwd = $"cache.{indexFieldName}, cache.{referencedFieldName}!";
+					joinKindLabelFwd = "many-to-one";
+				}
+				else {
+					// OneToOne. Both forms run the unpaired-left paired core over TKey.
+					nonExecBuilder = $"CacheQueryBuilderCombined<Prague.Core.TypeSystem.NonExecutableQuery<{referencedCacheClassFqn}>, " +
+					                 $"PairedCacheQueryBuilderCoreCombined<{keyTypeName}, {referencedKeyTypeName}, {referencedTypeFullName}>, " +
+					                 $"{referencedKeyTypeName}, {referencedTypeFullName}, " +
+					                 $"Resolvers<BaseResolver<{referencedKeyTypeName}, {referencedTypeFullName}>>, {referencedTypeFullName}>";
+					if (fkOnPkFwd) {
+						// The FK IS the primary key: the left candidate key already is the right PK.
+						// PK-to-PK JoinOneResolver, no index step. Cross-key PKs have no identity
+						// overload, so skip rather than emit an uncompilable call.
+						if (keyTypeName != referencedKeyTypeName) continue;
+						resolverFwd = f => $"JoinOneResolver<{keyTypeName}, {documentTypeName}, {referencedCacheClassFqn}, {referencedKeyTypeName}, {referencedTypeFullName}, {f}, IdentitySelector<{keyTypeName}>>";
+						fkJoinArgsFwd = $"cache.{referencedFieldName}!";
+						joinKindLabelFwd = "one-to-one, primary key";
+					}
+					else {
+						// Shape L1: LeftUnique over the symmetric unique index emitted for this FK.
+						// The index is keyed by the FK property's type, which must be the right PK for
+						// the identity overload to bind.
+						if (fkPropertyTypeFwd != referencedKeyTypeName) continue;
+						resolverFwd = f => $"JoinOneLeftUniqueIndexResolver<{keyTypeName}, {documentTypeName}, {referencedCacheClassFqn}, {referencedKeyTypeName}, {referencedKeyTypeName}, {referencedTypeFullName}, {f}, IdentitySelector<{referencedKeyTypeName}>>";
+						fkJoinArgsFwd = $"cache.{indexFieldName}, cache.{referencedFieldName}!";
+						joinKindLabelFwd = "one-to-one";
+					}
+				}
 
 				string newResultTypeFwd;
 				if (level == 0) {
@@ -6959,18 +6993,23 @@ public class CacheGenerator : IIncrementalGenerator {
 					newResultTypeFwd = $"JoinResult<{documentTypeName}, {resultTypeParams}, {referencedTypeFullName}?>";
 				}
 
-				var fkJoinArgsFwd = $"cache.{indexFieldName}, cache.{referencedFieldName}!";
-
 				// JoinWith{TOther} — no-filter / filter / filter+arg flavors.
 				EmitFkJoinWithOverloads(sb,
-					$"Join with {referencedTypeFullName} via {foreignKeyPropertyName} (many-to-one).",
+					$"Join with {referencedTypeFullName} via {foreignKeyPropertyName} ({joinKindLabelFwd}).",
 					methodName, joinGenericParams, joinBuilderParam, joinConstraints, getCacheCode,
+					keyTypeName, documentTypeName, newResultTypeFwd, nonExecBuilder, resolverFwd,
+					"JoinOne", fkJoinArgsFwd);
+
+				// Sort→JoinWith parallel — outer, no-filter only.
+				EmitFkSortedJoinWithOverload(sb,
+					$"Join with {referencedTypeFullName} via {foreignKeyPropertyName} ({joinKindLabelFwd}) after a Sort.",
+					methodName, joinGenericParamsSorted, joinBuilderParamSorted, joinConstraintsSorted, getCacheCodeSorted,
 					keyTypeName, documentTypeName, newResultTypeFwd, nonExecBuilder, resolverFwd,
 					"JoinOne", fkJoinArgsFwd);
 
 				// InnerJoinWith{TOther} — reuses the IBaseJoinable constraint (Inner semantics are carried by the resolver, not the discriminator). No-filter / filter / filter+arg flavors.
 				EmitFkJoinWithOverloads(sb,
-					$"Inner join with {referencedTypeFullName} via {foreignKeyPropertyName} (many-to-one), filtering out null results.",
+					$"Inner join with {referencedTypeFullName} via {foreignKeyPropertyName} ({joinKindLabelFwd}), filtering out null results.",
 					$"InnerJoin{methodName.Substring(4)}", joinGenericParams, joinBuilderParam, joinConstraints, getCacheCode,
 					keyTypeName, documentTypeName, newResultTypeFwd, nonExecBuilder, resolverFwd,
 					"InnerJoinOne", fkJoinArgsFwd);
@@ -7102,6 +7141,189 @@ public class CacheGenerator : IIncrementalGenerator {
 		}
 
 		sb.AppendLine("    }");
+
+		GeneratePreparedBuilderExtensions(sb, cacheClassName, indexedProperties, foreignKeyIndexes,
+			hasValueIndexProperties, hasNotValueIndexProperties, valueIndexProperties, noValueIndexProperties,
+			hasKeyProperty, keyPropertyName, keyPropertyAlreadyIndexed, hasGlobalKeyIndex, keyTypeName, documentTypeName);
+	}
+
+	/// <summary>
+	/// Emits the prepared-query twins of the eager With{Prop} / WithKey / UpdatedAfter extensions as a
+	/// sibling static class {CacheClassName}PreparedQueryExtensions. Each overload binds on a
+	/// CacheQueryBuilderCombined whose left query is the prepared recorder
+	/// (PreparedNarrowers&lt;TKey, TValue, TArgs, TChain&gt;) and forwards to the hand-written prepared
+	/// UseIndex overload for the wrapper's index field, so the return type grows the recorded chain by
+	/// one NarrowerLink. Scoping is the eager rule: TDiscriminator : IIndexNarrower, ICacheCarrier&lt;XxxCache&gt;,
+	/// which admits the top-level PreparedQueryDiscriminator&lt;XxxCache&gt; and the Or / If branch
+	/// discriminators (PreparedNarrowOnly / PreparedConditionalBranch over the same carrier) and rejects
+	/// every other cache's builder. Per index: bound value, Func&lt;TArgs, T&gt; selector, and — for
+	/// unique / many — ReadOnlyMemory&lt;T&gt;, T[] and Func&lt;TArgs, ReadOnlyMemory&lt;T&gt;&gt; multi-value
+	/// forms (the eager ReadOnlySpan / List forms have no recordable twin: a span cannot be stored and a
+	/// list would have to be copied); range: bound and (rb, args) builders; key-set: parameterless;
+	/// last-updated: long / DateTime / DateTimeOffset after and after-until plus Func&lt;TArgs, long&gt;
+	/// forms (the eager `out long max` forms are execution-time outputs with no home on a recorder).
+	/// FK JoinWith{T} / InnerJoinWith{T} need no twin: the eager emission binds on ICandidatesExecutor
+	/// only, which the recorder implements, and on IBaseJoinable + ICacheCarrier, which the top-level
+	/// prepared discriminator implements.
+	/// </summary>
+	private static void GeneratePreparedBuilderExtensions(
+		StringBuilder sb,
+		string cacheClassName,
+		List<(IPropertySymbol Property, AttributeData IndexAttribute, string IndexType, string IndexName, string? CustomIndexName)> indexedProperties,
+		List<(IPropertySymbol Property, string IndexType, string IndexName, bool IsSymmetric, INamedTypeSymbol? SelectorType, bool FkOnPk)> foreignKeyIndexes,
+		List<(IPropertySymbol Property, AttributeData Attribute, string IndexName)> hasValueIndexProperties,
+		List<(IPropertySymbol Property, AttributeData Attribute, string IndexName)> hasNotValueIndexProperties,
+		List<(IPropertySymbol Property, AttributeData Attribute, string IndexName, int Operation, object? Value, string ValueLiteral)> valueIndexProperties,
+		List<(IPropertySymbol Property, AttributeData Attribute, string IndexName, int Operation, object? Value, string ValueLiteral)> noValueIndexProperties,
+		bool hasKeyProperty,
+		string? keyPropertyName,
+		bool keyPropertyAlreadyIndexed,
+		bool hasGlobalKeyIndex,
+		string keyTypeName,
+		string documentTypeName)
+	{
+		var recorder = $"PreparedNarrowers<{keyTypeName}, {documentTypeName}, TArgs, TChain>";
+		var builderType = $"CacheQueryBuilderCombined<TDiscriminator, {recorder}, {keyTypeName}, {documentTypeName}, TResolverChain, TResult>";
+		var builderParam = $"this in {builderType} builder";
+		var genericParams = "TDiscriminator, TArgs, TChain, TResolverChain, TResult";
+		var constraints = $"where TDiscriminator : struct, Prague.Core.TypeSystem.IIndexNarrower, Prague.Core.TypeSystem.ICacheCarrier<{cacheClassName}>\n        where TChain : struct, INarrowerChain<{keyTypeName}, {documentTypeName}, TArgs>\n        where TResolverChain : struct, IResolvers\n        where TArgs : struct";
+		var getDisc = $"{builderType}.GetDiscriminator(ref Unsafe.AsRef(in builder))";
+
+		string ReturnType(string narrower)
+			=> $"CacheQueryBuilderCombined<TDiscriminator, PreparedNarrowers<{keyTypeName}, {documentTypeName}, TArgs, NarrowerLink<TChain, {narrower}, {keyTypeName}, {documentTypeName}, TArgs>>, {keyTypeName}, {documentTypeName}, TResolverChain, TResult>";
+
+		string Narrower(string name, string indexKeyType)
+			=> $"{name}<{keyTypeName}, {documentTypeName}, {indexKeyType}, TArgs>";
+
+		void EmitForward(string summary, string returnType, string methodName, string extraGenericParams, string parameters, string extraConstraints, string useIndexArgs) {
+			sb.AppendLine();
+			sb.AppendLine($"        /// <summary>{summary}</summary>");
+			sb.AppendLine("        [MethodImpl(MethodImplOptions.AggressiveInlining)]");
+			sb.AppendLine($"        public static {returnType}");
+			sb.AppendLine($"            {methodName}<{genericParams}{extraGenericParams}>({builderParam}{parameters})");
+			sb.AppendLine($"        {constraints}{extraConstraints}");
+			sb.AppendLine($"            => builder.UseIndex({useIndexArgs});");
+		}
+
+		sb.AppendLine();
+		sb.AppendLine($"    /// <summary>Prepared-query extension methods for {cacheClassName}: the build-once / execute-on-demand twins of the eager With… methods. Bind on <c>Prepare()</c> / <c>Prepare&lt;TArgs&gt;()</c> builders and inside their <c>Or</c> / <c>If</c> branches.</summary>");
+		sb.AppendLine($"    public static class {cacheClassName}PreparedQueryExtensions");
+		sb.AppendLine("    {");
+
+		// Helper: emit the prepared With family for one unique / many index (bound, selector, multi-value ×3).
+		void EmitWithMethods(string methodName, string indexAccess, string propertyType, bool isUnique) {
+			var eq = Narrower(isUnique ? "UniqueIndexEq" : "ListIndexEq", propertyType);
+			var eqArg = Narrower(isUnique ? "UniqueIndexEqArg" : "ListIndexEqArg", propertyType);
+			var @in = Narrower(isUnique ? "UniqueIndexIn" : "ListIndexIn", propertyType);
+			var inArg = Narrower(isUnique ? "UniqueIndexInArg" : "ListIndexInArg", propertyType);
+			var index = $"{getDisc}.Cache.{indexAccess}";
+
+			EmitForward($"{methodName}: value bound at build time.", ReturnType(eq), methodName, "",
+				$", {propertyType} value", "", $"{index}, value");
+			EmitForward($"{methodName}: value selected from the execution arguments (use a static lambda).", ReturnType(eqArg), methodName, "",
+				$", System.Func<TArgs, {propertyType}> selector", "", $"{index}, selector");
+			EmitForward($"{methodName}: membership in a value set bound at build time. An empty set yields no rows.", ReturnType(@in), methodName, "",
+				$", System.ReadOnlyMemory<{propertyType}> values", "", $"{index}, values");
+			EmitForward($"{methodName}: membership in an array of values bound at build time. An empty array yields no rows.", ReturnType(@in), methodName, "",
+				$", {propertyType}[] values", "", $"{index}, values");
+			EmitForward($"{methodName}: membership in a value set selected from the execution arguments (use a static lambda).", ReturnType(inArg), methodName, "",
+				$", System.Func<TArgs, System.ReadOnlyMemory<{propertyType}>> selector", "", $"{index}, selector");
+		}
+
+		void EmitKeySetMethod(string methodName, string indexName, string summary)
+			=> EmitForward(summary, ReturnType($"KeySetNarrower<{keyTypeName}, {documentTypeName}, TArgs>"), methodName, "", "", "", $"{getDisc}.Cache.{indexName}");
+
+		// Indexed properties
+		foreach (var indexed in indexedProperties) {
+			var prop = indexed.Property;
+			var indexType = indexed.IndexType;
+			var indexName = indexed.IndexName;
+			var propertyType = prop.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+			var methodName = $"With{indexed.CustomIndexName ?? prop.Name}";
+
+			if (indexType == "Many" && IsCollectionType(prop.Type, out var withElementType)) {
+				// Collection Many: query by a single ELEMENT against the symmetric index's forward half.
+				EmitWithMethods(methodName, $"{indexName}.Forward",
+					withElementType!.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat), isUnique: false);
+			} else if (indexType == "Unique" || indexType == "Many") {
+				EmitWithMethods(methodName, indexName, propertyType, indexType == "Unique");
+			} else if (indexType == "Range") {
+				var rangeConstraint = $"\n        where TQueryBuilder : struct, IRangeQueryBuilder<{propertyType}>";
+				EmitForward($"{methodName}: range bounds fixed at build time, e.g. <c>rb =&gt; rb.Gte(10).Lt(20)</c>.",
+					ReturnType($"RangeNarrower<{keyTypeName}, {documentTypeName}, {propertyType}, TQueryBuilder, TArgs>"), methodName, ", TQueryBuilder",
+					$", System.Func<RangeQueryBuilder<{propertyType}>, TQueryBuilder> rangeBuilder", rangeConstraint,
+					$"{getDisc}.Cache.{indexName}, rangeBuilder");
+				EmitForward($"{methodName}: range bounds taken from the execution arguments, <c>(rb, args) =&gt; rb.Gte(args.Min)</c> (use a static lambda).",
+					ReturnType($"RangeArgNarrower<{keyTypeName}, {documentTypeName}, {propertyType}, TQueryBuilder, TArgs>"), methodName, ", TQueryBuilder",
+					$", System.Func<RangeQueryBuilder<{propertyType}>, TArgs, TQueryBuilder> rangeBuilder", rangeConstraint,
+					$"{getDisc}.Cache.{indexName}, rangeBuilder");
+				// Optional bounds: "from and/or to" in one step, a null bound is the open side, both null is no
+				// narrowing. The hand-written UseIndex picks the value-type / reference-type narrower by constraint;
+				// the emitted return type has to name it, so the property type decides here.
+				var optionalArg = prop.Type.IsValueType ? "RangeOptionalArgNarrower" : "RangeOptionalRefArgNarrower";
+				EmitForward($"{methodName}: optional range bounds taken from the execution arguments (use static lambdas); a <c>null</c> bound is the open side, both <c>null</c> is no narrowing.",
+					ReturnType(Narrower(optionalArg, propertyType)), methodName, "",
+					$", System.Func<TArgs, {propertyType}?> from, System.Func<TArgs, {propertyType}?> to, bool fromInclusive = true, bool toInclusive = true", "",
+					$"{getDisc}.Cache.{indexName}, from, to, fromInclusive, toInclusive");
+				EmitForward($"{methodName}: optional range bounds fixed at build time; a <c>null</c> bound is the open side, both <c>null</c> is no narrowing.",
+					ReturnType(Narrower("RangeOptionalNarrower", propertyType)), methodName, "",
+					$", {propertyType}? from, {propertyType}? to, bool fromInclusive = true, bool toInclusive = true", "",
+					$"{getDisc}.Cache.{indexName}, from, to, fromInclusive, toInclusive");
+			}
+		}
+
+		// Foreign key indexes (keyed by the FK property's raw type, usable as a plain filter — as eager).
+		foreach (var fkIndex in foreignKeyIndexes) {
+			if (fkIndex.IndexType != "Unique" && fkIndex.IndexType != "Many")
+				continue;
+			var propertyType = fkIndex.Property.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+			EmitWithMethods($"With{fkIndex.Property.Name}", fkIndex.IndexName, propertyType, fkIndex.IndexType == "Unique");
+		}
+
+		// Key-set indexes: has-value / has-not-value / value / no-value
+		foreach (var hvIndex in hasValueIndexProperties)
+			EmitKeySetMethod($"With{hvIndex.Property.Name}", hvIndex.IndexName, $"Filters to only include items where {hvIndex.Property.Name} has a value.");
+		foreach (var hvnIndex in hasNotValueIndexProperties)
+			EmitKeySetMethod($"Without{hvnIndex.Property.Name}", hvnIndex.IndexName, $"Filters to only include items where {hvnIndex.Property.Name} is null.");
+		foreach (var vIndex in valueIndexProperties) {
+			var vMethodName = vIndex.IndexName.EndsWith("Index")
+				? $"With{vIndex.IndexName.Substring(0, vIndex.IndexName.Length - 5)}"
+				: $"With{vIndex.IndexName}";
+			EmitKeySetMethod(vMethodName, vIndex.IndexName, $"Filters to the items in the {vIndex.IndexName} key set.");
+		}
+		foreach (var nvIndex in noValueIndexProperties) {
+			var nvMethodName = nvIndex.IndexName.EndsWith("Index")
+				? $"With{nvIndex.IndexName.Substring(0, nvIndex.IndexName.Length - 5)}"
+				: $"With{nvIndex.IndexName}";
+			EmitKeySetMethod(nvMethodName, nvIndex.IndexName, $"Filters to the items in the {nvIndex.IndexName} key set.");
+		}
+
+		// WithKey methods (primary key index is a CacheKeyValueIndex → unique narrowers)
+		if (!hasKeyProperty)
+			EmitWithMethods("WithKey", "Cache.KeyIndex", keyTypeName, isUnique: true);
+		if (keyPropertyName != null && keyPropertyName != "Key" && !keyPropertyAlreadyIndexed)
+			EmitWithMethods($"With{keyPropertyName}", "Cache.KeyIndex", keyTypeName, isUnique: true);
+
+		// UpdatedAfter methods over the key's unfiltered global last-update index
+		if (hasGlobalKeyIndex) {
+			var index = $"{getDisc}.Cache._keyGlobalIndex!";
+			foreach (var (timeType, label) in new[] { ("long", "unix ms"), ("System.DateTime", "DateTime"), ("System.DateTimeOffset", "DateTimeOffset") }) {
+				EmitForward($"Rows updated strictly after <paramref name=\"updatedAfter\" /> ({label}), bound at build time.",
+					ReturnType($"GlobalLastUpdatedAfter<{keyTypeName}, {documentTypeName}, {timeType}, TArgs>"), "UpdatedAfter", "",
+					$", {timeType} updatedAfter", "", $"{index}, updatedAfter");
+				EmitForward($"Rows updated after <paramref name=\"updatedAfter\" /> up to and including <paramref name=\"updatedUntilInclusive\" /> ({label}), bound at build time.",
+					ReturnType($"GlobalLastUpdatedBetween<{keyTypeName}, {documentTypeName}, {timeType}, TArgs>"), "UpdatedAfter", "",
+					$", {timeType} updatedAfter, {timeType} updatedUntilInclusive", "", $"{index}, updatedAfter, updatedUntilInclusive");
+			}
+			EmitForward("Rows updated strictly after a unix-ms instant selected from the execution arguments (use a static lambda).",
+				ReturnType($"GlobalLastUpdatedAfterArg<{keyTypeName}, {documentTypeName}, TArgs>"), "UpdatedAfter", "",
+				", System.Func<TArgs, long> updatedAfter", "", $"{index}, updatedAfter");
+			EmitForward("Rows updated within a unix-ms window (exclusive start, inclusive end) selected from the execution arguments (use static lambdas).",
+				ReturnType($"GlobalLastUpdatedBetweenArg<{keyTypeName}, {documentTypeName}, TArgs>"), "UpdatedAfter", "",
+				", System.Func<TArgs, long> updatedAfter, System.Func<TArgs, long> updatedUntilInclusive", "", $"{index}, updatedAfter, updatedUntilInclusive");
+		}
+
+		sb.AppendLine("    }");
 	}
 
 	/// <summary>
@@ -7165,6 +7387,42 @@ public class CacheGenerator : IIncrementalGenerator {
 		sb.AppendLine("        {");
 		sb.AppendLine($"            var cache = {getCacheCode};");
 		sb.AppendLine($"            return Unsafe.AsRef(in builder).{delegateName}({baseDelegateArgs}, filter, arg);");
+		sb.AppendLine("        }");
+	}
+
+	/// <summary>
+	/// Emits the <c>Sort</c>/<c>SortBounded</c> twin of a single JoinWith/InnerJoinWith direction.
+	/// A sorted builder carries <c>SortedQuery&lt;TInner&gt;</c> as its discriminator, which is
+	/// <c>IBaseJoinable</c> but not <c>ICacheCarrier</c>, so the regular overload cannot bind and the
+	/// cache is reached one hop deeper (<c>disc.Inner.Cache</c>). Outer and no-filter only — the
+	/// filter flavors and <c>InnerJoinWith</c> are intentionally not emitted for the sorted shape.
+	/// </summary>
+	private static void EmitFkSortedJoinWithOverload(
+		StringBuilder sb,
+		string summary,
+		string methodName,
+		string methodGenericParamsSorted,
+		string builderParamSorted,
+		string constraintsSorted,
+		string getCacheCodeSorted,
+		string keyTypeName,
+		string documentTypeName,
+		string resultType,
+		string nonExec,
+		Func<string, string> resolverFor,
+		string delegateName,
+		string baseDelegateArgs) {
+		var returnType = $"CacheQueryBuilderCombined<Prague.Core.TypeSystem.SortedQuery<TInner>, TExecutor, {keyTypeName}, {documentTypeName}, Resolvers<TResolverChain, {resolverFor($"NoFilter<{nonExec}>")}>, {resultType}>";
+
+		sb.AppendLine();
+		sb.AppendLine($"        /// <summary>{summary}</summary>");
+		sb.AppendLine("        [MethodImpl(MethodImplOptions.AggressiveInlining)]");
+		sb.AppendLine($"        public static {returnType}");
+		sb.AppendLine($"            {methodName}<{methodGenericParamsSorted}>({builderParamSorted})");
+		sb.AppendLine($"        {constraintsSorted}");
+		sb.AppendLine("        {");
+		sb.AppendLine($"            var cache = {getCacheCodeSorted};");
+		sb.AppendLine($"            return Unsafe.AsRef(in builder).{delegateName}({baseDelegateArgs});");
 		sb.AppendLine("        }");
 	}
 
@@ -7397,784 +7655,23 @@ public class CacheGenerator : IIncrementalGenerator {
 		sb.AppendLine($"                new CacheQueryBuilderCoreCombined<{keyTypeName}, {documentTypeName}>(Cache),");
 		sb.AppendLine($"                new Resolvers<BaseResolver<{keyTypeName}, {documentTypeName}>>(new BaseResolver<{keyTypeName}, {documentTypeName}>()),");
 		sb.AppendLine("                0);");
-	}
 
-	/// <summary>
-	/// Generates a static extension class {CacheClassName}JoinExtensions with
-	/// JoinWith{Entity} / InnerJoinWith{Entity} extension methods for all join levels.
-	/// These are thin wrappers over the core JoinQueryBuilder extension methods that
-	/// pin TLeftKey/TLeftValue to the cache's concrete types and call into the cache's
-	/// field references for the right-side cache/index.
-	/// Execute, Sort, etc. come for free from core extension methods — no wrappers needed.
-	/// </summary>
-	private static void GenerateJoinQueryBuilders(
-		StringBuilder sb,
-		string cacheClassName,
-		INamedTypeSymbol classSymbol,
-		string keyTypeName,
-		string documentTypeName,
-		List<(string OtherCacheName, string OtherClassName, string OtherKeyTypeName, string OtherTypeFullName, string OtherFieldName, string MethodName, string ForeignKeyPropertyName, string ForeignKeyIndexName, string IndexType)> joinableEntities,
-		List<(IPropertySymbol Property, AttributeData ForeignKeyAttribute, INamedTypeSymbol? ReferencedType, string JoinType, INamedTypeSymbol? SelectorType)> foreignKeyPropertiesRaw,
-		List<(string Namespace, string CacheClassName, string FullName, INamedTypeSymbol ClassSymbol)> allCacheInfo)
-	{
-		// Build list of all join targets with resolver info
-		var joinTargets = new List<(
-			string MethodName,
-			string InnerMethodName,
-			string OtherKeyTypeName,
-			string OtherTypeFullName,
-			string OtherFieldName,
-			string OtherCacheName,
-			string ForeignKeyPropertyName,
-			string ForeignKeyIndexName,
-			bool IsMany,
-			bool IsForward,
-			string ResolverType,
-			string ResultType
-		)>();
-
-		// Reverse joins (other entities have FK to this entity)
-		foreach (var (otherCacheName, otherClassName, otherKeyTypeName, otherTypeFullName, otherFieldName, methodName, fkPropName, fkIndexName, indexType) in joinableEntities) {
-			var isMany = indexType != "Unique";
-			var resolverType = isMany
-				? $"ManyResolver<{keyTypeName}, {documentTypeName}, {otherKeyTypeName}, {otherTypeFullName}>"
-				: $"JoinOneResolver<{keyTypeName}, {documentTypeName}, {otherKeyTypeName}, {otherTypeFullName}>";
-			var resultType = isMany ? $"QueryResults<{otherTypeFullName}>" : $"{otherTypeFullName}?";
-
-			joinTargets.Add((
-				methodName,
-				$"Inner{methodName}",
-				otherKeyTypeName,
-				otherTypeFullName,
-				otherFieldName,
-				otherCacheName,
-				fkPropName,
-				fkIndexName,
-				isMany,
-				false,
-				resolverType,
-				resultType
-			));
-		}
-
-		// Forward joins (this entity has FK to other entities)
-		foreach (var fkRaw in foreignKeyPropertiesRaw) {
-			var referencedType = fkRaw.ReferencedType;
-			if (referencedType == null) continue;
-
-			var referencedCacheInfo = GetReferencedCacheInfo(referencedType, allCacheInfo);
-			if (referencedCacheInfo == null) continue;
-
-			var referencedClassName = referencedType.Name;
-			var referencedTypeFullName = referencedType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-			var referencedFieldName = $"_{referencedClassName.ToLower()}Cache";
-			var referencedCacheName = referencedCacheInfo.Value.CacheClassName;
-			var foreignKeyPropertyName = fkRaw.Property.Name;
-
-			var (_, referencedKeyTypeName, _) = ExtractKeyInfo(referencedType);
-			if (referencedKeyTypeName == null) continue;
-
-			var methodName = $"JoinWith{referencedClassName}";
-			var resolverType = $"JoinOneResolver<{keyTypeName}, {documentTypeName}, {referencedKeyTypeName}, {referencedTypeFullName}>";
-			var resultType = $"{referencedTypeFullName}?";
-
-			joinTargets.Add((
-				methodName,
-				$"InnerJoinWith{referencedClassName}",
-				referencedKeyTypeName,
-				referencedTypeFullName,
-				referencedFieldName,
-				referencedCacheName,
-				foreignKeyPropertyName,
-				"",
-				false,
-				true,
-				resolverType,
-				resultType
-			));
-		}
-
-		if (joinTargets.Count == 0)
-			return;
-
-		// Generate a single static class with extension methods for all levels
+		// Prepare() / Prepare<TArgs>(): the build-once / execute-on-demand builder. The discriminator carries
+		// THIS wrapper (not the raw InMemoryDataCache), so the generated prepared WithXxx / JoinWith{T}
+		// extensions — scoped by ICacheCarrier<{cacheClassName}> exactly like the eager ones — bind on it,
+		// and on the Or / If branch builders that inherit the same carrier.
+		string PreparedBuilderType(string args)
+			=> $"CacheQueryBuilderCombined<Prague.Core.TypeSystem.PreparedQueryDiscriminator<{cacheClassName}>, PreparedNarrowers<{keyTypeName}, {documentTypeName}, {args}, EmptyNarrowers<{keyTypeName}, {documentTypeName}, {args}>>, {keyTypeName}, {documentTypeName}, Resolvers<BaseResolver<{keyTypeName}, {documentTypeName}>>, {documentTypeName}>";
 		sb.AppendLine();
-		sb.AppendLine($"    /// <summary>Extension methods for joining with {cacheClassName}.</summary>");
-		sb.AppendLine($"    public static class {cacheClassName}JoinExtensions");
-		sb.AppendLine("    {");
-
-		// For each level, generate extension methods
-		for (var level = 1; level <= MaxJoinLevels; level++) {
-			var resultTypeParams = string.Join(", ", Enumerable.Range(1, level).Select(i => $"T{i}"));
-			var structTypeParams = $"TResolverChain, {resultTypeParams}";
-			var chainInterface = $"IResolverChain<{keyTypeName}, {documentTypeName}, {resultTypeParams}>";
-			var sortableChainInterface = $"ISortableResolverChain<{keyTypeName}, {documentTypeName}, {resultTypeParams}>";
-			var builderType = $"JoinQueryBuilder<TDiscriminator, TLeftQuery, {keyTypeName}, {documentTypeName}, TResolverChain, {resultTypeParams}>";
-
-			// Only generate JoinWith methods if not at max level (chaining produces level+1)
-			if (level >= MaxJoinLevels)
-				break;
-
-			sb.AppendLine();
-			sb.AppendLine($"        #region Level {level} extensions");
-
-			foreach (var target in joinTargets) {
-				var (methodName, innerMethodName, otherKeyTypeName, otherTypeFullName, otherFieldName, otherCacheName,
-					fkPropName, fkIndexName, isMany, isForward, newResolverType, newResultType) = target;
-
-				// Next level type params
-				var nextResultTypeParams = resultTypeParams + $", {newResultType}";
-				var nextChainType = $"ResolverChain<{keyTypeName}, {documentTypeName}, TResolverChain, {newResolverType}, {resultTypeParams}, {newResultType}>";
-				var nextBuilderType = $"JoinQueryBuilder<TDiscriminator, TLeftQuery, {keyTypeName}, {documentTypeName}, {nextChainType}, {nextResultTypeParams}>";
-
-				// JoinWith method
-				sb.AppendLine();
-				sb.AppendLine($"        /// <summary>Join with {otherTypeFullName} ({(isMany ? "one-to-many" : "one-to-one")}).</summary>");
-				sb.AppendLine("        [MethodImpl(MethodImplOptions.AggressiveInlining)]");
-				sb.AppendLine($"        public static {nextBuilderType}");
-				sb.AppendLine($"            {methodName}<TDiscriminator, TLeftQuery, {structTypeParams}>(");
-				sb.AppendLine($"                this in {builderType} builder,");
-				sb.AppendLine($"                {cacheClassName} cache,");
-				sb.AppendLine($"                Func<JoinedCacheQueryBuilder<{keyTypeName}, {otherKeyTypeName}, {otherTypeFullName}>, JoinedCacheQueryBuilder<{keyTypeName}, {otherKeyTypeName}, {otherTypeFullName}>>? filter = null)");
-				sb.AppendLine($"            where TDiscriminator : struct, Prague.Core.TypeSystem.IBaseJoinable");
-				sb.AppendLine($"            where TLeftQuery : struct, ICandidatesExecutor<{keyTypeName}, {documentTypeName}>");
-				sb.AppendLine($"            where TResolverChain : struct, {chainInterface}, {sortableChainInterface}");
-				sb.AppendLine("        {");
-
-				if (isForward) {
-					sb.AppendLine($"            return builder.JoinOne(cache.{otherFieldName}!.Cache, static ({documentTypeName} item) => item.{fkPropName}, filter);");
-				}
-				else if (isMany) {
-					sb.AppendLine($"            return builder.JoinMany(cache.{otherFieldName}!.Cache, cache.{otherFieldName}!.{fkIndexName}, filter);");
-				}
-				else {
-					sb.AppendLine($"            return builder.JoinOne(cache.{otherFieldName}!.Cache, cache.{otherFieldName}!.{fkIndexName}, filter);");
-				}
-
-				sb.AppendLine("        }");
-
-				// InnerJoinWith method (skip for Many joins for now)
-				if (!isMany) {
-					sb.AppendLine();
-					sb.AppendLine($"        /// <summary>Inner join with {otherTypeFullName} (one-to-one).</summary>");
-					sb.AppendLine("        [MethodImpl(MethodImplOptions.AggressiveInlining)]");
-					sb.AppendLine($"        public static {nextBuilderType}");
-					sb.AppendLine($"            {innerMethodName}<TDiscriminator, TLeftQuery, {structTypeParams}>(");
-					sb.AppendLine($"                this in {builderType} builder,");
-					sb.AppendLine($"                {cacheClassName} cache,");
-					sb.AppendLine($"                Func<JoinedCacheQueryBuilder<{keyTypeName}, {otherKeyTypeName}, {otherTypeFullName}>, JoinedCacheQueryBuilder<{keyTypeName}, {otherKeyTypeName}, {otherTypeFullName}>>? filter = null)");
-					sb.AppendLine($"            where TDiscriminator : struct, Prague.Core.TypeSystem.IInnerJoinable");
-					sb.AppendLine($"            where TLeftQuery : struct, ICandidatesExecutor<{keyTypeName}, {documentTypeName}>");
-					sb.AppendLine($"            where TResolverChain : struct, {chainInterface}, {sortableChainInterface}");
-					sb.AppendLine("        {");
-
-					if (isForward) {
-						sb.AppendLine($"            return builder.InnerJoinOne(cache.{otherFieldName}!.Cache, static ({documentTypeName} item) => item.{fkPropName}, filter);");
-					}
-					else {
-						sb.AppendLine($"            return builder.InnerJoinOne(cache.{otherFieldName}!.Cache, cache.{otherFieldName}!.{fkIndexName}, filter);");
-					}
-
-					sb.AppendLine("        }");
-				}
-			}
-
-			sb.AppendLine();
-			sb.AppendLine($"        #endregion");
-		}
-
-		sb.AppendLine("    }");
-	}
-
-	/// <summary>
-	/// Generates a single level JoinQueryBuilder struct.
-	/// Type params: TResolverChain, T1, ..., TN
-	/// TResolverChain is constrained to IResolverChain&lt;TLeftKey, TLeftValue, T1, ..., TN&gt;
-	/// </summary>
-	private static void GenerateJoinQueryBuilderLevel(
-		StringBuilder sb,
-		string cacheClassName,
-		string keyTypeName,
-		string documentTypeName,
-		List<(string MethodName, string InnerMethodName, string OtherKeyTypeName, string OtherTypeFullName, string OtherFieldName, string OtherCacheName, string ForeignKeyPropertyName, string ForeignKeyIndexName, bool IsMany, bool IsForward, string ResolverType, string ResultType)> joinTargets,
-		int level,
-		int maxLevel)
-	{
-		// Build result type parameters: T1, T2, ...
-		var resultTypeParams = string.Join(", ", Enumerable.Range(1, level).Select(i => $"T{i}"));
-
-		// Full struct type params: TResolverChain, T1, ..., TN
-		var structTypeParams = $"TResolverChain, {resultTypeParams}";
-
-		// Build result type: JoinResult<TLeftValue, T1, T2, ...>
-		var resultType = $"JoinResult<{documentTypeName}, {resultTypeParams}>";
-
-		// Build resolver chain constraint
-		var chainInterface = $"IResolverChain<{keyTypeName}, {documentTypeName}, {resultTypeParams}>";
-		var sortableChainInterface = $"ISortableResolverChain<{keyTypeName}, {documentTypeName}, {resultTypeParams}>";
-		var resolverConstraints = new List<string> {
-			$"where TResolverChain : struct, {chainInterface}, {sortableChainInterface}"
-		};
-
-		// Core executor type: Prague.Core.JoinQueryBuilder<TDiscriminator, TLeftQuery, TLeftKey, TLeftValue, TResolverChain, T1, ...>
-		// Must be fully qualified to avoid conflict with the nested JoinQueryBuilder struct
-		var coreExecutorType = $"Prague.Core.JoinQueryBuilder<ExecutableQuery<{cacheClassName}>, CacheQueryBuilder<{keyTypeName}, {documentTypeName}>, {keyTypeName}, {documentTypeName}, TResolverChain, {resultTypeParams}>";
-
+		sb.AppendLine("        /// <summary>Starts a prepared (build-once / execute-on-demand) query whose values are all bound at build time. Terminal is <c>Build()</c>.</summary>");
+		sb.AppendLine("        [MethodImpl(MethodImplOptions.AggressiveInlining)]");
+		sb.AppendLine($"        public {PreparedBuilderType("NoArgs")} Prepare() =>");
+		sb.AppendLine($"            Cache.Prepare<{cacheClassName}, {keyTypeName}, {documentTypeName}, NoArgs>(this);");
 		sb.AppendLine();
-		sb.AppendLine($"        /// <summary>");
-		sb.AppendLine($"        /// Join query builder for {level} join(s). Result: {resultType}");
-		sb.AppendLine($"        /// </summary>");
-		sb.AppendLine($"        public struct JoinQueryBuilder<{structTypeParams}>");
-
-		// Add constraints
-		foreach (var constraint in resolverConstraints) {
-			sb.AppendLine($"            {constraint}");
-		}
-
-		sb.AppendLine("        {");
-		sb.AppendLine($"            private readonly {cacheClassName} _cache;");
-		sb.AppendLine($"            private {coreExecutorType} _executor;");
-		sb.AppendLine();
-		sb.AppendLine($"            internal JoinQueryBuilder({cacheClassName} cache, {coreExecutorType} executor)");
-		sb.AppendLine("            {");
-		sb.AppendLine("                _cache = cache;");
-		sb.AppendLine("                _executor = executor;");
-		sb.AppendLine("            }");
-
-		// Generate Execute methods
-		// Generate Execute methods (without sorting - use Sort() for sorted execution)
-		sb.AppendLine();
-		sb.AppendLine("            /// <summary>Execute the join query.</summary>");
-		sb.AppendLine("            [MethodImpl(MethodImplOptions.AggressiveInlining)]");
-		sb.AppendLine($"            public QueryResults<{resultType}> Execute(int skip = 0, int take = int.MaxValue)");
-		sb.AppendLine("                => _executor.Execute(skip, take);");
-
-		sb.AppendLine();
-		sb.AppendLine("            /// <summary>Execute the join query and clone results.</summary>");
-		sb.AppendLine("            [MethodImpl(MethodImplOptions.AggressiveInlining)]");
-		sb.AppendLine($"            public QueryResults<{resultType}> ExecuteCloned(int skip = 0, int take = int.MaxValue)");
-		sb.AppendLine("                => _executor.ExecuteCloned(skip, take);");
-
-		sb.AppendLine();
-		sb.AppendLine("            /// <summary>Execute the join query with pooled arrays.</summary>");
-		sb.AppendLine("            [MethodImpl(MethodImplOptions.AggressiveInlining)]");
-		sb.AppendLine($"            public QueryResults<{resultType}> ExecutePooled(int skip = 0, int take = int.MaxValue)");
-		sb.AppendLine("                => _executor.ExecutePooled(skip, take);");
-
-		sb.AppendLine();
-		sb.AppendLine("            /// <summary>Execute the join query with pooled arrays and clone results.</summary>");
-		sb.AppendLine("            [MethodImpl(MethodImplOptions.AggressiveInlining)]");
-		sb.AppendLine($"            public QueryResults<{resultType}> ExecutePooledCloned(int skip = 0, int take = int.MaxValue)");
-		sb.AppendLine("                => _executor.ExecutePooledCloned(skip, take);");
-
-		// Generate Sort methods that return SortedJoinQueryBuilder
-		sb.AppendLine();
-		sb.AppendLine("            /// <summary>Sort the join query results using the specified comparer.</summary>");
-		sb.AppendLine("            [MethodImpl(MethodImplOptions.AggressiveInlining)]");
-		sb.AppendLine($"            public SortedJoinQueryBuilder<{structTypeParams}, TComparer> Sort<TComparer>(TComparer comparer)");
-		sb.AppendLine($"                where TComparer : IComparer<{resultType}>");
-		sb.AppendLine($"                => new SortedJoinQueryBuilder<{structTypeParams}, TComparer>(_cache, _executor, comparer);");
-
-		// Generate MapWhere method that returns MappedWhereJoinQueryBuilder
-		sb.AppendLine();
-		sb.AppendLine("            /// <summary>Map and filter the join query results.</summary>");
-		sb.AppendLine("            [MethodImpl(MethodImplOptions.AggressiveInlining)]");
-		sb.AppendLine($"            public MappedWhereJoinQueryBuilder<{structTypeParams}, TMapped, TMapper> MapWhere<TMapped, TMapper>(TMapper mapper)");
-		sb.AppendLine($"                where TMapper : struct, ICacheWhereMapper<{resultType}, TMapped>");
-		sb.AppendLine($"                => new MappedWhereJoinQueryBuilder<{structTypeParams}, TMapped, TMapper>(_cache, _executor, mapper);");
-
-		// Generate JoinWith* methods if not at max level
-		if (level < maxLevel) {
-			sb.AppendLine();
-			sb.AppendLine($"            #region JoinWith Methods (to level {level + 1})");
-
-			foreach (var target in joinTargets) {
-				var (methodName, innerMethodName, otherKeyTypeName, otherTypeFullName, otherFieldName, otherCacheName,
-					fkPropName, fkIndexName, isMany, isForward, newResolverType, newResultType) = target;
-
-				// Build the next level's type params using ResolverChain wrapping
-				var nextResultTypeParams = resultTypeParams + $", {newResultType}";
-				var nextChainType = $"ResolverChain<{keyTypeName}, {documentTypeName}, TResolverChain, {newResolverType}, {resultTypeParams}, {newResultType}>";
-				var nextReturnType = $"JoinQueryBuilder<{nextChainType}, {nextResultTypeParams}>";
-
-				// JoinWith method
-				sb.AppendLine();
-				sb.AppendLine($"            /// <summary>Join with {otherTypeFullName} ({(isMany ? "one-to-many" : "one-to-one")}).</summary>");
-				sb.AppendLine("            [MethodImpl(MethodImplOptions.AggressiveInlining)]");
-				sb.AppendLine($"            public {nextReturnType} {methodName}(");
-				sb.AppendLine($"                Func<JoinedCacheQueryBuilder<{keyTypeName}, {otherKeyTypeName}, {otherTypeFullName}>, JoinedCacheQueryBuilder<{keyTypeName}, {otherKeyTypeName}, {otherTypeFullName}>>? filter = null)");
-				sb.AppendLine("            {");
-				sb.AppendLine($"                if (_cache.{otherFieldName} == null)");
-				sb.AppendLine($"                    throw new System.InvalidOperationException(\"Cache '{otherCacheName}' not registered. Call AddJoinedCaches first.\");");
-
-				if (isForward) {
-					// Forward join: use foreign key selector
-					sb.AppendLine($"                var next = _executor.JoinOne(_cache.{otherFieldName}.Cache, static ({documentTypeName} item) => item.{fkPropName}, filter);");
-				}
-				else if (isMany) {
-					// Reverse many join: use list index
-					sb.AppendLine($"                var next = _executor.JoinMany(_cache.{otherFieldName}.Cache, _cache.{otherFieldName}.{fkIndexName}, filter);");
-				}
-				else {
-					// Reverse one join: use value index
-					sb.AppendLine($"                var next = _executor.JoinOne(_cache.{otherFieldName}.Cache, _cache.{otherFieldName}.{fkIndexName}, filter);");
-				}
-
-				sb.AppendLine($"                return new {nextReturnType}(_cache, next);");
-				sb.AppendLine("            }");
-
-				// InnerJoinWith method
-				// TODO: InnerJoinMany not yet properly implemented — skipping for Many joins
-				// if (isForward) {
-				// 	sb.AppendLine($"                var next = _executor.InnerJoinOne(_cache.{otherFieldName}.Cache, static ({documentTypeName} item) => item.{fkPropName}, filter);");
-				// }
-				// else if (isMany) {
-				// 	sb.AppendLine($"                var next = _executor.InnerJoinMany(_cache.{otherFieldName}.Cache, _cache.{otherFieldName}.{fkIndexName}, filter);");
-				// }
-				// else {
-				// 	sb.AppendLine($"                var next = _executor.InnerJoinOne(_cache.{otherFieldName}.Cache, _cache.{otherFieldName}.{fkIndexName}, filter);");
-				// }
-				if (!isMany) {
-					sb.AppendLine();
-					sb.AppendLine($"            /// <summary>Inner join with {otherTypeFullName} (one-to-one).</summary>");
-					sb.AppendLine("            [MethodImpl(MethodImplOptions.AggressiveInlining)]");
-					sb.AppendLine($"            public {nextReturnType} {innerMethodName}(");
-					sb.AppendLine($"                Func<JoinedCacheQueryBuilder<{keyTypeName}, {otherKeyTypeName}, {otherTypeFullName}>, JoinedCacheQueryBuilder<{keyTypeName}, {otherKeyTypeName}, {otherTypeFullName}>>? filter = null)");
-					sb.AppendLine("            {");
-					sb.AppendLine($"                if (_cache.{otherFieldName} == null)");
-					sb.AppendLine($"                    throw new System.InvalidOperationException(\"Cache '{otherCacheName}' not registered. Call AddJoinedCaches first.\");");
-
-					if (isForward) {
-						sb.AppendLine($"                var next = _executor.InnerJoinOne(_cache.{otherFieldName}.Cache, static ({documentTypeName} item) => item.{fkPropName}, filter);");
-					}
-					else {
-						sb.AppendLine($"                var next = _executor.InnerJoinOne(_cache.{otherFieldName}.Cache, _cache.{otherFieldName}.{fkIndexName}, filter);");
-					}
-
-					sb.AppendLine($"                return new {nextReturnType}(_cache, next);");
-					sb.AppendLine("            }");
-				}
-			}
-
-			sb.AppendLine();
-			sb.AppendLine("            #endregion");
-
-			// Generate generic InnerJoin method with predicate (closure-free with args)
-			sb.AppendLine();
-			sb.AppendLine("            #region Generic InnerJoin Methods");
-			sb.AppendLine();
-			sb.AppendLine("            /// <summary>");
-			sb.AppendLine("            /// Inner join with any cache using a field selector and predicate.");
-			sb.AppendLine("            /// </summary>");
-			sb.AppendLine("            [MethodImpl(MethodImplOptions.AggressiveInlining)]");
-
-			// Build next level return type with the new resolver using ResolverChain wrapping
-			var nextResultTypeParamsGeneric = resultTypeParams + ", TRightValue?";
-			var nextChainTypeGeneric = $"ResolverChain<{keyTypeName}, {documentTypeName}, TResolverChain, JoinOneResolver<{keyTypeName}, {documentTypeName}, TRightKey, TRightValue>, {resultTypeParams}, TRightValue?>";
-			var nextReturnTypeGeneric = $"JoinQueryBuilder<{nextChainTypeGeneric}, {nextResultTypeParamsGeneric}>";
-
-			sb.AppendLine($"            public {nextReturnTypeGeneric}");
-			sb.AppendLine($"                InnerJoin<TRightKey, TRightValue>(");
-			sb.AppendLine($"                    InMemoryDataCache<TRightKey, TRightValue> rightCache,");
-			sb.AppendLine($"                    Func<{documentTypeName}, TRightKey> fieldSelector,");
-			sb.AppendLine($"                    Func<{documentTypeName}, TRightValue, bool> predicate)");
-			sb.AppendLine($"                where TRightKey : notnull, IEquatable<TRightKey>");
-			sb.AppendLine($"                where TRightValue : ICacheEquatable<TRightValue>, ICacheClonable<TRightValue>");
-			sb.AppendLine("            {");
-			sb.AppendLine($"                var next = _executor.InnerJoinOne(rightCache, fieldSelector, predicate);");
-			sb.AppendLine($"                return new {nextReturnTypeGeneric}(_cache, next);");
-			sb.AppendLine("            }");
-			sb.AppendLine();
-			sb.AppendLine("            /// <summary>");
-			sb.AppendLine("            /// Inner join with any cache using a field selector and predicate with args (closure-free).");
-			sb.AppendLine("            /// </summary>");
-			sb.AppendLine("            [MethodImpl(MethodImplOptions.AggressiveInlining)]");
-			sb.AppendLine($"            public {nextReturnTypeGeneric}");
-			sb.AppendLine($"                InnerJoin<TRightKey, TRightValue, TArgs>(");
-			sb.AppendLine($"                    InMemoryDataCache<TRightKey, TRightValue> rightCache,");
-			sb.AppendLine($"                    Func<{documentTypeName}, TArgs, TRightKey> fieldSelector,");
-			sb.AppendLine($"                    Func<{documentTypeName}, TRightValue, TArgs, bool> predicate,");
-			sb.AppendLine($"                    TArgs args)");
-			sb.AppendLine($"                where TRightKey : notnull, IEquatable<TRightKey>");
-			sb.AppendLine($"                where TRightValue : ICacheEquatable<TRightValue>, ICacheClonable<TRightValue>");
-			sb.AppendLine("            {");
-			sb.AppendLine($"                var next = _executor.InnerJoinOne(rightCache, item => fieldSelector(item, args), (left, right) => predicate(left, right, args));");
-			sb.AppendLine($"                return new {nextReturnTypeGeneric}(_cache, next);");
-			sb.AppendLine("            }");
-			sb.AppendLine();
-			sb.AppendLine("            #endregion");
-		}
-
-		sb.AppendLine("        }");
-
-		// Generate SortedJoinQueryBuilder struct for this level
-		GenerateSortedJoinQueryBuilderLevel(sb, cacheClassName, keyTypeName, documentTypeName, joinTargets, level, maxLevel, structTypeParams, resultTypeParams, resultType, resolverConstraints, coreExecutorType);
-	}
-
-	/// <summary>
-	/// Generates a SortedJoinQueryBuilder struct for a given level.
-	/// This wraps the executor with a comparer for sorted execution.
-	/// Supports mid-chain sort: JoinWith* methods call _executor.Sort(_comparer) then chain the join.
-	/// </summary>
-	private static void GenerateSortedJoinQueryBuilderLevel(
-		StringBuilder sb,
-		string cacheClassName,
-		string keyTypeName,
-		string documentTypeName,
-		List<(string MethodName, string InnerMethodName, string OtherKeyTypeName, string OtherTypeFullName, string OtherFieldName, string OtherCacheName, string ForeignKeyPropertyName, string ForeignKeyIndexName, bool IsMany, bool IsForward, string ResolverType, string ResultType)> joinTargets,
-		int level,
-		int maxLevel,
-		string structTypeParams,
-		string resultTypeParams,
-		string resultType,
-		List<string> resolverConstraints,
-		string coreExecutorType)
-	{
-		// Type params: TResolver1, ..., TResolverN, T1, ..., TN, TComparer
-		var sortedStructTypeParams = $"{structTypeParams}, TComparer";
-
-		// The sorted core executor type after calling _executor.Sort(_comparer)
-		var sortedChainType = $"SortedResolverChain<{keyTypeName}, {documentTypeName}, TResolverChain, TComparer, {resultTypeParams}>";
-		var sortedCoreExecutorType = $"Prague.Core.JoinQueryBuilder<SortedQuery<ExecutableQuery<{cacheClassName}>>, CacheQueryBuilder<{keyTypeName}, {documentTypeName}>, {keyTypeName}, {documentTypeName}, {sortedChainType}, {resultTypeParams}>";
-
-		sb.AppendLine();
-		sb.AppendLine($"        /// <summary>");
-		sb.AppendLine($"        /// Sorted join query builder for {level} join(s). Result: {resultType}");
-		sb.AppendLine($"        /// </summary>");
-		sb.AppendLine($"        public struct SortedJoinQueryBuilder<{sortedStructTypeParams}>");
-
-		// Add resolver constraints
-		foreach (var constraint in resolverConstraints) {
-			sb.AppendLine($"            {constraint}");
-		}
-		// Add comparer constraint
-		sb.AppendLine($"            where TComparer : IComparer<{resultType}>");
-
-		sb.AppendLine("        {");
-		sb.AppendLine($"            private readonly {cacheClassName} _cache;");
-		sb.AppendLine($"            private {coreExecutorType} _executor;");
-		sb.AppendLine("            private readonly TComparer _comparer;");
-		sb.AppendLine();
-		sb.AppendLine($"            internal SortedJoinQueryBuilder({cacheClassName} cache, {coreExecutorType} executor, TComparer comparer)");
-		sb.AppendLine("            {");
-		sb.AppendLine("                _cache = cache;");
-		sb.AppendLine("                _executor = executor;");
-		sb.AppendLine("                _comparer = comparer;");
-		sb.AppendLine("            }");
-
-		// Generate Execute methods (all use the comparer)
-		sb.AppendLine();
-		sb.AppendLine("            /// <summary>Execute the sorted join query.</summary>");
-		sb.AppendLine("            [MethodImpl(MethodImplOptions.AggressiveInlining)]");
-		sb.AppendLine($"            public QueryResults<{resultType}> Execute(int skip = 0, int take = int.MaxValue)");
-		sb.AppendLine("                => _executor.Execute(_comparer, skip, take);");
-
-		sb.AppendLine();
-		sb.AppendLine("            /// <summary>Execute the sorted join query and clone results.</summary>");
-		sb.AppendLine("            [MethodImpl(MethodImplOptions.AggressiveInlining)]");
-		sb.AppendLine($"            public QueryResults<{resultType}> ExecuteCloned(int skip = 0, int take = int.MaxValue)");
-		sb.AppendLine("                => _executor.ExecuteCloned(_comparer, skip, take);");
-
-		sb.AppendLine();
-		sb.AppendLine("            /// <summary>Execute the sorted join query with pooled arrays.</summary>");
-		sb.AppendLine("            [MethodImpl(MethodImplOptions.AggressiveInlining)]");
-		sb.AppendLine($"            public QueryResults<{resultType}> ExecutePooled(int skip = 0, int take = int.MaxValue)");
-		sb.AppendLine("                => _executor.ExecutePooled(_comparer, skip, take);");
-
-		sb.AppendLine();
-		sb.AppendLine("            /// <summary>Execute the sorted join query with pooled arrays and clone results.</summary>");
-		sb.AppendLine("            [MethodImpl(MethodImplOptions.AggressiveInlining)]");
-		sb.AppendLine($"            public QueryResults<{resultType}> ExecutePooledCloned(int skip = 0, int take = int.MaxValue)");
-		sb.AppendLine("                => _executor.ExecutePooledCloned(_comparer, skip, take);");
-
-		// Generate Map method that returns MappedSortedJoinQueryBuilder
-		sb.AppendLine();
-		sb.AppendLine("            /// <summary>Map the sorted join query results.</summary>");
-		sb.AppendLine("            [MethodImpl(MethodImplOptions.AggressiveInlining)]");
-		sb.AppendLine($"            public MappedSortedJoinQueryBuilder<{structTypeParams}, TComparer, TMapped> Map<TMapped>(Func<{resultType}, TMapped> mapper)");
-		sb.AppendLine($"                => new MappedSortedJoinQueryBuilder<{structTypeParams}, TComparer, TMapped>(_cache, _executor, _comparer, mapper);");
-
-		// Generate JoinWith* methods for mid-chain sort if not at max level
-		if (level < maxLevel) {
-			sb.AppendLine();
-			sb.AppendLine($"            #region JoinWith Methods (mid-chain sort to level {level + 1})");
-
-			foreach (var target in joinTargets) {
-				var (methodName, innerMethodName, otherKeyTypeName, otherTypeFullName, otherFieldName, otherCacheName,
-					fkPropName, fkIndexName, isMany, isForward, newResolverType, newResultType) = target;
-
-				// After Sort(), the chain type is SortedResolverChain<...>. Chaining a join wraps it in ResolverChain.
-				var nextResultTypeParams = resultTypeParams + $", {newResultType}";
-				var nextChainType = $"ResolverChain<{keyTypeName}, {documentTypeName}, {sortedChainType}, {newResolverType}, {resultTypeParams}, {newResultType}>";
-				var nextReturnType = $"JoinQueryBuilder<{nextChainType}, {nextResultTypeParams}>";
-
-				// JoinWith method
-				sb.AppendLine();
-				sb.AppendLine($"            /// <summary>Mid-chain sort then join with {otherTypeFullName} ({(isMany ? "one-to-many" : "one-to-one")}).</summary>");
-				sb.AppendLine("            [MethodImpl(MethodImplOptions.AggressiveInlining)]");
-				sb.AppendLine($"            public {nextReturnType} {methodName}(");
-				sb.AppendLine($"                Func<JoinedCacheQueryBuilder<{keyTypeName}, {otherKeyTypeName}, {otherTypeFullName}>, JoinedCacheQueryBuilder<{keyTypeName}, {otherKeyTypeName}, {otherTypeFullName}>>? filter = null)");
-				sb.AppendLine("            {");
-				sb.AppendLine($"                if (_cache.{otherFieldName} == null)");
-				sb.AppendLine($"                    throw new System.InvalidOperationException(\"Cache '{otherCacheName}' not registered. Call AddJoinedCaches first.\");");
-				sb.AppendLine("                var sorted = _executor.Sort(_comparer);");
-
-				if (isForward) {
-					sb.AppendLine($"                var next = sorted.JoinOne(_cache.{otherFieldName}.Cache, static ({documentTypeName} item) => item.{fkPropName}, filter);");
-				}
-				else if (isMany) {
-					sb.AppendLine($"                var next = sorted.JoinMany(_cache.{otherFieldName}.Cache, _cache.{otherFieldName}.{fkIndexName}, filter);");
-				}
-				else {
-					sb.AppendLine($"                var next = sorted.JoinOne(_cache.{otherFieldName}.Cache, _cache.{otherFieldName}.{fkIndexName}, filter);");
-				}
-
-				sb.AppendLine($"                return new {nextReturnType}(_cache, next);");
-				sb.AppendLine("            }");
-
-				// InnerJoinWith method (one-to-one only)
-				if (!isMany) {
-					sb.AppendLine();
-					sb.AppendLine($"            /// <summary>Mid-chain sort then inner join with {otherTypeFullName} (one-to-one).</summary>");
-					sb.AppendLine("            [MethodImpl(MethodImplOptions.AggressiveInlining)]");
-					sb.AppendLine($"            public {nextReturnType} {innerMethodName}(");
-					sb.AppendLine($"                Func<JoinedCacheQueryBuilder<{keyTypeName}, {otherKeyTypeName}, {otherTypeFullName}>, JoinedCacheQueryBuilder<{keyTypeName}, {otherKeyTypeName}, {otherTypeFullName}>>? filter = null)");
-					sb.AppendLine("            {");
-					sb.AppendLine($"                if (_cache.{otherFieldName} == null)");
-					sb.AppendLine($"                    throw new System.InvalidOperationException(\"Cache '{otherCacheName}' not registered. Call AddJoinedCaches first.\");");
-					sb.AppendLine("                var sorted = _executor.Sort(_comparer);");
-
-					if (isForward) {
-						sb.AppendLine($"                var next = sorted.InnerJoinOne(_cache.{otherFieldName}.Cache, static ({documentTypeName} item) => item.{fkPropName}, filter);");
-					}
-					else {
-						sb.AppendLine($"                var next = sorted.InnerJoinOne(_cache.{otherFieldName}.Cache, _cache.{otherFieldName}.{fkIndexName}, filter);");
-					}
-
-					sb.AppendLine($"                return new {nextReturnType}(_cache, next);");
-					sb.AppendLine("            }");
-				}
-			}
-
-			sb.AppendLine();
-			sb.AppendLine("            #endregion");
-		}
-
-		sb.AppendLine("        }");
-
-		// Generate MappedWhereJoinQueryBuilder struct for this level
-		GenerateMappedWhereJoinQueryBuilderLevel(sb, cacheClassName, keyTypeName, documentTypeName, level, structTypeParams, resolverConstraints, coreExecutorType, resultType);
-
-		// Generate MappedSortedJoinQueryBuilder struct for this level
-		GenerateMappedSortedJoinQueryBuilderLevel(sb, cacheClassName, keyTypeName, documentTypeName, level, structTypeParams, resolverConstraints, coreExecutorType, resultType);
-	}
-
-	/// <summary>
-	/// Generates a MappedWhereJoinQueryBuilder struct for a given level.
-	/// This wraps the executor with a mapper for MapWhere execution.
-	/// </summary>
-	private static void GenerateMappedWhereJoinQueryBuilderLevel(
-		StringBuilder sb,
-		string cacheClassName,
-		string keyTypeName,
-		string documentTypeName,
-		int level,
-		string structTypeParams,
-		List<string> resolverConstraints,
-		string coreExecutorType,
-		string resultType)
-	{
-		// Type params: TResolver1, ..., TResolverN, T1, ..., TN, TMapped, TMapper
-		var mappedStructTypeParams = $"{structTypeParams}, TMapped, TMapper";
-
-		sb.AppendLine();
-		sb.AppendLine($"        /// <summary>");
-		sb.AppendLine($"        /// Mapped/filtered join query builder for {level} join(s).");
-		sb.AppendLine($"        /// </summary>");
-		sb.AppendLine($"        public struct MappedWhereJoinQueryBuilder<{mappedStructTypeParams}>");
-
-		// Add resolver constraints
-		foreach (var constraint in resolverConstraints) {
-			sb.AppendLine($"            {constraint}");
-		}
-		// Add mapper constraint
-		sb.AppendLine($"            where TMapper : struct, ICacheWhereMapper<{resultType}, TMapped>");
-
-		sb.AppendLine("        {");
-		sb.AppendLine($"            private readonly {cacheClassName} _cache;");
-		sb.AppendLine($"            private {coreExecutorType} _executor;");
-		sb.AppendLine("            private readonly TMapper _mapper;");
-		sb.AppendLine();
-		sb.AppendLine($"            internal MappedWhereJoinQueryBuilder({cacheClassName} cache, {coreExecutorType} executor, TMapper mapper)");
-		sb.AppendLine("            {");
-		sb.AppendLine("                _cache = cache;");
-		sb.AppendLine("                _executor = executor;");
-		sb.AppendLine("                _mapper = mapper;");
-		sb.AppendLine("            }");
-
-		// TODO: Uncomment when ExecuteMapWhere/ExecuteMapWherePooled are added to T4-generated JoinQueryBuilder
-		// // Generate Execute methods
-		// sb.AppendLine();
-		// sb.AppendLine("            /// <summary>Execute the mapped/filtered join query.</summary>");
-		// sb.AppendLine("            [MethodImpl(MethodImplOptions.AggressiveInlining)]");
-		// sb.AppendLine($"            public QueryResults<TMapped> Execute(int skip = 0, int take = int.MaxValue)");
-		// sb.AppendLine($"                => _executor.ExecuteMapWhere<TMapped, TMapper>(_mapper, skip, take);");
-		//
-		// sb.AppendLine();
-		// sb.AppendLine("            /// <summary>Execute the mapped/filtered join query with pooled arrays.</summary>");
-		// sb.AppendLine("            [MethodImpl(MethodImplOptions.AggressiveInlining)]");
-		// sb.AppendLine($"            public QueryResults<TMapped> ExecutePooled(int skip = 0, int take = int.MaxValue)");
-		// sb.AppendLine($"                => _executor.ExecuteMapWherePooled<TMapped, TMapper>(_mapper, skip, take);");
-
-		// Generate Sort method
-		sb.AppendLine();
-		sb.AppendLine("            /// <summary>Sort the mapped/filtered join query results.</summary>");
-		sb.AppendLine("            [MethodImpl(MethodImplOptions.AggressiveInlining)]");
-		sb.AppendLine($"            public MappedWhereSortedJoinQueryBuilder<{structTypeParams}, TMapped, TMapper, TComparer> Sort<TComparer>(TComparer comparer)");
-		sb.AppendLine($"                where TComparer : IComparer<TMapped>");
-		sb.AppendLine($"                => new MappedWhereSortedJoinQueryBuilder<{structTypeParams}, TMapped, TMapper, TComparer>(_cache, _executor, _mapper, comparer);");
-
-		sb.AppendLine("        }");
-
-		// Generate MappedWhereSortedJoinQueryBuilder struct
-		GenerateMappedWhereSortedJoinQueryBuilderLevel(sb, cacheClassName, keyTypeName, documentTypeName, level, structTypeParams, resolverConstraints, coreExecutorType, resultType);
-	}
-
-	/// <summary>
-	/// Generates a MappedWhereSortedJoinQueryBuilder struct for a given level.
-	/// This wraps the executor with a mapper and comparer for sorted MapWhere execution.
-	/// </summary>
-	private static void GenerateMappedWhereSortedJoinQueryBuilderLevel(
-		StringBuilder sb,
-		string cacheClassName,
-		string keyTypeName,
-		string documentTypeName,
-		int level,
-		string structTypeParams,
-		List<string> resolverConstraints,
-		string coreExecutorType,
-		string resultType)
-	{
-		// Type params: TResolver1, ..., TResolverN, T1, ..., TN, TMapped, TMapper, TComparer
-		var sortedMappedStructTypeParams = $"{structTypeParams}, TMapped, TMapper, TComparer";
-
-		sb.AppendLine();
-		sb.AppendLine($"        /// <summary>");
-		sb.AppendLine($"        /// Sorted mapped/filtered join query builder for {level} join(s).");
-		sb.AppendLine($"        /// </summary>");
-		sb.AppendLine($"        public struct MappedWhereSortedJoinQueryBuilder<{sortedMappedStructTypeParams}>");
-
-		// Add resolver constraints
-		foreach (var constraint in resolverConstraints) {
-			sb.AppendLine($"            {constraint}");
-		}
-		// Add mapper and comparer constraints
-		sb.AppendLine($"            where TMapper : struct, ICacheWhereMapper<{resultType}, TMapped>");
-		sb.AppendLine($"            where TComparer : IComparer<TMapped>");
-
-		sb.AppendLine("        {");
-		sb.AppendLine($"            private readonly {cacheClassName} _cache;");
-		sb.AppendLine($"            private {coreExecutorType} _executor;");
-		sb.AppendLine("            private readonly TMapper _mapper;");
-		sb.AppendLine("            private readonly TComparer _comparer;");
-		sb.AppendLine();
-		sb.AppendLine($"            internal MappedWhereSortedJoinQueryBuilder({cacheClassName} cache, {coreExecutorType} executor, TMapper mapper, TComparer comparer)");
-		sb.AppendLine("            {");
-		sb.AppendLine("                _cache = cache;");
-		sb.AppendLine("                _executor = executor;");
-		sb.AppendLine("                _mapper = mapper;");
-		sb.AppendLine("                _comparer = comparer;");
-		sb.AppendLine("            }");
-
-		// TODO: Uncomment when ExecuteMapWhere/ExecuteMapWherePooled are added to T4-generated JoinQueryBuilder
-		// // Generate Execute methods
-		// sb.AppendLine();
-		// sb.AppendLine("            /// <summary>Execute the sorted mapped/filtered join query.</summary>");
-		// sb.AppendLine("            [MethodImpl(MethodImplOptions.AggressiveInlining)]");
-		// sb.AppendLine($"            public QueryResults<TMapped> Execute(int skip = 0, int take = int.MaxValue)");
-		// sb.AppendLine($"                => _executor.ExecuteMapWhere<TMapped, TMapper, TComparer>(_mapper, _comparer, skip, take);");
-		//
-		// sb.AppendLine();
-		// sb.AppendLine("            /// <summary>Execute the sorted mapped/filtered join query with pooled arrays.</summary>");
-		// sb.AppendLine("            [MethodImpl(MethodImplOptions.AggressiveInlining)]");
-		// sb.AppendLine($"            public QueryResults<TMapped> ExecutePooled(int skip = 0, int take = int.MaxValue)");
-		// sb.AppendLine($"                => _executor.ExecuteMapWherePooled<TMapped, TMapper, TComparer>(_mapper, _comparer, skip, take);");
-
-		sb.AppendLine("        }");
-	}
-
-	/// <summary>
-	/// Generates a MappedSortedJoinQueryBuilder struct for a given level.
-	/// This wraps the executor with a comparer and mapper for sorted Map execution.
-	/// </summary>
-	private static void GenerateMappedSortedJoinQueryBuilderLevel(
-		StringBuilder sb,
-		string cacheClassName,
-		string keyTypeName,
-		string documentTypeName,
-		int level,
-		string structTypeParams,
-		List<string> resolverConstraints,
-		string coreExecutorType,
-		string resultType)
-	{
-		// Type params: TResolver1, ..., TResolverN, T1, ..., TN, TComparer, TMapped
-		var mappedSortedStructTypeParams = $"{structTypeParams}, TComparer, TMapped";
-
-		sb.AppendLine();
-		sb.AppendLine($"        /// <summary>");
-		sb.AppendLine($"        /// Mapped sorted join query builder for {level} join(s).");
-		sb.AppendLine($"        /// </summary>");
-		sb.AppendLine($"        public struct MappedSortedJoinQueryBuilder<{mappedSortedStructTypeParams}>");
-
-		// Add resolver constraints
-		foreach (var constraint in resolverConstraints) {
-			sb.AppendLine($"            {constraint}");
-		}
-		// Add comparer constraint (on the full join result type)
-		sb.AppendLine($"            where TComparer : IComparer<{resultType}>");
-
-		sb.AppendLine("        {");
-		sb.AppendLine($"            private readonly {cacheClassName} _cache;");
-		sb.AppendLine($"            private {coreExecutorType} _executor;");
-		sb.AppendLine("            private readonly TComparer _comparer;");
-		sb.AppendLine($"            private readonly Func<{resultType}, TMapped> _mapper;");
-		sb.AppendLine();
-		sb.AppendLine($"            internal MappedSortedJoinQueryBuilder({cacheClassName} cache, {coreExecutorType} executor, TComparer comparer, Func<{resultType}, TMapped> mapper)");
-		sb.AppendLine("            {");
-		sb.AppendLine("                _cache = cache;");
-		sb.AppendLine("                _executor = executor;");
-		sb.AppendLine("                _comparer = comparer;");
-		sb.AppendLine("                _mapper = mapper;");
-		sb.AppendLine("            }");
-
-		// TODO: Uncomment when ExecuteMap/ExecuteMapPooled are added to T4-generated JoinQueryBuilder
-		// // Generate Execute methods
-		// sb.AppendLine();
-		// sb.AppendLine("            /// <summary>Execute the mapped sorted join query.</summary>");
-		// sb.AppendLine("            [MethodImpl(MethodImplOptions.AggressiveInlining)]");
-		// sb.AppendLine($"            public QueryResults<TMapped> Execute(int skip = 0, int take = int.MaxValue)");
-		// sb.AppendLine($"                => _executor.ExecuteMap<TMapped, TComparer>(_mapper, _comparer, skip, take);");
-		//
-		// sb.AppendLine();
-		// sb.AppendLine("            /// <summary>Execute the mapped sorted join query with pooled arrays.</summary>");
-		// sb.AppendLine("            [MethodImpl(MethodImplOptions.AggressiveInlining)]");
-		// sb.AppendLine($"            public QueryResults<TMapped> ExecutePooled(int skip = 0, int take = int.MaxValue)");
-		// sb.AppendLine($"                => _executor.ExecuteMapPooled<TMapped, TComparer>(_mapper, _comparer, skip, take);");
-
-		sb.AppendLine("        }");
-	}
-
-	/// <summary>
-	/// Gets referenced cache info given a type symbol.
-	/// </summary>
-	private static (string Namespace, string CacheClassName, string FullName, INamedTypeSymbol ClassSymbol)?
-		GetReferencedCacheInfo(INamedTypeSymbol referencedType, List<(string Namespace, string CacheClassName, string FullName, INamedTypeSymbol ClassSymbol)> allCacheInfo) {
-		foreach (var info in allCacheInfo) {
-			if (SymbolEqualityComparer.Default.Equals(info.ClassSymbol, referencedType))
-				return info;
-		}
-		return null;
+		sb.AppendLine("        /// <summary>Starts a prepared query parameterized by <typeparamref name=\"TArgs\" />, supplied on every execution. Terminal is <c>Build()</c>.</summary>");
+		sb.AppendLine("        [MethodImpl(MethodImplOptions.AggressiveInlining)]");
+		sb.AppendLine($"        public {PreparedBuilderType("TArgs")} Prepare<TArgs>() where TArgs : struct =>");
+		sb.AppendLine($"            Cache.Prepare<{cacheClassName}, {keyTypeName}, {documentTypeName}, TArgs>(this);");
 	}
 
 	/// <summary>
