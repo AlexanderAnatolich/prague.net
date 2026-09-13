@@ -2162,7 +2162,7 @@ public struct CacheQueryBuilderCombined<TDiscriminator, TLeftQuery, TLeftKey, TL
 
 #region CacheQueryBuilderNew Extension Methods
 
-public static class CacheQueryBuilderCombinedFilterExtenisons {
+public static class CacheQueryBuilderCombinedFilterExtensions {
 
 	// CacheKeyValueIndex overloads
 

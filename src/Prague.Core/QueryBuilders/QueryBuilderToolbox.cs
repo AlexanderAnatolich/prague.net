@@ -242,10 +242,6 @@ internal interface IJoinManyResolver<TLeftKey, TLeftValue, TInnerValue>
 		where TContainer : struct, IJoinedKeyedResultContainer<TLeftKey, TInnerValue>, allows ref struct;
 }
 
-public interface ILeftValueAccessor<TLeftValue> {
-	ReadOnlySpan<TLeftValue> Values { get; }
-}
-
 public interface IUnsafeValueAccessor {
 	ref TRightValue GetValueRef<TKey, TRightValue>(TKey key) where TKey : IEquatable<TKey>;
 	ref TRightValue GetValueRefOrAddDefault<TKey, TRightValue>(TKey key, out bool exists) where  TKey : IEquatable<TKey>;
@@ -284,16 +280,6 @@ public interface IUnsafeValueAccessor<TLeftKey> : IUnsafeValueAccessor
 
 	ref TRightValue GetValueRef<TRightValue>(TLeftKey key);
 	ref TRightValue GetValueRefOrAddDefault<TRightValue>(TLeftKey key, out bool exists);
-}
-/// <summary>
-/// Accessor interface for getting references to value slots by key.
-/// </summary>
-public interface IValueAccessor<TLeftKey, TRightValue>
-	where TLeftKey : IEquatable<TLeftKey> {
-	ReadOnlySpan<TLeftKey> Keys { get; }
-
-	ref TRightValue GetValueRef(TLeftKey key);
-	ref TRightValue GetValueRefOrAddDefault(TLeftKey key, out bool exists);
 }
 
 
