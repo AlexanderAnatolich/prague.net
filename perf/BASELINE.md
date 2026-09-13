@@ -1,5 +1,5 @@
 # Prague performance baseline
-_Generated 2026-09-09T10:25:16Z_
+_Generated 2026-09-13T07:51:52Z_
 
 ## apple-m4pro-darwin
 
@@ -64,59 +64,59 @@ _Generated 2026-09-09T10:25:16Z_
 ## linux-x64-ci
 
 ### concurrent  
-`github-ubuntu` · `Ubuntu 24.04.4 LTS` · `.NET 9.0.20` · commit `9b34732`
+`github-ubuntu` · `Ubuntu 24.04.5 LTS` · `.NET 9.0.20` · commit `cb3fa06`
 | metric | value | unit |
 |---|---:|---|
-| read.throughput | 2873005.65 | reads/s |
-| query.multiJoin.p50 | 367567.00 | ns |
-| query.multiJoin.p99 | 12524031.00 | ns |
-| query.multiJoin.p999 | 13767679.00 | ns |
+| read.throughput | 2556554.18 | reads/s |
+| query.multiJoin.p50 | 405983.00 | ns |
+| query.multiJoin.p99 | 12759039.00 | ns |
+| query.multiJoin.p999 | 15370751.00 | ns |
 
 ### core-only  
-`github-ubuntu` · `Ubuntu 24.04.4 LTS` · `.NET 9.0.20` · commit `9b34732`
+`github-ubuntu` · `Ubuntu 24.04.5 LTS` · `.NET 9.0.20` · commit `cb3fa06`
 | metric | value | unit |
 |---|---:|---|
-| ingest.throughput | 4655727.86 | ent/s |
-| ingest.alloc | 196.33 | bytes |
-| query.uniqueLookup.p50 | 292.69 | ns |
+| ingest.throughput | 4202797.72 | ent/s |
+| ingest.alloc | 201.75 | bytes |
+| query.uniqueLookup.p50 | 273.89 | ns |
 | query.uniqueLookup.alloc | 0.00 | bytes |
-| query.rangeScan.p50 | 4731.69 | ns |
+| query.rangeScan.p50 | 4987.17 | ns |
 | query.rangeScan.alloc | 0.00 | bytes |
-| query.joinOne.p50 | 15338.01 | ns |
+| query.joinOne.p50 | 16321.28 | ns |
 | query.joinOne.alloc | 0.00 | bytes |
-| query.joinMany.p50 | 182444.62 | ns |
+| query.joinMany.p50 | 193643.39 | ns |
 | query.joinMany.alloc | 2.00 | bytes |
-| query.joinManyAll.p50 | 357359.59 | ns |
-| query.joinManyAll.alloc | 3.00 | bytes |
-| query.multiJoin.p50 | 196820.15 | ns |
+| query.joinManyAll.p50 | 391045.75 | ns |
+| query.joinManyAll.alloc | 1.00 | bytes |
+| query.multiJoin.p50 | 204567.47 | ns |
 | query.multiJoin.alloc | 2.00 | bytes |
 
 ### core-sort  
-`github-ubuntu` · `Ubuntu 24.04.4 LTS` · `.NET 9.0.20` · commit `9b34732`
+`github-ubuntu` · `Ubuntu 24.04.5 LTS` · `.NET 9.0.20` · commit `cb3fa06`
 | metric | value | unit |
 |---|---:|---|
-| query.sortDistinct.p50 | 13191.28 | ns |
+| query.sortDistinct.p50 | 13050.68 | ns |
 | query.sortDistinct.alloc | 0.00 | bytes |
-| query.sortTied.p50 | 11141.38 | ns |
+| query.sortTied.p50 | 11134.36 | ns |
 | query.sortTied.alloc | 0.00 | bytes |
-| query.sortTiedJoined.p50 | 384178.90 | ns |
-| query.sortTiedJoined.alloc | 2.00 | bytes |
-| query.sortTiedJoinedBoundedPage.p50 | 382672.00 | ns |
-| query.sortTiedJoinedBoundedPage.alloc | 3.00 | bytes |
-| query.sortTiedLeftThenJoinClassic.p50 | 47205.45 | ns |
+| query.sortTiedJoined.p50 | 412347.39 | ns |
+| query.sortTiedJoined.alloc | 0.00 | bytes |
+| query.sortTiedJoinedBoundedPage.p50 | 412062.64 | ns |
+| query.sortTiedJoinedBoundedPage.alloc | 2.00 | bytes |
+| query.sortTiedLeftThenJoinClassic.p50 | 49417.56 | ns |
 | query.sortTiedLeftThenJoinClassic.alloc | 0.00 | bytes |
-| query.sortTiedLeftThenJoinBounded.p50 | 24998.33 | ns |
+| query.sortTiedLeftThenJoinBounded.p50 | 20637.57 | ns |
 | query.sortTiedLeftThenJoinBounded.alloc | 0.00 | bytes |
-| query.sortBoundedPage.p50 | 7792.95 | ns |
+| query.sortBoundedPage.p50 | 6334.85 | ns |
 | query.sortBoundedPage.alloc | 0.00 | bytes |
-| query.sortBoundedFullPage.p50 | 43636.19 | ns |
+| query.sortBoundedFullPage.p50 | 34713.07 | ns |
 | query.sortBoundedFullPage.alloc | 0.00 | bytes |
 
 ### full-sim  
-`github-ubuntu` · `Ubuntu 24.04.4 LTS` · `.NET 9.0.20` · commit `9b34732`
+`github-ubuntu` · `Ubuntu 24.04.5 LTS` · `.NET 9.0.20` · commit `cb3fa06`
 | metric | value | unit |
 |---|---:|---|
-| ingest.throughput | 1176105.81 | ent/s |
-| query.multiJoin.p50 | 199159.00 | ns |
-| query.multiJoin.p99 | 421583.00 | ns |
-| query.multiJoin.p999 | 596959.00 | ns |
+| ingest.throughput | 1154249.74 | ent/s |
+| query.multiJoin.p50 | 218823.00 | ns |
+| query.multiJoin.p99 | 470863.00 | ns |
+| query.multiJoin.p999 | 657663.00 | ns |
