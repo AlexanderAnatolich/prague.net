@@ -1969,7 +1969,7 @@ straight line's 314 → ~1,117 ns is **walk overhead** (R2's target); 4,499 − 
 
 ### R3 — single-pass page materialization: built, measured, killed
 
-Branch `r3-page-materialize-killed` (kept, unmerged) holds the implementation: on
+The implementation (branch deleted after the merge; the design is what follows): on
 `BoundedCapable && _allFused && manyCount == 0 && !HasUnfusedInnerMany` the drained page goes into a rented
 `TResult[]` + key array through a second T4 accessor family (`UnsafeRight{N}PageAccessor`, +1,222
 generated lines) instead of the `ValueDictionary`; 1,598 Core + 1,224 Generated tests green. Same-session
@@ -1984,7 +1984,7 @@ decides whether the hop simply never inlined in R1a (→ R1b) or the cost is the
 
 ### R2 — struct key selectors on the indexes: built, measured, killed (and why the ceiling's premise was wrong)
 
-Branch `r2-struct-selectors-killed` (kept, unmerged): `IIndexKeySelector<TKey,TValue,TIndexKey>` (static
+The implementation (branch deleted after the merge): `IIndexKeySelector<TKey,TValue,TIndexKey>` (static
 abstract `Select`), `CacheKeyValueListIndex<…,TSelector>` subclassing the three-parameter index so field
 types and the raw `Func` constructors compile unchanged, codegen emitting a private `readonly struct
 {Prop}IndexSelector` per scalar `Many` index, the planner recovering `TSelector` once per build through a

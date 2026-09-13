@@ -49,10 +49,10 @@ same-session baseline with untouched control rows:
 - **Comparer hop (R1a):** built, no change on A/B. A constrained call on a struct receiver is resolved at
   JIT time; A/B take the collect-all plan, not the heap plan the probe exercised.
 - **Page materialization (R3):** built (a second T4 accessor family), no change. The whole
-  `ValueDictionary` path is < 100 ns of A. Branch `r3-page-materialize-killed`.
+  `ValueDictionary` path is < 100 ns of A. (Branch deleted after the merge; RESULTS.MD has the design.)
 - **Struct key selectors (R2):** built, **+8–41% regression**. Dynamic PGO already devirtualizes and
   inlines the monomorphic probe call site, delegate included; per-index step types made it polymorphic.
-  Branch `r2-struct-selectors-killed`.
+  (Branch deleted after the merge; RESULTS.MD has the design.)
 - **Four join-loop items:** killed with evidence (RESULTS.MD "Killed").
 - **Page selection (R1b, `33b5442`) — the one that paid.** The direct-comparer probe on the real container
   measured the hop at 1,359 ns on shape A, and the disassembly proved it: `CompareLeftValues<TLeft>` compiled
