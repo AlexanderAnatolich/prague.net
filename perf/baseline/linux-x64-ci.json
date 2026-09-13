@@ -67,7 +67,7 @@
         {
           "id": "query.joinMany.alloc",
           "unit": "bytes",
-          "value": 2,
+          "value": 0,
           "higherIsBetter": false
         },
         {
@@ -79,7 +79,7 @@
         {
           "id": "query.joinManyAll.alloc",
           "unit": "bytes",
-          "value": 1,
+          "value": 0,
           "higherIsBetter": false
         },
         {
@@ -91,7 +91,7 @@
         {
           "id": "query.multiJoin.alloc",
           "unit": "bytes",
-          "value": 2,
+          "value": 0,
           "higherIsBetter": false
         }
       ]
@@ -223,7 +223,7 @@
         {
           "id": "query.sortTiedJoinedBoundedPage.alloc",
           "unit": "bytes",
-          "value": 2,
+          "value": 0,
           "higherIsBetter": false
         },
         {

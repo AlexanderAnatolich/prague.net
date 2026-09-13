@@ -3,29 +3,29 @@
     "core-only": {
       "env": {
         "cpu": "cpu",
-        "os": "Darwin 25.2.0 Darwin Kernel Version 25.2.0: Tue Nov 18 21:09:56 PST 2025; root:xnu-12377.61.12~1/RELEASE_ARM64_T6041",
+        "os": "Darwin 25.6.0 Darwin Kernel Version 25.6.0: Fri Jul 31 19:17:26 PDT 2026; root:xnu-12377.161.14~5/RELEASE_ARM64_T6041",
         "dotnet": ".NET 9.0.19",
         "coreCount": 12
       },
-      "commit": "a2ae5b3",
-      "timestampUtc": "2026-09-09T10:15:05.9206570Z",
+      "commit": "cb3fa06",
+      "timestampUtc": "2026-09-13T07:50:20.2724330Z",
       "metrics": [
         {
           "id": "ingest.throughput",
           "unit": "ent/s",
-          "value": 8255946.427046363,
+          "value": 8462478.764857078,
           "higherIsBetter": true
         },
         {
           "id": "ingest.alloc",
           "unit": "bytes",
-          "value": 208.02254545454545,
+          "value": 217.8798181818182,
           "higherIsBetter": false
         },
         {
           "id": "query.uniqueLookup.p50",
           "unit": "ns",
-          "value": 216.35395164489745,
+          "value": 186.45560104506356,
           "higherIsBetter": false
         },
         {
@@ -37,7 +37,7 @@
         {
           "id": "query.rangeScan.p50",
           "unit": "ns",
-          "value": 2968.4303613390243,
+          "value": 2871.7924270629883,
           "higherIsBetter": false
         },
         {
@@ -49,7 +49,7 @@
         {
           "id": "query.joinOne.p50",
           "unit": "ns",
-          "value": 8592.808493980994,
+          "value": 8383.137040358324,
           "higherIsBetter": false
         },
         {
@@ -61,7 +61,7 @@
         {
           "id": "query.joinMany.p50",
           "unit": "ns",
-          "value": 95495.58342285156,
+          "value": 94528.31486816406,
           "higherIsBetter": false
         },
         {
@@ -73,7 +73,7 @@
         {
           "id": "query.joinManyAll.p50",
           "unit": "ns",
-          "value": 183738.14152018228,
+          "value": 179846.58530273437,
           "higherIsBetter": false
         },
         {
@@ -85,7 +85,7 @@
         {
           "id": "query.multiJoin.p50",
           "unit": "ns",
-          "value": 100636.73192545572,
+          "value": 99066.82005964007,
           "higherIsBetter": false
         },
         {
@@ -171,17 +171,17 @@
     "core-sort": {
       "env": {
         "cpu": "cpu",
-        "os": "Darwin 25.2.0 Darwin Kernel Version 25.2.0: Tue Nov 18 21:09:56 PST 2025; root:xnu-12377.61.12~1/RELEASE_ARM64_T6041",
+        "os": "Darwin 25.6.0 Darwin Kernel Version 25.6.0: Fri Jul 31 19:17:26 PDT 2026; root:xnu-12377.161.14~5/RELEASE_ARM64_T6041",
         "dotnet": ".NET 9.0.19",
         "coreCount": 12
       },
-      "commit": "a2ae5b3",
-      "timestampUtc": "2026-09-09T10:16:56.0269600Z",
+      "commit": "cb3fa06",
+      "timestampUtc": "2026-09-13T07:52:31.8688450Z",
       "metrics": [
         {
           "id": "query.sortDistinct.p50",
           "unit": "ns",
-          "value": 11499.75091044108,
+          "value": 11370.624970656176,
           "higherIsBetter": false
         },
         {
@@ -193,7 +193,7 @@
         {
           "id": "query.sortTied.p50",
           "unit": "ns",
-          "value": 9248.975173950195,
+          "value": 9210.800247192383,
           "higherIsBetter": false
         },
         {
@@ -205,7 +205,7 @@
         {
           "id": "query.sortTiedJoined.p50",
           "unit": "ns",
-          "value": 193562.45823567707,
+          "value": 191011.63738141741,
           "higherIsBetter": false
         },
         {
@@ -217,7 +217,7 @@
         {
           "id": "query.sortTiedJoinedBoundedPage.p50",
           "unit": "ns",
-          "value": 192294.19868977866,
+          "value": 192747.90400390624,
           "higherIsBetter": false
         },
         {
@@ -229,7 +229,7 @@
         {
           "id": "query.sortTiedLeftThenJoinClassic.p50",
           "unit": "ns",
-          "value": 30326.28122965495,
+          "value": 30451.747715541296,
           "higherIsBetter": false
         },
         {
@@ -241,7 +241,7 @@
         {
           "id": "query.sortTiedLeftThenJoinBounded.p50",
           "unit": "ns",
-          "value": 20118.838248697917,
+          "value": 13762.953399658203,
           "higherIsBetter": false
         },
         {
@@ -253,7 +253,7 @@
         {
           "id": "query.sortBoundedPage.p50",
           "unit": "ns",
-          "value": 7805.393985493978,
+          "value": 6173.840631103516,
           "higherIsBetter": false
         },
         {
@@ -265,7 +265,7 @@
         {
           "id": "query.sortBoundedFullPage.p50",
           "unit": "ns",
-          "value": 34472.747579721305,
+          "value": 23639.29866333008,
           "higherIsBetter": false
         },
         {

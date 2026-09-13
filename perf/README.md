@@ -167,6 +167,11 @@ Blessed baselines live in `perf/baseline/<machine-class>.json` (e.g.
 `perf/baseline/apple-m4pro-darwin.json`). `perf/BASELINE.md` is a generated,
 human-readable rollup of every committed baseline — never hand-edit it.
 
+**After a bless, inspect the `.alloc` rows of the pooled query shapes.** A reading below 24 B (one
+object) is the pool re-warm artefact described above, not an allocation; set it back to `0` in the JSON
+and regenerate the rollup (`python3 -c "import sys; sys.path.insert(0,'perf'); import compare; compare.write_rollup('perf/baseline')"`)
+before committing — otherwise the ±2% gate is armed on noise and the next clean run trips it.
+
 Run with `--bless` to record the current run as the new baseline: it rewrites
 `perf/baseline/<machine-class>.json` and regenerates `perf/BASELINE.md`, then
 exits 0 without comparing. Bless **intentionally** — only when a metric change
