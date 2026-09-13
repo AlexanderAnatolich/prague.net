@@ -38,6 +38,8 @@ sorted**; ties unspecified; `Sort`/`SortBounded` with a total comparer byte-iden
 | `0d16689`, `33b5442` | the direct-comparer probe; **R1b: the sorter's comparer carried into the bounded container** | shape A 4.575 → 3.766 µs; `Fk_SortBounded` −15%; `Sort_JoinMany` −14% |
 | `6cbeb70` | the #83 TimeRange spike: the ring rejected by measurement | dedupe 3.30 ns/key; ingestion +16% |
 | `8080c12` | **#97: symmetric seed chooser** — declaration order no longer decides the seed | time-first 1 s window 9,299 → 141 ns (66×) |
+| `2315f2f`, `f8c0698` | #92: forward `JoinWith` for one-to-one FKs; `Sort → JoinWith` for the scalar many-to-one | `Fk_SortBounded_ManyToOne` 29.3 → 14.4 µs |
+| `003d4a8` | **R1b for the eager path** — the eager top-k containers carry the comparer; `FrozenTopKJoinedContainer` deleted as a duplicate | eager `SortBounded` −15%, eager shape A −17%, shape B −18%, `SortBounded_JoinMany` −36%; prepared rows the same; `perf/` sort p50s −20…−31% (re-bless after merge) |
 
 ### The negative results, and what they establish
 
@@ -62,8 +64,9 @@ same-session baseline with untouched control rows:
 Conclusion: after R1b the frozen pipeline on shapes A and B is at the practical floor of its type-erased
 design. The remaining 2.2× on A (3.77 vs 1.70 µs) is the shared probe call site, the type-erased steps and
 one residual shared-generic comparer instantiation, removable only by a generated straight-line executor
-per plan — #93, deferred until further notice. The eager top-k comparers carry the same hop and were left
-alone (their rows sit inside ±2%); a candidate for its own sweep.
+per plan — #93, deferred until further notice. The eager top-k comparers were then given the same treatment (`003d4a8`): the hop was
+there after all, hidden inside 16–37 µs executions, and removing it took eager `SortBounded` −15% and the
+bounded joined shapes −17…−36%.
 
 ## 2. What to do next
 

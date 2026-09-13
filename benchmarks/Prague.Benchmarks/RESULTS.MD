@@ -2090,3 +2090,35 @@ Declaration order no longer decides the seed. No-regression rows at comparable l
 no direction. `Fixed`/`PreserveEagerOrder` never reach the chooser; every existing `Explain()` assertion
 outside the probe test is unchanged. This is the ≥5× on recent windows that #83's bucket ring was meant to
 buy, without a new index (the ring itself measured 3–12× *slower* on those windows: spike spec).
+
+### R1b for the eager path — the eager top-k containers call the user comparer directly (`003d4a8`)
+
+`TopKSimpleResultContainer` and `TopKJoinedBaseContainer` are now generic over the page comparer, not the
+resolver or chain: `ExecuteCoreSimpleTop` / `ExecuteCoreJoinedTop` (and the frozen simple `ExecuteTop`) walk
+`WithSorter` → `IJoinResolver.WithLeftComparer` once per execution and close the container over
+`TopKLeftValueComparer` / `TopKLeftPairComparer`. Both bounded gates already require exactly one sorter,
+innermost, ordering the left value, so **no shape falls back** and the per-link `TopKPairComparer` hop of a
+multi-join chain is gone too. `FrozenTopKJoinedContainer` became a line-for-line duplicate and is deleted;
+the "before" comparers live on only in `BoundedComparerProbeBenchmarks`.
+
+Same session, `--inProcess`, one category per run, loads 1.9–11.8 (per-run values in the commit body); 0 B
+before and after:
+
+| Row | Eager before → after | Prepared before → after | Frozen before → after |
+|---|---:|---:|---:|
+| SortBounded (1k bucket, heap plan) | 15.98 → **13.60 µs** (−14.9%) | 15.93 → **13.39** | 15.29 → 12.12 (−20.7%) |
+| SortBounded_ListList | 11.36 → 10.85 (−4.5%) | 11.38 → 10.79 | 3.517 → **2.838** (−19.3%) |
+| SortBounded_JoinMany | 25.89 → **16.47** (−36.4%) | 25.88 → **16.54** | 14.42 → 14.64 |
+| Sort_JoinMany (classic sort, not bounded) | 120.2 → 120.8 | 121.1 → 121.7 | 14.41 → 14.38 |
+| ListListListSortBoundedJoinOne (shape A) | 17.11 → **14.16** (−17.3%) | 17.05 → **13.86** | 3.917 → 3.917 |
+| TimeWindowListListSortBoundedJoinTwo (shape B) | 34.63 → **28.36** (−18.1%) | 34.51 → **28.61** | 18.05 → 17.88 |
+| TimeRangeListListSortBoundedJoinTwo | 37.05 → **31.56** (−14.8%) | 37.14 → **31.33** | 20.31 → 20.53 |
+
+`perf/run.sh sort` (reported, not blessed; load 4.03): `sortBoundedFullPage.p50` 34.5 → **23.9 µs** (−30.7%),
+`sortBoundedPage.p50` 7.81 → **6.20** (−20.5%), `sortTiedLeftThenJoinBounded.p50` 20.1 → **13.9** (−30.7%);
+every other sort metric within ±5%, every `.alloc` 0.00 → 0.00. **The sort baseline understates now and
+should be re-blessed on a quiet box after the merge.**
+
+Reading it: the frozen ratios on the bounded joined shapes fall because the *eager* side got faster —
+shape A is now 14.2 → 3.9 µs (3.6×) and shape B 28.4 → 17.9 (1.6×); the frozen rows themselves did not
+move. The prepared replay runs the eager containers, so its rows moved with eager.

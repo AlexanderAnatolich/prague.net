@@ -685,8 +685,8 @@ list buckets, Apple M4 Pro, .NET 9, `--inProcess`, pooled + disposed; every froz
 | list ∩ 60k-row range window | 398 µs | 396 µs | **11.2 µs** | 35× |
 | "everything since T" ∩ list | 216 µs | 216 µs | **9.66 µs** | 22× |
 | `Or` of two 1k buckets, first narrowing | 976 µs | 983 µs | **26.9 µs** | 36× |
-| `SortBounded` page of 20 over list ∩ list | 11.3 µs | 11.4 µs | **3.42 µs** | 3.3× |
-| 3 lists → `SortBounded(page)` → `JoinOne` | 17.1 µs | 16.9 µs | **3.77 µs** | 4.5× |
+| `SortBounded` page of 20 over list ∩ list | 10.8 µs | 10.8 µs | **2.84 µs** | 3.8× |
+| 3 lists → `SortBounded(page)` → `JoinOne` | 14.2 µs | 13.9 µs | **3.9 µs** | 3.6× |
 | …the same shape's `Count` | 11.0 µs | 10.8 µs | **1.42 µs** | 7.7× |
 | `Sort` over a 1k bucket → `JoinMany` | 118 µs | 119 µs | **14.3 µs** | 8.3× |
 
