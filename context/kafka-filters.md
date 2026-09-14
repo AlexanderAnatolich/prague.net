@@ -9,6 +9,14 @@ Filter types live under `src/Prague.Kafka/Filters/`. `KafkaCacheHandlerBuilder` 
 - `WithKeyFilter(Func<TKey,bool>, bool treatAsDelete = false)`
 - `WithValueFilter(Func<TValue,bool>, bool treatAsDelete = false)`
 
+DI-aware variants, all resolving **once** at `Build` (see "Snapshot filters" below):
+
+- `WithKeyFilter<TState>(Func<IServiceProvider,TState> stateFactory, Func<TState,TKey,bool>, bool treatAsDelete = false)`
+- `WithValueFilter<TState>(Func<IServiceProvider,TState> stateFactory, Func<TState,TValue,bool>, bool treatAsDelete = false)`
+- `WithKeyFilter<TService>(Func<TService,TKey,bool>, bool treatAsDelete = false)` — sugar; `TService` **never infers**, always spell it
+- `WithValueFilter<TService>(Func<TService,TValue,bool>, bool treatAsDelete = false)` — same
+- `WithHeaderFilter<TState,THeaderValue>(string name, Func<IServiceProvider,TState>, Func<TState,THeaderValue,bool>, bool passOnNull = true)` — neither type arg infers
+
 No-filter path is zero-alloc for the **key and value** gates (inline `IsEmpty` check, short-circuited at the three `DispatchRaw` call sites). The **header** gate still walks every header regardless — the producer self-filter has to inspect each one — but a name longer than the longest configured filter key is answered by a compare, so with zero filters configured (bound 0) nothing is transcoded or looked up.
 
 **Required headers are a bitmask.** `KafkaHeaderFilters.RequiredMask` carries one bit per header name that a `WithHeaderExistsFilter` requires; the gate ORs in a bit when a name resolves and compares `seen == RequiredMask` once, after the last header. A single shared bool used to mean any one required header satisfied all of them — `exists("A") + exists("B")` composed as OR against the documented AND. Cap is 64 distinct required names; the 65th throws at handler build.
@@ -17,6 +25,26 @@ No-filter path is zero-alloc for the **key and value** gates (inline `IsEmpty` c
 
 A thrown predicate is caught and treated as **reject** at all three gates — key and value at the `DispatchRaw` call sites (maps to `Skip`, never `Delete`), header at the `ConsumeRawLoop` call site (maps to `Rejected`, never a waived reason, so a throw cannot let a foreign tombstone cross a sub-stream gate). All logged via `LoggerMessage`. The header catch is by **origin, not by type**: nothing inside the gate observes the consumer's token or talks to the broker, so anything thrown there is the user's predicate. Filtering on exception type would let a predicate impersonate shutdown (an `OperationCanceledException` reaching the loop's cancellation handler) or a broker failure (a `KafkaException` latching the consumer fatal) — so a real shutdown is distinguished by `ct.IsCancellationRequested`, which is the only thing that actually knows. It is load-bearing: the filter chain itself does not catch, and the enclosing handler rethrows — one throwing header predicate would otherwise stop the raw worker of **every** cache on the consumer and replay from the log into a crash loop.
 
+## Snapshot filters — one ordered factory list
+
+The builder holds `List<Func<IServiceProvider, KafkaKeyFilter<TKey>>>` (same for value; header holds a dict of factory lists). **Eager and DI-aware registrations share ONE list** — evaluation is first-reject-wins and the *rejecting* filter's own `TreatAsDelete` picks `Skip` vs `Delete`, so two lists concatenated at `Build` would silently reorder the chain. `FilterRegistrationOrderTests` guards this; nothing else does.
+
+`Build` resolves the list through `internal BuildKeyFilters/BuildValueFilters/BuildHeaderFilters(sp)` — also the seam that makes broker-free filter unit tests possible (`tests/Prague.Kafka.Tests/DependencyInjection/Filter*Tests.cs`).
+
+`KafkaKeyStatePredicateFilter<TState,TKey>` / `KafkaValueStatePredicateFilter<TState,TValue>` hold `(state, predicate, treatAsDelete)` and call `_predicate(_state, key)`. State is passed as an **argument, not captured**, so the predicate can be `static` → Roslyn caches it in a static field → one delegate per process, zero allocation on the ingestion path. Header state filters instead bind the state into a closure at `Build` (one allocation, once) to avoid duplicating `KafkaHeaderPredicateFilter`'s deserialization ladder.
+
+Inject several services with a **named tuple** — element names survive into the predicate:
+
+```csharp
+.WithKeyFilter(
+  static sp => (allow: sp.GetRequiredService<IAllowList>(), clock: sp.GetRequiredService<IClock>()),
+  static (s, key) => s.allow.Contains(key) && s.clock.IsOpen)
+```
+
+`sp` is the **root** provider (`KafkaCacheHandlers` is a keyed singleton). A scoped service passed to the `TService` overloads throws at `Build` via `ResolveFilterService<TService>` — the container will not catch it, because a default `BuildServiceProvider()` hands scoped services out of the root silently and MS only errors under `validateScopes: true` (Development only).
+
+**Startup ordering:** `Build` — and therefore every state factory — runs during hosted-service *construction*, before the `StartAsync` of **every** hosted service. A state service that populates itself in its own `StartAsync` is empty when the factory runs. (It is the initial *load* that is ordered by registration, inside `KafkaCachesBackgroundWorker.StartAsync`.)
+
 ## FilterDecision (key + value share it)
 
 `FilterDecision { Accept, Skip, Delete }` (`Filters/FilterDecision.cs`). Aggregates `KafkaKeyFilters<TKey>.Evaluate(key)` / `KafkaValueFilters<TValue>.Evaluate(value)` return it; each concrete filter carries `internal abstract bool TreatAsDelete`. **First-reject-wins** — the first rejecting filter's flag picks `Delete` vs `Skip`:
@@ -24,7 +52,18 @@ A thrown predicate is caught and treated as **reject** at all three gates — ke
 - `Skip` → silent drop on load / live publishes `RAW_KIND_FILTERED` → after-handlers fire with `UpdateType.Filtered`.
 - `Delete` → live publishes `RAW_KIND_DELETE` → `HandleRawLiveDelete` (removes key, fires `UpdateType.Delete` with old value only if key was present) / on load `RemoveDuringLoad` cancels any buffered value **and** removes the key from the cache (no after-handler). Buffer-only was #35: the compacting buffer is flushed mid-load, so once a key's value had reached the cache the delete was silently lost.
 
-**Caveat:** a key is immutable, so key-filter `treatAsDelete` only evicts when the predicate closes over mutable external state and a *new* message for that key arrives; for pure key predicates it is inert.
+## Filter lifecycle — what changing a filter does and does not do
+
+Filters are an **ingress gate**: evaluated exactly once per message as it is consumed, never re-applied to already-materialised cache state. Two consequences, and the second is the one people get wrong:
+
+- **Narrowing** evicts only through `treatAsDelete`, and only when a *new* message arrives for the affected key. On a compacted topic with no further writes for that key, that means *never*. So key-filter `treatAsDelete` is inert for a pure key predicate or an immutable snapshot, and meaningful only when the predicate reads state that changed after the key was admitted (a live service via the `TService` overload, or a mutable closure).
+- **Widening resurrects nothing.** Records dropped earlier are not in the cache and are never replayed: the raw spans die with `using var raw` in `ConsumeRawLoop`, the load buffer only ever held accepted values, and `consumer.Subscribe(_topics)` is the *only* consumer-positioning call in the project — no `Seek`, no `Assign`, no `Commit`.
+
+The supported reload primitive is a **process restart**, and it works for free: `EnableAutoCommit = false`, `EnableAutoOffsetStore = false`, `GroupId = KafkaCaches.InstanceId` (a fresh `Guid` per process), `AutoOffsetReset.Earliest`. A restarted process re-reads each topic in full under the new state. An explicitly configured `group.id` does not break this — Prague writes no offset for that group either — but it does make instances split partitions instead of each loading the whole topic.
+
+A filter is a **retention / load-shedding device, not an authorization boundary**: cached entries reflect the state in force when they were ingested. Dynamic visibility policy belongs in a reader over `Query()`, where narrowing and widening both take effect immediately.
+
+**Threading:** all filter predicates for every cache in a config section run synchronously on one `LongRunning` consume thread. A blocking predicate stalls the initial load and the live tail of every *other* cache in that section.
 
 ## Tombstones beat filters
 
