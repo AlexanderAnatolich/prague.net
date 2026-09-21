@@ -41,7 +41,7 @@ Raw, unsynchronized reads on `KafkaCachesConsumerStatistics` are exposed via `*U
 
 ## Tests
 
-- `Prague.Kafka.Tests` (NUnit) — unit coverage of filters, SerDe, enrichment, builder/registration.
+- `Prague.Kafka.Tests` (NUnit) — broker-free unit coverage of filters (DI-aware state overloads, registration order, build failures), SerDe, builder/registration, health. **No enrichment coverage here** — that lives only in the integration tests.
 - `Prague.Kafka.IntegrationTests` (NUnit + **Testcontainers.Kafka**) — behavioral coverage against a real broker via a dual-cluster fixture: lifecycle, header/key/value filters, enrichment, tombstones, numeric-header round-trips, MessagePack isolation, health, self-consume. This is the in-tree replacement for the removed in-memory TestAdaptor.
 
 > The in-memory `Prague.Kafka.TestAdaptor` project (and its `.Tests`) were removed. `CacheGenerator` still emits TestAdaptor extension methods **conditionally** — only when an assembly defining `Prague.Kafka.TestAdaptor.KafkaCacheTestBuilderProviderMarshall` is referenced — so that codegen branch is currently dormant.
