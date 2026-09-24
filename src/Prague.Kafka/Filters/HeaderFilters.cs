@@ -101,6 +101,8 @@ internal sealed class KafkaHeaderFilters {
 
 	// Split out so the localloc lives in a callee: a stackalloc in the body blocks inlining of the whole method,
 	// and the bound check above is what the caller wants inlined.
+	// SkipLocalsInit: GetChars writes every char the slice below reads, so the buffer is never read uninitialised.
+	[SkipLocalsInit]
 	private bool Resolve(ref ulong seen, ReadOnlySpan<byte> headerName, ReadOnlySpan<byte> headerValue) {
 		Span<char> nameChars = stackalloc char[headerName.Length];
 		var charCount = Encoding.UTF8.GetChars(headerName, nameChars);

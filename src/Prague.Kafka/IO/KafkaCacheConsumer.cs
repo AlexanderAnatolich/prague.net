@@ -640,8 +640,7 @@ internal class KafkaCacheConsumer : IDisposable {
 					HeaderGate gate;
 					try {
 						gate = handler.EvaluateHeaderGate(raw.Headers);
-					}
-					catch (Exception e) {
+					} catch (Exception e) {
 						// The header gate runs first, on raw wire bytes, and invokes a user-supplied predicate —
 						// exactly like the key and value gates, which have always caught and degraded. Without this
 						// the enclosing catch rethrows, the loop exits, and the finally stops the raw worker of
@@ -653,13 +652,14 @@ internal class KafkaCacheConsumer : IDisposable {
 						// predicate impersonate either: an OperationCanceledException would reach the shutdown
 						// handler and stop the loop with nobody having asked, and a KafkaException would reach the
 						// broker-error handler and latch the consumer fatal. A real shutdown is distinguished by the
-						// token instead, which is the only thing that actually knows.
+						// token instead, which is the only thing that actually knows -- and it is surfaced as a
+						// cancellation bound to that token, not as the predicate's own exception, so a predicate that
+						// happens to die mid-shutdown takes the graceful path rather than latching the consumer fatal.
 						//
 						// Mapped to Rejected, not to a waived reason: the key and value gates already settle that a
 						// predicate we could not evaluate must not admit the message, and a throw must never become
 						// a way for a foreign tombstone to cross a sub-stream gate.
-						if (ct.IsCancellationRequested)
-							throw;
+						ct.ThrowIfCancellationRequested();
 						_logger.HeaderFilterError(e, handler.Name, raw.Offset.Value);
 						gate = HeaderGate.Rejected;
 					}
