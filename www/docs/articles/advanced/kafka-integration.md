@@ -169,7 +169,9 @@ After-handlers run only in the live phase. Multiple handlers per cache run seque
 
 ## Awaiting initial load
 
-By default the host starts servicing requests as soon as DI is ready, before any cache is loaded. If you need the caches warm before serving:
+`AddKafkaCaches` registers a hosted service whose `StartAsync` returns only once every cache has reached its initial-load EOF, so a generic host does not finish starting (and an ASP.NET Core host does not start serving) before the caches are loaded. A load that stalls fails startup with a `TimeoutException` naming the caches still waiting, when the host's startup token fires.
+
+To wait for the load somewhere else — a host that starts its hosted services concurrently, or a test that builds the provider itself — await it explicitly:
 
 ```csharp
 var host = builder.Build();
@@ -181,8 +183,8 @@ await host.RunAsync();
 
 ```csharp
 services.AddHealthChecks()
-    .AddPragueKafkaLiveness()       // tag: "live"
-    .AddPragueKafkaReadiness();     // tag: "ready"
+    .AddPragueKafkaLiveness(tags: ["live"])     // "prague-kafka-live", Unhealthy on failure
+    .AddPragueKafkaReadiness(tags: ["ready"]);  // "prague-kafka-ready", Degraded on failure
 
 services.Configure<KafkaCachesHealthOptions>(o => {
     o.PollLoopHeartbeatTimeout   = TimeSpan.FromSeconds(3);   // liveness
@@ -196,21 +198,24 @@ services.Configure<KafkaCachesHealthOptions>(o => {
 
 ## Producer
 
-The DI registration also wires a `KafkaCacheProducer`:
+`AddKafkaCaches` also registers a `KafkaCacheProducer` per configuration section, as a **keyed** singleton under the section name (`"kafkaCaches"` by default) — there is no unkeyed registration, so inject it with `[FromKeyedServices]`:
 
 ```csharp
-public sealed class OrderService
+public sealed class OrderService([FromKeyedServices("kafkaCaches")] KafkaCacheProducer producer)
 {
-    private readonly KafkaCacheProducer _producer;
-    public OrderService(KafkaCacheProducer producer) => _producer = producer;
-
     public void Place(Order o)
     {
-        _producer.Produce("orders", o.OrderId, o);   // upsert
-        // _producer.Delete("orders", o.OrderId);    // tombstone
+        producer.Produce("orders", o.OrderId, o);   // upsert
+        // producer.Delete("orders", o.OrderId);    // tombstone
     }
 }
 ```
+
+`Produce` takes any `[DataCache]` type (it needs the generated `IEnrichable<T>`); the topic does not have to be one this process consumes. A section with no cache at all is a producer-only registration: its consumer subscribes to nothing and its initial load completes at once.
+
+The producer is fire-and-forget. `Produce` and `Delete` return once the message is queued in librdkafka: there is no delivery report and no awaitable result, and a broker-side failure is only logged. It is built from the section's `ClientSettings` (the same dictionary the consumer uses) with gzip compression and topic auto-creation off; acks, idempotence and retries are librdkafka's defaults unless `ClientSettings` sets them. Only a full local queue (`Local_QueueFull`) is retried, up to five times with a short backoff, before it throws. `Dispose` flushes; after it, `Produce` and `Delete` do nothing.
+
+When a cache is registered with `AddCache` (not `AddInternalCache`), the generated `CacheMarshall.Produce(cache, key, value)` / `CacheMarshall.Delete(cache, key)` and `cache.AddOrUpdateAndProduce(value)` use that cache's producer and topic, so no topic string is needed.
 
 The producer always writes — there is no producer-side dedup. If you need it, consult `cache.Cache.TryGet(...)` before calling `Produce`.
 
@@ -230,19 +235,12 @@ services.AddKafkaCaches(
 
 The lambda's input is the default Prague composite (`StringInterningFormatter` + `PragueDateTimeResolver` + `TypelessContractlessStandardResolver`); return whatever composite you want active for SerDe.
 
-## Testing without a broker
+## Testing
 
-Use `Prague.Kafka.TestAdaptor`:
+There is no in-memory broker substitute (the former `Prague.Kafka.TestAdaptor` was removed). Test against a real broker — Prague's own integration tests use Testcontainers. Two things to set up:
 
-```csharp
-services.AddKafkaCacheTestCluster();
-
-// in a test:
-var provider = host.Services.GetRequiredService<IKafkaCacheTestBuilderProvider>();
-provider.InjectDump("fixtures/orders.pkd");   // replay a MessagePack dump + EOF
-```
-
-The dump format is the same one `cache.CreateDump(path)` produces in production — round-trip safe.
+- **Give each consumer under test its own `group.id`** (`ClientSettings["group.id"]`). The default group id is the process's instance id, shared by every Prague consumer in the process, so two providers built in one test run would otherwise join one group and split the partitions between them.
+- **A process does not consume what it produced.** The self-filter drops every message stamped with this process's `X-Producer-Id`, from any provider in the process. To load a cache with what code under test produced in the same process, read the raw messages and re-produce them without that header, or produce the fixtures with a plain Confluent producer.
 
 ## Next
 

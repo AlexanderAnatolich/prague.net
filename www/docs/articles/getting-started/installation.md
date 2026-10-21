@@ -18,14 +18,12 @@ title: Installation
 | `Prague.Attributes` | The user-facing attribute set (`[DataCache]`, `[DataCacheKey]`, `[DataCacheIndex]`, etc.). |
 | `Prague.Codegen` | Roslyn analyzer + source generator. Referenced as an analyzer so its types do not appear in your output. |
 | `Prague.Kafka` | Kafka consumer/producer wiring, filters, change detection, OpenTelemetry. Optional. |
-| `Prague.Kafka.TestAdaptor` | In-memory Kafka substitute for unit and integration tests. Optional. |
 
 ## Install
 
 ```bash
 dotnet add package Prague
 dotnet add package Prague.Kafka          # if you wire to a real broker
-dotnet add package Prague.Kafka.TestAdaptor --version=*-* # tests only
 ```
 
 ## Project hygiene

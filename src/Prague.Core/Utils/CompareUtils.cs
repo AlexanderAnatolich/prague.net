@@ -46,6 +46,22 @@ public static class CompareUtils {
 	}
 
 	/// <summary>
+	/// Dictionary comparison with a per-value equality, for values that are themselves containers (the generated code
+	/// compares those by content, level by level).
+	/// </summary>
+	public static bool CompareDictionaries<TKey, TValue>(IDictionary<TKey, TValue> left, IDictionary<TKey, TValue> right,
+		Func<TValue, TValue, bool> valueEquals)
+		where TKey : notnull {
+		if (left.Count != right.Count) return false;
+
+		foreach (var kvp in left) {
+			if (!right.TryGetValue(kvp.Key, out var rightValue)) return false;
+			if (!valueEquals(kvp.Value, rightValue)) return false;
+		}
+		return true;
+	}
+
+	/// <summary>
 	/// Optimized dictionary comparison using CollectionsMarshal for zero-allocation lookups.
 	/// Uses vectorized byte comparison for large unmanaged value types.
 	/// </summary>
