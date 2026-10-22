@@ -45,11 +45,11 @@ query.WithEmail(new List<string> { "alice@example.com", "bob@example.com" });
 
 ```csharp
 query.WithCreatedAtUnixMs(q => q.Gte(yesterdayMs));
-query.WithCreatedAtUnixMs(q => q.Between(startMs, endMs));
+query.WithCreatedAtUnixMs(q => q.Gte(startMs).Lt(endMs));
 query.WithCreatedAtUnixMs(q => q.Lt(nowMs));
 ```
 
-The sub-builder operators are `Eq`, `Gt`, `Gte`, `Lt`, `Lte`, `Between`.
+The sub-builder is type-state: open with `Gt` / `Gte` or `Lt` / `Lte`, then optionally close the other side. There is no `Between` or `Eq`; a disjunction is the query-level `.Or(...)`.
 
 ## Symmetric variants
 

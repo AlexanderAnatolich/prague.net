@@ -88,7 +88,7 @@ using var rows = bookCache.Query()
     .ExecutePooled();
 
 foreach (var row in rows)
-    Console.WriteLine($"{row.Left.Title} by {row.Right1?.Name ?? "unknown"}");
+    Console.WriteLine($"{row.Left.Title} by {row.Right?.Name ?? "unknown"}");
 ```
 
 `InnerJoinWithAuthor()` drops books whose author is missing:
@@ -99,7 +99,7 @@ using var rows = bookCache.Query()
     .ExecutePooled();
 ```
 
-Chained joins are supported up to 4 levels:
+Chained joins are supported up to 5 levels:
 
 ```csharp
 using var rows = orderCache.Query()
