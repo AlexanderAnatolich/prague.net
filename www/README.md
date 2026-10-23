@@ -43,14 +43,23 @@ npm run build     # dist/ — static HTML + one stylesheet
 
 # Docs (requires .NET 9 and .NET 10 SDKs, because the projects multi-target both)
 dotnet tool install -g docfx     # one-time
+www/docs/scripts/release-notes.sh   # generates articles/reference/release-notes.md from GitHub Releases
 cd www/docs
 docfx docfx.json --serve         # http://localhost:8080
 ```
+
+The release-notes page is not in git: `www/docs/scripts/release-notes.sh` (bash + python3, no other
+dependencies) writes it from the GitHub Releases of `nanov/prague.net`, newest first by semantic version,
+one section per release with its notes and a compare link to the previous tag. Run it before a docs
+build; if you skip it DocFX still succeeds but warns `InvalidFileLink` for the `toc.yml` entry and the
+sidebar link is dead. It uses `GH_TOKEN` when set (CI passes `github.token`; locally
+`GH_TOKEN=$(gh auth token)`), and works anonymously otherwise at GitHub's 60-requests-per-hour limit.
 
 ## Build everything (mirrors the CI pipeline)
 
 ```bash
 (cd www/site && npm ci && npm run build)
+GH_TOKEN=$(gh auth token) www/docs/scripts/release-notes.sh      # articles/reference/release-notes.md (gitignored)
 (cd www/docs && docfx docfx.json --metadata _pragueVersion=$(gh release view --json tagName --jq '.tagName | ltrimstr("v")'))
 rm -rf www/_dist && mkdir -p www/_dist/docs
 cp -R www/site/dist/. www/_dist/
