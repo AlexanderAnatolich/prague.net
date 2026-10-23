@@ -43,15 +43,25 @@ npm run build     # dist/ — static HTML + one stylesheet
 
 # Docs (requires .NET 9 and .NET 10 SDKs, because the projects multi-target both)
 dotnet tool install -g docfx     # one-time
+www/docs/scripts/release-notes.sh   # generates articles/reference/release-notes.md from GitHub Releases
 cd www/docs
 docfx docfx.json --serve         # http://localhost:8080
 ```
+
+The release-notes page is not in git: `www/docs/scripts/release-notes.sh` (bash + python3, no other
+dependencies) writes it from the GitHub Releases of `nanov/prague.net`, newest first by semantic version,
+one section per release with its notes and a compare link to the previous tag. Run it before a docs
+build; if you skip it DocFX still succeeds but warns `InvalidFileLink` for the `toc.yml` entry and the
+sidebar link is dead. It uses `GH_TOKEN` when set (CI passes `github.token`; locally
+`GH_TOKEN=$(gh auth token)`), and works anonymously otherwise at GitHub's 60-requests-per-hour limit.
 
 ## Build everything (mirrors the CI pipeline)
 
 ```bash
 (cd www/site && npm ci && npm run build)
+GH_TOKEN=$(gh auth token) www/docs/scripts/release-notes.sh      # articles/reference/release-notes.md (gitignored)
 (cd www/docs && docfx docfx.json --metadata _pragueVersion=$(gh release view --json tagName --jq '.tagName | ltrimstr("v")'))
+python3 www/docs/scripts/embed-svg-fonts.py www/docs/_site/images   # inline Excalifont into the diagram SVGs
 rm -rf www/_dist && mkdir -p www/_dist/docs
 cp -R www/site/dist/. www/_dist/
 cp -R www/docs/_site/. www/_dist/docs/
@@ -83,6 +93,13 @@ produced are kept in `www/site/src/assets/images/` and are not shipped. The DocF
 (`www/docs/templates/prague/public/main.css`) re-uses the same color tokens (`--brand-orange #F27D26`,
 `--brand-black #141414`) and fonts so the two halves of the site feel like one.
 
+## Diagrams
+
+Diagrams are Excalidraw files in `www/docs/images/*.excalidraw`, drawn with the `excalidraw-architect`
+MCP tooling and exported next to the source as `*.svg` (commit both). The export only names the
+Excalifont typeface; `scripts/embed-svg-fonts.py` inlines the Latin subset from `www/docs/fonts/` into
+the built SVGs so they look the same in every browser (see `www/docs/fonts/README.md`).
+
 ## Adding a doc article
 
 1. Create the Markdown file in `www/docs/articles/` with `title:` and `description:` front matter and a
@@ -96,3 +113,28 @@ Edit `www/site/src/App.tsx`. It is rendered once at build time with `renderToSta
 stay free of hooks, effects and event handlers; use CSS for motion (and respect
 `prefers-reduced-motion`). `import.meta.env.BASE_URL` resolves to `/` in dev and `/prague.net/` in
 production builds — use it for any cross-page link (e.g. `${BASE_URL}docs/`).
+
+## Code samples are compiled
+
+Every C# block on a docs page is pulled out of `samples/Prague.Samples/`, an NUnit project that
+`dotnet test Prague.Tests.slnf` builds and runs in CI, so an example cannot stop compiling or stop
+being true without a test going red. The articles contain no hand-written C#.
+
+- `samples/Prague.Samples/Models/` is the one domain every page uses (`Order`, `Customer`, `OrderLine`,
+  `Shipment`, `Product`, `CustomerActivityIndex`). Add attributes to these models rather than inventing
+  new entities; each file opens with a `// docs:` line saying what it demonstrates.
+- One folder per docs section (`GettingStarted/`, …), one test class per article. Each block is a
+  `#region kebab-name` … `#endregion` containing exactly the code the reader should see; assertions and
+  set-up stay outside the region. Region names are unique within a file and describe the block, not
+  the test (`write-and-query`, `direct-index-access`).
+- A page references a region with DocFX's code-snippet syntax, relative to the article:
+
+  ```markdown
+  [!code-csharp[](../../../../samples/Prague.Samples/GettingStarted/QuickStart.cs#write-and-query)]
+  ```
+
+  DocFX reads the file from disk at build time (paths outside `www/docs` are fine), strips the
+  `#region` lines and renders the body with the common indentation removed. Rename the region and the
+  build warns `codesnippet-not-found`, so run `docfx build docfx.json` after moving one.
+- Run the samples alone with `dotnet test samples/Prague.Samples`. Every test must pass on both target
+  frameworks before the page that cites it is merged.

@@ -8,6 +8,10 @@
       href: articles/getting-started/installation.md
     - name: Quick Start
       href: articles/getting-started/quick-start.md
+- name: Tutorial
+  items:
+    - name: Build an Order Service
+      href: articles/tutorial/build-an-order-service.md
 - name: Core Concepts
   items:
     - name: Index Types
@@ -22,7 +26,27 @@
       href: articles/core-concepts/conditional-updates.md
     - name: Joins
       href: articles/core-concepts/joins.md
-- name: Advanced
+- name: How-to Guides
+  items:
+    - name: Page an API
+      href: articles/how-to/page-an-api.md
+    - name: Incremental Sync
+      href: articles/how-to/incremental-sync.md
+    - name: Write a Filter
+      href: articles/how-to/write-a-filter.md
+    - name: React to Changes
+      href: articles/how-to/react-to-changes.md
+    - name: Host with DI
+      href: articles/how-to/host-with-di.md
+    - name: Inspect over HTTP
+      href: articles/how-to/inspect-over-http.md
+    - name: Map, Clone, Batch
+      href: articles/how-to/map-clone-batch.md
+    - name: Test without a Broker
+      href: articles/how-to/test-without-a-broker.md
+    - name: Health and Metrics
+      href: articles/how-to/health-and-metrics.md
+- name: Kafka and Operations
   items:
     - name: Kafka Integration
       href: articles/advanced/kafka-integration.md
@@ -30,6 +54,24 @@
       href: articles/advanced/global-last-update-index.md
     - name: Performance Tuning
       href: articles/advanced/performance-tuning.md
+- name: Explanation
+  items:
+    - name: How Prague Works
+      href: articles/explanation/architecture.md
+    - name: The Concurrency Contract
+      href: articles/explanation/concurrency.md
+    - name: Ordering and Determinism
+      href: articles/explanation/ordering-and-determinism.md
+- name: Reference
+  items:
+    - name: Attributes and Generated Code
+      href: articles/reference/attributes.md
+    - name: Generator Diagnostics
+      href: articles/reference/diagnostics.md
+    - name: Benchmarks
+      href: articles/reference/benchmarks.md
+    - name: Release Notes
+      href: articles/reference/release-notes.md
 - name: API Reference
   href: api/
   topicHref: api/index.md

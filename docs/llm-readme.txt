@@ -86,9 +86,9 @@ Attributes (all in namespace Prague.Core):
                                                 `public static readonly IComparer<T> NameComparer` on
                                                 the wrapper. ":1" asc, ":-1" desc.
   [DataCacheIgnoreEquality]                     property. Excluded from CacheEquals/CacheGetHashCode.
-  [DataCacheTopic] / [DataCacheTopic("orders.{env}")]   class. Emits `public const string
-                                                TopicNameTemplate`. Default template "Cache.{ClassName}".
-                                                `{name}` placeholders resolve from KafkaCachesOptions.Vars.
+  [DataCacheTopic] / [DataCacheTopic("orders.[v:env]")] class. Emits `public const string
+                                                TopicNameTemplate`. Default template "Cache.<ClassName>".
+                                                `[v:name]` resolves from KafkaCachesOptions.Vars, `[e:NAME]` from env vars.
   [DataCacheFromTimestamp]                      property (long). Filled from the Kafka message timestamp.
   [DataCacheHeader("header-name")]              property. Filled from a Kafka header (MessagePack-first
                                                 numeric SerDe for int/long).
@@ -285,7 +285,7 @@ global indices between the registered caches.
               .WithKeyFilter(static sp => <state>, static (state, k) => ...)     // DI state, resolved ONCE at build
               .WithValueFilter<IPolicy>(static (policy, o) => ...)             // TService must be spelled
               .WithAfterHandler<OrderProjector>();                             // ICacheAfterHandler<string,Order>
-          b.AddCache<CustomerCache, int, Customer>("customers-{env}");        // explicit topic
+          b.AddCache<CustomerCache, int, Customer>("customers-[v:env]");      // explicit topic
           b.AddCache<X, K, V>(sp => <topic from options>);
           b.AddInternalCache<ViewCache, int, View>();                           // in registry, not consumed
       },
@@ -343,7 +343,7 @@ are the floor under slot sizing and are expected to be false / 0.
   `cache.Cache.TryGetValues(...)`                          → `cache.Cache.TryGet(keys, span)` / `TryGet(keys)`
   `.SortByPriority()`                                      → `.Sort(OrderCache.ByPriorityComparer)` or SortBounded
   `OrderCache.Topic`                                       → `OrderCache.TopicNameTemplate`
-  `[DataCacheTopic("a.[v:version]")]`                      → `[DataCacheTopic("a.{version}")]` + o.Vars["version"]
+  `[DataCacheTopic("a.{version}")]`                        → `[DataCacheTopic("a.[v:version]")]` + o.Vars["version"]
   `services.AddPragueKafka(...).AddConsumer(...)`          → `services.AddKafkaCaches(o => ..., b => b.AddCache<..>())`
   `b.AddOrderCache()`                                      → `b.AddCache<OrderCache, string, Order>()`
   `Prepare<MyArgsClass>()`                                 → make TArgs a struct / record struct / tuple

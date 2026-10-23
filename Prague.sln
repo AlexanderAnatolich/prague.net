@@ -45,6 +45,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Prague.Baseline.Bdn", "perf
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Prague.Baseline.Harness", "perf\Prague.Baseline.Harness\Prague.Baseline.Harness.csproj", "{5C80D8BE-BED5-400D-BC60-A47D3916D798}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "samples", "samples", "{5D20AA90-6969-D8BD-9DCD-8634F4692FDA}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Prague.Samples", "samples\Prague.Samples\Prague.Samples.csproj", "{ACA82C20-1E93-47DA-946E-197EF3C21A24}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -259,6 +263,18 @@ Global
 		{5C80D8BE-BED5-400D-BC60-A47D3916D798}.Release|x64.Build.0 = Release|Any CPU
 		{5C80D8BE-BED5-400D-BC60-A47D3916D798}.Release|x86.ActiveCfg = Release|Any CPU
 		{5C80D8BE-BED5-400D-BC60-A47D3916D798}.Release|x86.Build.0 = Release|Any CPU
+		{ACA82C20-1E93-47DA-946E-197EF3C21A24}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{ACA82C20-1E93-47DA-946E-197EF3C21A24}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{ACA82C20-1E93-47DA-946E-197EF3C21A24}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{ACA82C20-1E93-47DA-946E-197EF3C21A24}.Debug|x64.Build.0 = Debug|Any CPU
+		{ACA82C20-1E93-47DA-946E-197EF3C21A24}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{ACA82C20-1E93-47DA-946E-197EF3C21A24}.Debug|x86.Build.0 = Debug|Any CPU
+		{ACA82C20-1E93-47DA-946E-197EF3C21A24}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{ACA82C20-1E93-47DA-946E-197EF3C21A24}.Release|Any CPU.Build.0 = Release|Any CPU
+		{ACA82C20-1E93-47DA-946E-197EF3C21A24}.Release|x64.ActiveCfg = Release|Any CPU
+		{ACA82C20-1E93-47DA-946E-197EF3C21A24}.Release|x64.Build.0 = Release|Any CPU
+		{ACA82C20-1E93-47DA-946E-197EF3C21A24}.Release|x86.ActiveCfg = Release|Any CPU
+		{ACA82C20-1E93-47DA-946E-197EF3C21A24}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -281,5 +297,6 @@ Global
 		{FF90269E-10CE-406B-A8F9-998535C0A9D9} = {5081215B-A8D2-606B-0497-D199D4ED2BF3}
 		{0CCCF7CF-48DF-4D89-B770-5A121404C425} = {5081215B-A8D2-606B-0497-D199D4ED2BF3}
 		{5C80D8BE-BED5-400D-BC60-A47D3916D798} = {5081215B-A8D2-606B-0497-D199D4ED2BF3}
+		{ACA82C20-1E93-47DA-946E-197EF3C21A24} = {5D20AA90-6969-D8BD-9DCD-8634F4692FDA}
 	EndGlobalSection
 EndGlobal

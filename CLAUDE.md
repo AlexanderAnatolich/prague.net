@@ -47,6 +47,9 @@ tests/        NUnit projects per layer (Core, Generated, Kafka, Kafka.Integratio
               solution filter. The generated DI surface (AddKafkaCaches) is covered by
               Kafka.IntegrationTests. Fill it or delete it; do not re-add it to Tests.slnf empty.
 benchmarks/   Prague.Benchmarks (BenchmarkDotNet) + RESULTS.MD
+samples/      Prague.Samples — NUnit project that is the single source of every code block on the docs
+              site: www/docs articles pull `#region`s out of it with `[!code-csharp[](…#region)]`, so a
+              sample that stops compiling or passing breaks `dotnet test Prague.Tests.slnf` → www/README.md
 www/ docs/    Public docs site + superpowers specs/plans
 perf/         Regression tripwire: Prague.Baseline.{Bdn,Harness,Scenario}, compare.py diffs
               against perf/baseline/<machine-class>.json → perf/README.md

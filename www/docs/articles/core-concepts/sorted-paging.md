@@ -6,23 +6,12 @@ description: Sort versus SortBounded in Prague queries - when each plan wins, ho
 # Sorted Paging
 
 Sorted queries come in two execution plans, and you choose one. Nothing is inferred from the
-arguments, because the plans order comparer-equal rows differently — so which one runs has to be
-your decision, not the engine's. Both accept any `IComparer<T>`, including the `XxxCache.{Name}Comparer`
-fields emitted from `[DataCacheSort]`.
+arguments: the right plan depends on how much of the matched result you are about to take, which
+only you know. Both accept any `IComparer<T>`, including the `XxxCache.{Name}Comparer` fields
+emitted from `[DataCacheSort]`. The blocks below run against a 120-order sample cache and are
+asserted in `samples/Prague.Samples/Concepts/SortedPaging.cs`.
 
-```csharp
-// Paging a large result: select just the page, never sort the rest.
-using var page = orderCache.Query()
-    .WithCustomerId(42)
-    .SortBounded(new ByCreatedAtDesc())
-    .ExecutePooled(skip: 40, take: 20);
-
-// Materialising a whole result: classic full sort.
-using var all = orderCache.Query()
-    .WithCustomerId(42)
-    .Sort(new ByCreatedAtDesc())
-    .ExecutePooled();
-```
+[!code-csharp[](../../../../samples/Prague.Samples/Concepts/SortedPaging.cs#sort-vs-sort-bounded)]
 
 ## Which one
 
@@ -31,7 +20,6 @@ using var all = orderCache.Query()
 | paging — `take` is a small slice of what matched (tens to a few hundred rows) | `SortBounded` | 2.3–8.6× faster; `skip` is irrelevant, so deep pages win too |
 | taking a large chunk — `take` covers roughly a quarter or more of what matched | `Sort` | `SortBounded` is 1.3–2.7× slower there: no sort left to skip, only overhead |
 | calling `Execute*()` with no page at all | `Sort` | unbounded always runs the classic sort anyway |
-| paging with a comparer that can **tie** | `SortBounded` — required | it breaks ties by encounter order, so consecutive pages partition the result |
 
 The deciding variable is **`take` as a fraction of the matched rows** — not `skip`, and not the cache
 size.
@@ -58,39 +46,47 @@ Chain shapes the bounded plan cannot handle — a comparer over joined fields, a
 join, an inner join that cannot narrow — fall back to the classic pipeline automatically, with
 identical results.
 
-## Ties decide it, not speed
+## Ties
 
-A comparer that returns `0` for two distinct rows leaves their relative order **unspecified**. Paging
-with `Sort` under such a comparer can therefore repeat a row on one page and drop it from the next —
-exactly like SQL `ORDER BY … LIMIT/OFFSET` without a unique tiebreaker.
+A comparer that returns `0` for two distinct rows leaves nothing to chance here: **both plans are
+stable**. `Sort` keeps comparer-equal rows in encounter order; `SortBounded` carries each row's
+encounter ordinal and breaks ties by it. The two plans therefore return the same rows in the same
+order for the same query, and consecutive pages of an unchanged result partition it with no
+duplicates and no gaps — under either plan. The sample sorts by `Status`, which ties thirty ways:
 
-Two ways out:
+[!code-csharp[](../../../../samples/Prague.Samples/Concepts/SortedPaging.cs#tied-comparer)]
 
-1. **Use `SortBounded`.** It carries each row's encounter ordinal and breaks ties by it, so
-   consecutive pages of an unchanged result partition it with no duplicates and no gaps.
-2. **Make the comparer total** — fall back to the primary key when the primary keys differ:
+[!code-csharp[](../../../../samples/Prague.Samples/Concepts/SortedPaging.cs#tied-comparer-plans-agree)]
 
-   ```csharp
-   public int Compare(Order? x, Order? y) {
-       var byDate = y!.CreatedAt.CompareTo(x!.CreatedAt);
-       return byDate != 0 ? byDate : x.Id.CompareTo(y.Id);   // total: no ties between distinct rows
-   }
-   ```
+[!code-csharp[](../../../../samples/Prague.Samples/Concepts/SortedPaging.cs#pages-partition)]
 
-With a total comparer both plans return byte-identical output — a total order has exactly one sorted
-permutation — and the choice becomes purely a performance one.
+Encounter order is the order the candidate set yields rows, which for one cache and one query is
+repeatable but is not something you can predict or build on. If the order within a tie group matters
+to a reader, make the comparer **total** — fall back to the primary key when the sort key ties:
+
+[!code-csharp[](../../../../samples/Prague.Samples/Concepts/SortedPaging.cs#total-comparer)]
+
+A total order has exactly one sorted permutation, so the page is then defined by the data alone:
+
+[!code-csharp[](../../../../samples/Prague.Samples/Concepts/SortedPaging.cs#total-comparer-pages)]
 
 Neither plan gives you snapshot isolation: pages partition an *unchanged* result. Writes landing
 between two page queries can still move a row across the boundary.
 
-After `Sort` / `SortBounded` only the outer, unfiltered `JoinWith{T}()` binds. On a [frozen query](prepared-queries.md)
-the ties of a sorted result are unspecified; a total comparer gives byte-identical pages there too.
+After `Sort` / `SortBounded` only the outer, unfiltered `JoinWith{T}()` binds. On a
+[frozen query](prepared-queries.md) the seed lane — and so the encounter order — is chosen per
+execution, which leaves the order inside a tie group unspecified there; a total comparer gives
+byte-identical pages on the frozen path too, and `FrozenOptions.PreserveEagerOrder` pins the
+ordinals back to the eager ones.
 
 ## Allocation
 
 `SortBounded` on a page allocates **nothing**. The comparer reaches the selection code as a struct
 type parameter, so there is no `Comparison<T>` delegate and no boxed `IComparer<T>`, and the heap
-buffer is pooled. `Sort` costs roughly 88 B/query on a simple shape and 168 B on a joined one.
+buffer is pooled. `Sort` is 0 B per query with a struct comparer as well: the comparer travels as a
+type parameter through every frame and the sort runs over a pooled index array. Passing a reference
+comparer — the generated `{Name}Comparer` fields are `IComparer<T>` — trades that for an interface
+call per comparison, still with no per-row allocation.
 
 ## Measured
 

@@ -50,7 +50,7 @@ foreach (var row in rows) {
 }`;
 
 const stats = [
-	{ value: "15.9M+", label: "reads per second, pooled queries, 10 reader threads + writers" },
+	{ value: "11M+", label: "reads per second, pooled 3-level join, 10 reader threads + 2 writers" },
 	{ value: "< 100 ns", label: "indexed lookup" },
 	{ value: "18 ns", label: "frozen unique-key point lookup" },
 	{ value: "0 B", label: "per execution on pooled and frozen paths" },
@@ -166,7 +166,7 @@ export default function App() {
 							</div>
 							<p className="mt-4 sm:mt-0 sm:absolute sm:bottom-0 sm:right-0 bg-brand-orange text-white p-6 sm:p-8 rounded-3xl shadow-xl sm:rotate-3 inline-block">
 								<span className="block text-[11px] font-mono uppercase tracking-[0.2em] mb-1">Concurrent read throughput</span>
-								<span className="block text-4xl font-black tracking-tight leading-none italic">15.9M+</span>
+								<span className="block text-4xl font-black tracking-tight leading-none italic">11M+</span>
 								<span className="block text-sm font-bold mt-1">reads per second</span>
 							</p>
 						</div>

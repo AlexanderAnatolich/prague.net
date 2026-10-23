@@ -4194,8 +4194,12 @@ public class CacheGenerator : IIncrementalGenerator {
 			var fullTypeName = typeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat).TrimEnd('?');
 			var typeName = typeSymbol.Name;
 
-			// Get all public properties including inherited ones
-			var properties = GetAllProperties(typeSymbol);
+			// Get all public properties including inherited ones, minus the ones excluded from equality:
+			// a [DataCacheIgnoreEquality] property must not make AddOrUpdate report Update (conditional updates).
+			var properties = GetAllProperties(typeSymbol)
+				.Where(p => !p.GetAttributes().Any(a =>
+					a.AttributeClass?.ToDisplayString() == "Prague.Core.DataCacheIgnoreEqualityAttribute"))
+				.ToList();
 
 			if (properties.Count == 0)
 				continue;

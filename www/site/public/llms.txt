@@ -11,19 +11,57 @@ Repository: https://github.com/nanov/prague.net — License: MIT.
 
 ## Docs
 
+Start here:
+
 - [Introduction](https://nanov.github.io/prague.net/docs/articles/getting-started/introduction.html): what Prague is and is not, the data flow.
 - [Installation](https://nanov.github.io/prague.net/docs/articles/getting-started/installation.html): packages and project setup.
 - [Quick Start](https://nanov.github.io/prague.net/docs/articles/getting-started/quick-start.html): define an entity, create a cache, write, query.
+- [Tutorial: Build an Order Service](https://nanov.github.io/prague.net/docs/articles/tutorial/build-an-order-service.html): thirty minutes from annotated POCOs to an HTTP service that queries, joins and pages orders out of Kafka-fed caches, reacts to live shipments and reports health.
+
+Core concepts:
+
 - [Index Types](https://nanov.github.io/prague.net/docs/articles/core-concepts/index-types.html): Unique, Many, Range, symmetric and key-set indices.
 - [Query Engine](https://nanov.github.io/prague.net/docs/articles/core-concepts/query-engine.html): fluent API, index intersection, OR clauses, pooled vs allocating execution.
 - [Sorted Paging](https://nanov.github.io/prague.net/docs/articles/core-concepts/sorted-paging.html): Sort vs SortBounded plans.
 - [Prepared and Frozen Queries](https://nanov.github.io/prague.net/docs/articles/core-concepts/prepared-queries.html): Prepare, Build, BuildFrozen, executors, ordering contract.
 - [Conditional Updates](https://nanov.github.io/prague.net/docs/articles/core-concepts/conditional-updates.html): generated deep equality and UpdateType.
 - [Joins](https://nanov.github.io/prague.net/docs/articles/core-concepts/joins.html): foreign-key driven 1:1 and 1:N joins with pooled results.
+
+How-to guides (task-shaped, every code block compiled and tested):
+
+- [Page an API](https://nanov.github.io/prague.net/docs/articles/how-to/page-an-api.html): sorted, paged list endpoint with offset or cursor pages, disjoint-page comparer, DTOs, frozen query for the hot path.
+- [Incremental Sync](https://nanov.github.io/prague.net/docs/articles/how-to/incremental-sync.html): "what changed since my watermark" from a global last-update index, across caches, with ties and deletes.
+- [Write a Filter](https://nanov.github.io/prague.net/docs/articles/how-to/write-a-filter.html): header, key and value filters, treatAsDelete, predicates with DI state.
+- [React to Changes](https://nanov.github.io/prague.net/docs/articles/how-to/react-to-changes.html): ICacheAfterHandler, each UpdateType, what makes a write Same rather than Update.
+- [Host with DI](https://nanov.github.io/prague.net/docs/articles/how-to/host-with-di.html): generic host or ASP.NET Core registration, options binding, topic placeholders, several clusters, clean shutdown.
+- [Inspect over HTTP](https://nanov.github.io/prague.net/docs/articles/how-to/inspect-over-http.html): Prague.Api endpoints, statistics, query-string syntax, keeping them off the public surface.
+- [Map, Clone, Batch](https://nanov.github.io/prague.net/docs/articles/how-to/map-clone-batch.html): project results without a second buffer, private copies of rows, many keys in one call.
+- [Test without a Broker](https://nanov.github.io/prague.net/docs/articles/how-to/test-without-a-broker.html): construct caches directly or via the registry, seed with AddOrUpdate, drive after-handlers by hand.
+- [Health and Metrics](https://nanov.github.io/prague.net/docs/articles/how-to/health-and-metrics.html): liveness and readiness checks, failure reasons, thresholds, the Prague.Kafka meter through OpenTelemetry.
+
+Kafka and operations:
+
 - [Kafka Integration](https://nanov.github.io/prague.net/docs/articles/advanced/kafka-integration.html): topics, filters, after-handlers, health checks, OpenTelemetry.
 - [Global Last Update Index](https://nanov.github.io/prague.net/docs/articles/advanced/global-last-update-index.html): cross-cache change tracking for incremental sync.
 - [Performance Tuning](https://nanov.github.io/prague.net/docs/articles/advanced/performance-tuning.html): hot-path guidance.
+
+Explanation:
+
+- [How Prague Works](https://nanov.github.io/prague.net/docs/articles/explanation/architecture.html): codegen output, InMemoryDataCache storage, index structures, eager planning, frozen executors, QueryResults ownership, allocation table.
+- [The Concurrency Contract](https://nanov.github.io/prague.net/docs/articles/explanation/concurrency.html): one writer / lock-free readers, observable mid-write states, thread-sharing rules, visibility.
+- [Ordering and Determinism](https://nanov.github.io/prague.net/docs/articles/explanation/ordering-and-determinism.html): eager first-lane order, stable Sort/SortBounded, frozen ordering contract, PreserveEagerOrder, join row order.
+
+Reference:
+
+- [Attributes and Generated Code](https://nanov.github.io/prague.net/docs/articles/reference/attributes.html): every attribute, its parameters and defaults, and exactly what the generator emits.
+- [Generator Diagnostics](https://nanov.github.io/prague.net/docs/articles/reference/diagnostics.html): all CACHExxx / DATACACHExxx diagnostics with examples and fixes, plus compiler errors that have no diagnostic.
+- [Benchmarks](https://nanov.github.io/prague.net/docs/articles/reference/benchmarks.html): latest measured numbers per benchmark family, traced to the log, with the reproduce command.
+- [Release Notes](https://nanov.github.io/prague.net/docs/articles/reference/release-notes.html): every release newest first, generated from GitHub Releases at build time.
 - [API Reference](https://nanov.github.io/prague.net/docs/api/index.html): generated from XML doc comments.
+
+## Compiled samples
+
+- [samples/Prague.Samples](https://github.com/nanov/prague.net/tree/main/samples/Prague.Samples): the NUnit project every documentation code block is pulled from; clone it to run the examples.
 
 ## Optional
 

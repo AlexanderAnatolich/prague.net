@@ -82,7 +82,7 @@ short-circuits on the first empty set — no further index walks, no allocations
 ## ✨ Why Prague?
 
 ### **🚀 Extreme Performance**
-- **15.9M+ reads/sec** with pooled queries (concurrent benchmark)
+- **11M+ reads/sec** with pooled queries (concurrent 3-level join, 10 readers + 2 writers; `HeavyJoinPooledBenchmarks`, see RESULTS.MD)
 - **<100 ns** indexed lookups; **18 ns** for a frozen unique-key point lookup
 - **0 B per execution** on pooled and frozen paths
 - **3–36×** over the eager builder with `BuildFrozen()` on indexed shapes
@@ -147,7 +147,7 @@ Every package multi-targets `net9.0;net10.0`. Published versions are on the `0.6
 using Prague.Core;
 
 [DataCache]                                        // optional: [DataCache("OrdersCache")] to name the class
-[DataCacheTopic("orders.events")]                  // optional: default template is "Cache.{ClassName}"
+[DataCacheTopic("orders.events")]                  // optional: default template is "Cache.<ClassName>"
 [DataCacheSort("ByPriority", "Priority:1", "CreatedAt:-1")]
 public partial class Order {                       // must be partial
     [DataCacheKey]
@@ -615,13 +615,13 @@ tracks only entities the filter admits, re-evaluated on every update.
 ### **Topics**
 
 ```csharp
-[DataCacheTopic("orders.{env}")]            // default template without the attribute: "Cache.{ClassName}"
+[DataCacheTopic("orders.[v:env]")]          // default template without the attribute: "Cache.<ClassName>"
 public partial class Order { … }
 
-OrderCache.TopicNameTemplate                // "orders.{env}" — compile-time constant
+OrderCache.TopicNameTemplate                // "orders.[v:env]" — compile-time constant
 ```
 
-`{name}` placeholders resolve against `KafkaCachesOptions.Vars` at registration time.
+`[v:name]` placeholders resolve against `KafkaCachesOptions.Vars` and `[e:NAME]` against environment variables at registration time; unknown names are left verbatim.
 
 ---
 
@@ -639,7 +639,7 @@ services.AddKafkaCaches(
             .WithHeaderEqualsFilter("tenant", "acme")
             .WithValueFilter(static o => o.Status == OrderStatus.Active, treatAsDelete: true)
             .WithAfterHandler<OrderProjector>();
-        b.AddCache<CustomerCache, int, Customer>("customers-{env}");  // explicit topic
+        b.AddCache<CustomerCache, int, Customer>("customers-[v:env]");  // explicit topic
         b.AddInternalCache<ViewCache, int, View>();                   // in the registry, not consumed
     });
 
@@ -864,18 +864,17 @@ zero-copy from the broker's buffer to your POCO.
 
 - **Docs site** — [nanov.github.io/prague.net](https://nanov.github.io/prague.net/): guides at [`/docs/`](https://nanov.github.io/prague.net/docs/),
   generated [API reference](https://nanov.github.io/prague.net/docs/api/index.html), and [`/llms.txt`](https://nanov.github.io/prague.net/llms.txt) for assistants.
-- **Docs site sources** — [`www/docs/`](www/docs/): [Introduction](www/docs/articles/getting-started/introduction.md)
-  · [Installation](www/docs/articles/getting-started/installation.md)
-  · [Quick Start](www/docs/articles/getting-started/quick-start.md)
-  · [Index Types](www/docs/articles/core-concepts/index-types.md)
-  · [Query Engine](www/docs/articles/core-concepts/query-engine.md)
-  · [Sorted Paging](www/docs/articles/core-concepts/sorted-paging.md)
-  · [Prepared and Frozen Queries](www/docs/articles/core-concepts/prepared-queries.md)
-  · [Conditional Updates](www/docs/articles/core-concepts/conditional-updates.md)
-  · [Joins](www/docs/articles/core-concepts/joins.md)
-  · [Kafka Integration](www/docs/articles/advanced/kafka-integration.md)
-  · [Global Last Update Index](www/docs/articles/advanced/global-last-update-index.md)
-  · [Performance Tuning](www/docs/articles/advanced/performance-tuning.md)
+- **Docs site sources** — [`www/docs/`](www/docs/), organised by what you are trying to do:
+  [Tutorial: Build an Order Service](www/docs/articles/tutorial/build-an-order-service.md)
+  · Core concepts ([Index Types](www/docs/articles/core-concepts/index-types.md), [Query Engine](www/docs/articles/core-concepts/query-engine.md),
+  [Sorted Paging](www/docs/articles/core-concepts/sorted-paging.md), [Prepared and Frozen Queries](www/docs/articles/core-concepts/prepared-queries.md),
+  [Conditional Updates](www/docs/articles/core-concepts/conditional-updates.md), [Joins](www/docs/articles/core-concepts/joins.md))
+  · [How-to guides](www/docs/articles/how-to/) (page an API, incremental sync, filters, after-handlers, DI hosting, HTTP inspection, testing, health and metrics)
+  · [Kafka Integration](www/docs/articles/advanced/kafka-integration.md), [Global Last Update Index](www/docs/articles/advanced/global-last-update-index.md), [Performance Tuning](www/docs/articles/advanced/performance-tuning.md)
+  · Explanation ([How Prague Works](www/docs/articles/explanation/architecture.md), [The Concurrency Contract](www/docs/articles/explanation/concurrency.md), [Ordering and Determinism](www/docs/articles/explanation/ordering-and-determinism.md))
+  · Reference ([Attributes and Generated Code](www/docs/articles/reference/attributes.md), [Generator Diagnostics](www/docs/articles/reference/diagnostics.md), [Benchmarks](www/docs/articles/reference/benchmarks.md)).
+- **Compiled samples** — [`samples/Prague.Samples/`](samples/Prague.Samples/): every code block on the docs site is a region of
+  this NUnit project and runs in CI, so the docs cannot drift from the library.
 - **For LLMs and coding assistants** — [`docs/llm-readme.txt`](docs/llm-readme.txt).
 - **Engineering notes** (how it works inside) — [`context/`](context/): `core.md`, `indexes.md`,
   `query.md`, `joins.md`, `collections.md`, `generated.md`, `kafka.md`, `kafka-filters.md`,
