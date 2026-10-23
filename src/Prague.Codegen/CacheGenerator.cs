@@ -2578,6 +2578,26 @@ public class CacheGenerator : IIncrementalGenerator {
 						});
 					});
 
+					// AddOrUpdateAndProduce(document, force): the same conditional local write, but the produce
+					// step is unconditional. Re-emits the current state onto the topic (a fresh compacted record,
+					// consumers that rebuild or join later see it) without pretending the local value changed.
+					w.Line();
+					w.Summary("Adds or updates a document in the cache and produces it to Kafka.",
+						"With <paramref name=\"force\"/> the message is produced even when the local write reported no change",
+						"(the document is cache-equal to the resident one); the local write itself stays conditional, and",
+						"consumers apply the record through their ordinary equality gate.");
+					w.Method($"public static void AddOrUpdateAndProduce(this {cacheFullName} cache, {typeName} document, bool force)", (ref CodeWriter w) => {
+						if (!string.IsNullOrEmpty(keyPropertyName))
+							w.Line($"var key = document.{keyPropertyName};");
+						else
+							w.Line("var key = document.GetKey();");
+
+						w.Line("var changed = cache.Cache.AddOrUpdate(key, document);").Line();
+						w.If("changed || force", (ref CodeWriter w) => {
+							w.Line($"{namespaceName}.CacheMarshall.Produce(cache, key, document);");
+						});
+					});
+
 					// RemoveAndProduce extension method
 					w.Line();
 					w.Summary("Removes a document from the cache and produces a delete (tombstone) message to Kafka.",
@@ -2589,6 +2609,39 @@ public class CacheGenerator : IIncrementalGenerator {
 						w.Line("var removed = cache.Cache.Remove(key, out _);");
 						w.Line($"{namespaceName}.CacheMarshall.Delete(cache, key);");
 						w.Line("return removed;");
+					});
+
+					// ForceProduceAll: re-emit every resident record onto the topic. A repair tool, not an operation:
+					// the snapshot takes every store lock, and the produce is one record per resident key. It reuses
+					// the same full-scan the generated CreateDump takes (Query().ExecutePooled()), so Core gains no
+					// new surface and the per-record produce is the ordinary CacheMarshall.Produce.
+					w.Line();
+					w.Summary("Produces every record currently resident in this cache to Kafka, unconditionally.",
+						"<para>",
+						"This is a repair operation, not part of normal writing: it snapshots the whole store (taking every",
+						"store lock for the duration of the snapshot) and then produces one record per resident key, whether",
+						"or not anything changed. Use it to re-seed a topic — after a retention or compaction mishap, to",
+						"bootstrap a new downstream consumer, or to re-publish state produced by an older schema. Every",
+						"consumer receives the records through its ordinary equality gate, so a consumer that already holds",
+						"the same state sees no change; this process's own consumer skips them as self-produced.",
+						"</para>",
+						"<para>",
+						"The snapshot is taken once, before the first produce; records written after it are not included.",
+						"The method does not block on delivery. Returns the number of records produced.",
+						"</para>");
+					w.Method($"public static int ForceProduceAll(this {cacheFullName} cache)", (ref CodeWriter w) => {
+						w.If("cache._producer == null || cache._topicName == null", (ref CodeWriter w) => {
+							w.Line("throw new System.InvalidOperationException(\"Producer not configured. Ensure this cache is registered with Kafka.\");");
+						});
+						w.Line("using var all = cache.Query().ExecutePooled();");
+						w.For("var i = 0; i < all.Count; i++", (ref CodeWriter w) => {
+							w.Line("var document = all[i];");
+							if (!string.IsNullOrEmpty(keyPropertyName))
+								w.Line($"{namespaceName}.CacheMarshall.Produce(cache, document.{keyPropertyName}, document);");
+							else
+								w.Line($"{namespaceName}.CacheMarshall.Produce(cache, document.GetKey(), document);");
+						});
+						w.Line("return all.Count;");
 					});
 
 					// Internal configuration method
