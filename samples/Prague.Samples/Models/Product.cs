@@ -24,10 +24,10 @@ public partial class Product {
 	[DataCacheIndex(DataCacheIndexType.Range)]
 	public required decimal Price { get; init; }
 
-	[DataCacheValueIndex(CompareOp.GreaterThan, 0, IndexName = "InStock")]   // key set: WithInStock() / WithoutInStock()
+	[DataCacheValueIndex(CompareOp.GreaterThan, 0, IndexName = "InStock")]   // key set: WithInStock() = Stock > 0
 	public required int Stock { get; init; }
 
-	[DataCacheHasValueIndex]                                       // bool: WithIsPublished() = true, WithoutIsPublished() = false
+	[DataCacheHasValueIndex]                                       // bool: WithIsPublished() = IsPublished == true
 	public required bool IsPublished { get; init; }
 
 	[DataCacheHasValueIndex]                                       // nullable: WithDiscontinuedAtUnixMs() = non-null

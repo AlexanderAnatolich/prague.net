@@ -147,7 +147,7 @@ Every package multi-targets `net9.0;net10.0`. Published versions are on the `0.6
 using Prague.Core;
 
 [DataCache]                                        // optional: [DataCache("OrdersCache")] to name the class
-[DataCacheTopic("orders.events")]                  // optional: default template is "Cache.{ClassName}"
+[DataCacheTopic("orders.events")]                  // optional: default template is "Cache.<ClassName>"
 [DataCacheSort("ByPriority", "Priority:1", "CreatedAt:-1")]
 public partial class Order {                       // must be partial
     [DataCacheKey]
@@ -615,13 +615,13 @@ tracks only entities the filter admits, re-evaluated on every update.
 ### **Topics**
 
 ```csharp
-[DataCacheTopic("orders.{env}")]            // default template without the attribute: "Cache.{ClassName}"
+[DataCacheTopic("orders.[v:env]")]          // default template without the attribute: "Cache.<ClassName>"
 public partial class Order { … }
 
-OrderCache.TopicNameTemplate                // "orders.{env}" — compile-time constant
+OrderCache.TopicNameTemplate                // "orders.[v:env]" — compile-time constant
 ```
 
-`{name}` placeholders resolve against `KafkaCachesOptions.Vars` at registration time.
+`[v:name]` placeholders resolve against `KafkaCachesOptions.Vars` and `[e:NAME]` against environment variables at registration time; unknown names are left verbatim.
 
 ---
 
@@ -639,7 +639,7 @@ services.AddKafkaCaches(
             .WithHeaderEqualsFilter("tenant", "acme")
             .WithValueFilter(static o => o.Status == OrderStatus.Active, treatAsDelete: true)
             .WithAfterHandler<OrderProjector>();
-        b.AddCache<CustomerCache, int, Customer>("customers-{env}");  // explicit topic
+        b.AddCache<CustomerCache, int, Customer>("customers-[v:env]");  // explicit topic
         b.AddInternalCache<ViewCache, int, View>();                   // in the registry, not consumed
     });
 

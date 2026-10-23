@@ -7,6 +7,8 @@ description: Wire Prague caches to compacted Kafka topics - topic settings, AddK
 
 `Prague.Kafka` connects Prague caches to compacted Kafka topics. One background worker per Kafka cluster drives a consumer that funnels messages into the right cache by topic.
 
+Every code block on this page compiles in `samples/Prague.Samples/Advanced/KafkaIntegration.cs`. The registration blocks run as tests against a `ServiceCollection` and assert the container they build; the three blocks that only make sense against a live cluster — awaiting the initial load, mapping health endpoints, producing — are compiled wiring examples and are not executed.
+
 ## Kafka model in one paragraph
 
 Prague assumes each cache is backed by a single compacted Kafka topic **with one partition**, where the message key maps to the cache's primary key. Tombstones (`null` value) delete; non-null values upsert. Partition EOF marks the boundary between *initial load* (replay of the topic state) and *live* (subsequent live updates); the load handshake completes on the first partition EOF, so a multi-partition topic goes live before the load has finished (not enforced in code). Consumer group offset commit, partition rebalance, and broker failover are delegated to `Confluent.Kafka` and librdkafka. If you want a refresher, read the Confluent intro to log compaction — you only need to know that, and the rest of this page makes sense.
@@ -51,79 +53,43 @@ The compaction settings keep an initial load short: the fewer superseded values 
 
 ## Wiring up
 
-```csharp
-services.AddKafkaCaches(
-    o => {
-        o.BootstrapServers = "kafka:9092";
-        o.ClientSettings["group.id"] = "my-service";
-        o.Vars["env"] = "prod";              // available for topic-template interpolation
-    },
-    builder => {
-        builder.AddCache<OrderCache, string, Order>();
-        builder.AddCache<CustomerCache, int, Customer>("customers-{env}");
-    });
-```
+[!code-csharp[](../../../../samples/Prague.Samples/Advanced/KafkaIntegration.cs#wiring-up)]
 
-Per-cluster options live in `KafkaCachesOptions`:
+Per-cluster options live in `KafkaCachesOptions` (namespace `Prague.Kafka.Options`):
 
 | Property | Meaning |
 | --- | --- |
 | `BootstrapServers` | Required. Comma-separated broker list. |
 | `ClientSettings` | Forwarded to librdkafka (`group.id`, `auto.offset.reset`, SASL settings, etc.). |
-| `Vars` | String-string map; values are substituted into topic name templates as `{key}`. |
+| `Vars` | String-string map; values are substituted into topic names as `[v:key]`. |
 
-Multiple clusters are supported by calling `AddKafkaCaches` more than once with different `configsSectionName` arguments; each cluster has its own consumer + producer + handler set.
+Multiple clusters are supported by calling `AddKafkaCaches` more than once with different `configsSectionName` arguments (the default section is `"kafkaCaches"`); each cluster has its own consumer + producer + handler set.
 
 Global, library-wide options live in `KafkaCachesGlobalOptions`:
 
-```csharp
-services.Configure<KafkaCachesGlobalOptions>(o => {
-    o.StatisticsEnabled = true;           // default; required for broker-state health
-    o.StatisticsIntervalSeconds = 60;
-});
-```
+[!code-csharp[](../../../../samples/Prague.Samples/Advanced/KafkaIntegration.cs#global-options)]
 
 ## Cache registration
 
-`AddCache<TCacheEntity, TKey, TValue>` registers the cache with the consumer:
+`AddCache<TCacheEntity, TKey, TValue>` registers the cache with the consumer. The topic can come from the entity's attribute, from a literal, or from a resolver that runs against the container; `AddInternalCache<...>` registers a cache that participates in the DI registry but is **not** consumed from Kafka — useful for caches you populate manually (test fixtures, computed views):
 
-```csharp
-builder.AddCache<OrderCache, string, Order>();               // default topic template
-builder.AddCache<OrderCache, string, Order>("orders-v2");    // override topic name
-builder.AddCache<OrderCache, string, Order>(sp =>            // resolver
-    sp.GetRequiredService<IOptions<TopicNamingOptions>>().Value.Orders);
-```
+[!code-csharp[](../../../../samples/Prague.Samples/Advanced/KafkaIntegration.cs#cache-registration)]
 
-The default topic template comes from `[DataCacheTopic]` (or `"Cache.{ClassName}"` if no attribute). `{env}`-style placeholders are resolved against `KafkaCachesOptions.Vars`.
+The default topic template comes from `[DataCacheTopic]`, or is `Cache.<ClassName>` when the entity has no attribute. Two placeholder forms are resolved in every topic name — the attribute's, a literal's and a resolver's alike: `[v:name]` reads `KafkaCachesOptions.Vars["name"]`, `[e:NAME]` reads the environment variable `NAME`. An unknown name is left in place verbatim. The generated cache exposes the raw template as a constant:
 
-`AddInternalCache<...>` registers a cache that participates in the DI registry but is **not** consumed from Kafka — useful for caches you populate manually (test fixtures, computed views).
+[!code-csharp[](../../../../samples/Prague.Samples/Advanced/KafkaIntegration.cs#topic-template)]
 
 ## Filters
 
 `KafkaCacheHandlerBuilder` exposes filter builder methods that compose with AND:
 
-```csharp
-builder.AddCache<OrderCache, string, Order>()
-    .WithHeaderEqualsFilter("region", "EU")
-    .WithHeaderEqualsFilter("region", "EU", "UK")             // OR (string)
-    .WithHeaderEqualsFilter("priority", 1, 2, 3)              // OR (int)
-    .WithHeaderNotEqualsFilter("source", "synthetic")
-    .WithHeaderExistsFilter("tenantId")
-    .WithHeaderFilter<long>("dispatchedAt",
-        ts => ts > cutoffUnixMs,
-        passOnNull: false)
-    .WithKeyFilter(static k => !k.StartsWith("tmp-"))
-    .WithValueFilter(static o => o.Status == OrderStatus.Active)
-    .WithKeyFilter(                                           // state resolved from DI, once
-        static sp => sp.GetRequiredService<IAllowList>().Ids.ToFrozenSet(),
-        static (allow, k) => allow.Contains(k));
-```
+[!code-csharp[](../../../../samples/Prague.Samples/Advanced/KafkaIntegration.cs#filters)]
 
 `WithHeaderEqualsFilter` / `WithHeaderNotEqualsFilter` take `string`, `int` or `long` values (one or more; several values are an OR). Numeric headers are read MessagePack-first with a fallback to raw 4/8-byte values for backward compatibility; the generic `WithHeaderFilter<T>` deserializes the header via MessagePack and hands the value to your predicate (`passOnNull` decides what a missing header does). Header filters run before the key is deserialized and have no `treatAsDelete`.
 
 `WithValueFilter(Func<TValue, bool> predicate, bool treatAsDelete = false)` runs the predicate against the **deserialized** cache entity and admits the message only when it returns `true`. It is a plain ingestion-time predicate — *not* an indexed query, so the body is arbitrary C# (combine conditions with `||` / `&&` inside the single lambda; there is no "OR filter" at ingestion). It is evaluated **exactly once per message, as that message is consumed**, and never against records that are already in the cache. Use it to keep only the records you care about (e.g. a status, a tenant, a non-empty field). Header and key filters are evaluated first, so the value is deserialized only for messages that already passed them.
 
-- **Tombstones** (null-value delete messages) **skip the key and value filters entirely and still delete** the key — neither predicate is evaluated for a message that carries no value. A delete is the log's statement that the key is gone, and an ingress predicate cannot meaningfully judge it. Two header-side rules are the deliberate exceptions: a filter that saw its header and **explicitly rejected** the value still drops the tombstone (that is how a consumer selects a sub-stream of a shared topic), and so does the producer self-filter. A header that is merely **missing** does not — see `WithHeaderExistsFilter` below.
+- **Tombstones** (null-value delete messages) **skip the key and value filters entirely and still delete** the key — neither predicate is evaluated for a message that carries no value. A delete is the log's statement that the key is gone, and an ingress predicate cannot meaningfully judge it. Two header-side rules are the deliberate exceptions: a filter that saw its header and **explicitly rejected** the value still drops the tombstone (that is how a consumer selects a sub-stream of a shared topic), and so does the producer self-filter. A header that is merely **missing** does not — see `WithHeaderExistsFilter` above.
 - All filter methods (header, key, value) compose with **AND**; multiple `WithValueFilter` calls must all pass, and multiple `WithHeaderExistsFilter` calls all require their header (up to 64 distinct names).
 - **Every predicate runs on one thread.** All filters for every cache in the same `AddKafkaCaches` section are evaluated synchronously on the single long-running consume thread. A predicate that blocks or does I/O stalls the initial load *and* the live tail of every other cache in that section.
 - **A filter is not an authorization boundary.** It is a retention / load-shedding device: cached entries reflect the state that was in force when they were ingested. Dynamic visibility policy belongs in a reader over `Query()`, where narrowing and widening both take effect immediately.
@@ -133,42 +99,26 @@ builder.AddCache<OrderCache, string, Order>()
 
 ### Filters that need DI state
 
-Key, value, and header filters each have an overload that resolves state from the container. The factory runs **exactly once**, while the handler is built, against the root `IServiceProvider`; its result is handed to the predicate on every message, so nothing is resolved from DI on the ingestion path:
+Key, value, and header filters each have an overload that resolves state from the container. The factory runs **exactly once**, while the handler is built, against the root `IServiceProvider`; its result is handed to the predicate on every message, so nothing is resolved from DI on the ingestion path. With three services of your own —
 
-```csharp
-builder.AddCache<OrderCache, string, Order>()
-    // Snapshot — immutable for the process lifetime.
-    .WithKeyFilter(
-        static sp => sp.GetRequiredService<IAllowList>().Ids.ToFrozenSet(),
-        static (allow, key) => allow.Contains(key))
-    // Several services at once: a named tuple's element names survive into the predicate.
-    .WithKeyFilter(
-        static sp => (allow: sp.GetRequiredService<IAllowList>(), clock: sp.GetRequiredService<IClock>()),
-        static (s, key) => s.allow.Contains(key) && s.clock.IsOpen)
-    // Sugar for a single service — note the explicit type argument.
-    .WithValueFilter<IRegionPolicy>(static (policy, o) => policy.Allows(o.Region))
-    // Header state filter: both type arguments are explicit.
-    .WithHeaderFilter<IClock, long>("dispatchedAt",
-        static sp => sp.GetRequiredService<IClock>(),
-        static (clock, ts) => ts >= clock.CutoffUnixMs);
-```
+[!code-csharp[](../../../../samples/Prague.Samples/Advanced/KafkaIntegration.cs#filter-state-services)]
 
-- **Prefer a snapshot over a live service.** `sp => sp.GetRequiredService<IAllowList>().Ids.ToFrozenSet()` is fixed for the process lifetime, which makes a restart the single well-defined way to reload it — see *Filter lifecycle* below. Capturing the live service instead means the predicate reads its current state on every message, while entries admitted under the old state stay cached regardless.
+— the four shapes look like this:
+
+[!code-csharp[](../../../../samples/Prague.Samples/Advanced/KafkaIntegration.cs#filters-di-state)]
+
+- **Prefer a snapshot over a live service.** `sp => sp.GetRequiredService<IAllowList>().OrderIds.ToFrozenSet()` is fixed for the process lifetime, which makes a restart the single well-defined way to reload it — see *Filter lifecycle* below. Capturing the live service instead means the predicate reads its current state on every message, while entries admitted under the old state stay cached regardless.
 - **Write the predicate as a `static` lambda.** State arrives as an *argument*, not a capture, so a `static` lambda closes over nothing; Roslyn caches it in a static field and you pay one delegate per process and nothing per message.
-- **Spell out the type argument on the `<TService>` overloads.** It is not inferable from an untyped lambda — you get `CS0411`. Write `.WithKeyFilter<IAllowList>(static (allow, key) => allow.Contains(key))`, and both type arguments for the header overload.
+- **Spell out the type argument on the `<TService>` overloads.** It is not inferable from an untyped lambda — you get `CS0411`. Write `.WithValueFilter<IRegionPolicy>(static (policy, o) => …)`, and both type arguments for the header overload.
 - **`sp` is the root provider.** A service registered as `Scoped` throws at build time with a Prague message pointing you at a singleton registration or the snapshot overloads. A `Transient` is resolved once and then captured for the process lifetime.
 
 > **Startup ordering.** The state factory runs while hosted services are being **constructed**, which precedes the `StartAsync` of *every* hosted service — only the initial cache *load* is ordered by registration. A state service that populates itself in its own `StartAsync` or `BackgroundService` is still empty when the factory reads it, so make sure the state is fully materialized by then.
 
 ### `treatAsDelete` — derive tombstones from a filter
 
-Both `WithValueFilter(predicate, treatAsDelete)` and `WithKeyFilter(predicate, treatAsDelete)` accept an optional `treatAsDelete` flag (default `false`). By default a rejected message is dropped without touching the cache (any previously-cached value for that key stays). Pass `treatAsDelete: true` to instead **treat a rejection as a tombstone for the key** — useful when the stream carries soft-deletes as ordinary records (e.g. `Status == Deleted`) rather than as null-value tombstones:
+Both `WithValueFilter(predicate, treatAsDelete)` and `WithKeyFilter(predicate, treatAsDelete)` accept an optional `treatAsDelete` flag (default `false`). By default a rejected message is dropped without touching the cache (any previously-cached value for that key stays). Pass `treatAsDelete: true` to instead **treat a rejection as a tombstone for the key** — useful when the stream carries soft-deletes as ordinary records (a `Cancelled` status, say) rather than as null-value tombstones:
 
-```csharp
-builder.AddCache<OrderCache, string, Order>()
-    // An order that is no longer Active is removed from the cache.
-    .WithValueFilter(static o => o.Status == OrderStatus.Active, treatAsDelete: true);
-```
+[!code-csharp[](../../../../samples/Prague.Samples/Advanced/KafkaIntegration.cs#treat-as-delete)]
 
 Every key/value filter chain evaluates to a shared `FilterDecision` — `Accept`, `Skip`, or `Delete`:
 
@@ -190,21 +140,11 @@ The supported way to re-admit them is a **process restart**, and it works out of
 
 ## After-handlers
 
-```csharp
-builder.AddCache<OrderCache, string, Order>()
-    .WithAfterHandler<OrderProjector>();
+`WithAfterHandler<T>()` registers `T` as the cache's `ICacheAfterHandler<TKey, TValue>`:
 
-public sealed class OrderProjector : ICacheAfterHandler<string, Order>
-{
-    public ValueTask Handle(UpdateType updateType, string key, Order? newValue, Order? oldValue)
-    {
-        // ... your projection logic
-        return ValueTask.CompletedTask;
-    }
-}
-```
+[!code-csharp[](../../../../samples/Prague.Samples/Advanced/KafkaIntegration.cs#after-handler-registration)]
 
-After-handlers run only in the live phase. Multiple handlers per cache run sequentially; exceptions in one don't skip the others. See [Conditional Updates](../core-concepts/conditional-updates.md) for the `UpdateType` enum semantics.
+`OrderProjector` is the handler shown in [Conditional Updates](../core-concepts/conditional-updates.md), which also explains the `UpdateType` enum. After-handlers run only in the live phase. Multiple handlers per cache run sequentially; exceptions in one don't skip the others.
 
 ## Enrichment
 
@@ -214,27 +154,13 @@ Two property attributes fill fields from the message rather than its payload: `[
 
 `AddKafkaCaches` registers a hosted service whose `StartAsync` returns only once every cache has reached its initial-load EOF, so a generic host does not finish starting (and an ASP.NET Core host does not start serving) before the caches are loaded. A load that stalls fails startup with a `TimeoutException` naming the caches still waiting, when the host's startup token fires.
 
-To wait for the load somewhere else — a host that starts its hosted services concurrently, or a test that builds the provider itself — await it explicitly:
+To wait for the load somewhere else — a host that starts its hosted services concurrently, or a test that builds the provider itself — await it explicitly. This is wiring for a running cluster, compiled but not executed by the samples:
 
-```csharp
-var host = builder.Build();
-await host.DataCachesLoadCompletion();      // returns once every cache reaches EOF
-await host.RunAsync();
-```
+[!code-csharp[](../../../../samples/Prague.Samples/Advanced/KafkaIntegration.cs#await-initial-load)]
 
 ## Health checks
 
-```csharp
-services.AddHealthChecks()
-    .AddPragueKafkaLiveness(tags: ["live"])     // "prague-kafka-live", Unhealthy on failure
-    .AddPragueKafkaReadiness(tags: ["ready"]);  // "prague-kafka-ready", Degraded on failure
-
-services.Configure<KafkaCachesHealthOptions>(o => {
-    o.PollLoopHeartbeatTimeout   = TimeSpan.FromSeconds(3);   // liveness
-    o.HandlerProcessingTimeout   = TimeSpan.FromSeconds(5);   // liveness
-    o.MinBrokersUp               = 1;                         // readiness
-});
-```
+[!code-csharp[](../../../../samples/Prague.Samples/Advanced/KafkaIntegration.cs#health-checks)]
 
 | Check | Predicate | Catches |
 | --- | --- | --- |
@@ -247,29 +173,15 @@ services.Configure<KafkaCachesHealthOptions>(o => {
 | | `BrokersDown` | fewer than `MinBrokersUp` brokers `UP` per librdkafka statistics |
 | | `PartitionsLost` | last rebalance lost partitions and nothing was re-assigned |
 
-`HealthCheckResult.Data` carries `<consumer>.failures` and `<consumer>.caches` so the output names the culprit. The healthy path allocates nothing. Disable the broker predicate (`MinBrokersUp = 0`) if you run with `StatisticsEnabled = false`. The default `MapHealthChecks` returns 200 for `Degraded`; map it to 503 for a Kubernetes readiness probe:
+`HealthCheckResult.Data` carries `<consumer>.failures` and `<consumer>.caches` so the output names the culprit. The healthy path allocates nothing. Disable the broker predicate (`MinBrokersUp = 0`) if you run with `StatisticsEnabled = false`. The default `MapHealthChecks` returns 200 for `Degraded`; map it to 503 for a Kubernetes readiness probe (wiring example, needs a `WebApplication`):
 
-```csharp
-app.MapHealthChecks("/health/live",  new HealthCheckOptions { Predicate = r => r.Tags.Contains("live") });
-app.MapHealthChecks("/health/ready", new HealthCheckOptions {
-    Predicate = r => r.Tags.Contains("ready"),
-    ResultStatusCodes = {
-        [HealthStatus.Healthy]   = StatusCodes.Status200OK,
-        [HealthStatus.Degraded]  = StatusCodes.Status503ServiceUnavailable,
-        [HealthStatus.Unhealthy] = StatusCodes.Status503ServiceUnavailable,
-    }
-});
-```
+[!code-csharp[](../../../../samples/Prague.Samples/Advanced/KafkaIntegration.cs#health-endpoints)]
 
 ## OpenTelemetry metrics
 
-Opt-in observable instruments sourced from the statistics the consumer already collects — no hot-path cost, no allocations per scrape after warm-up. The extension lives in `Prague.Kafka.OpenTelemetry` and is registered on the `MeterProviderBuilder`:
+Opt-in observable instruments sourced from the statistics the consumer already collects — no hot-path cost, no allocations per scrape after warm-up. The extension lives in `Prague.Kafka.OpenTelemetry` and is registered on the `MeterProviderBuilder`; add your exporter after it:
 
-```csharp
-services.AddOpenTelemetry().WithMetrics(m => m
-    .AddPragueKafkaInstrumentation()        // "prague.kafka.*"; AddPragueKafkaInstrumentation("acme.") to prefix
-    .AddPrometheusExporter());
-```
+[!code-csharp[](../../../../samples/Prague.Samples/Advanced/KafkaIntegration.cs#otel-metrics)]
 
 | Metric | Kind | Tags |
 | --- | --- | --- |
@@ -280,47 +192,35 @@ services.AddOpenTelemetry().WithMetrics(m => m
 | `prague.kafka.cache.messages.received` | Counter | `consumer`, `cache` |
 | `prague.kafka.cache.health` | Gauge (0/1) | `consumer`, `cache` |
 | `prague.kafka.cache.index.size` | UpDownCounter | `consumer`, `cache`, `index`, `kind=keys\|values` |
+| `prague.kafka.cache.index.capacity` | UpDownCounter | `consumer`, `cache`, `index` |
 
-The `health` gauges share their predicates with the health checks (`1` = healthy); the health endpoint carries the reasons.
+The `health` gauges share their predicates with the health checks (`1` = healthy); the health endpoint carries the reasons. `index.size / index.capacity` is the utilization of an index's pooled sets.
 
 ## Producer
 
-`AddKafkaCaches` also registers a `KafkaCacheProducer` per configuration section, as a **keyed** singleton under the section name (`"kafkaCaches"` by default) — there is no unkeyed registration, so inject it with `[FromKeyedServices]`:
+`AddKafkaCaches` also registers a `KafkaCacheProducer` (namespace `Prague.Kafka.IO`) per configuration section, as a **keyed** singleton under the section name (`"kafkaCaches"` by default) — there is no unkeyed registration, so inject it with `[FromKeyedServices]`:
 
-```csharp
-public sealed class OrderService([FromKeyedServices("kafkaCaches")] KafkaCacheProducer producer)
-{
-    public void Place(Order o)
-    {
-        producer.Produce("orders", o.OrderId, o);   // upsert
-        // producer.Delete("orders", o.OrderId);    // tombstone
-    }
-}
-```
+[!code-csharp[](../../../../samples/Prague.Samples/Advanced/KafkaIntegration.cs#producer-service)]
 
 `Produce` takes any `[DataCache]` type (it needs the generated `IEnrichable<T>`); the topic does not have to be one this process consumes. A section with no cache at all is a producer-only registration: its consumer subscribes to nothing and its initial load completes at once.
 
 The producer is fire-and-forget. `Produce` and `Delete` return once the message is queued in librdkafka: there is no delivery report and no awaitable result, and a broker-side failure is only logged. It is built from the section's `ClientSettings` (the same dictionary the consumer uses) with gzip compression and topic auto-creation off; acks, idempotence and retries are librdkafka's defaults (`acks=all`, idempotence off) unless `ClientSettings` sets them. Only a full local queue (`Local_QueueFull`) is retried, up to five times with a short backoff, before it throws. `Dispose` flushes; after it, `Produce` and `Delete` do nothing.
 
-When a cache is registered with `AddCache` (not `AddInternalCache`), the generated `CacheMarshall.Produce(cache, key, value)` / `CacheMarshall.Delete(cache, key)` and `cache.AddOrUpdateAndProduce(value)` use that cache's producer and topic, so no topic string is needed.
+When a cache is registered with `AddCache` (not `AddInternalCache`), the generated `CacheMarshall.Produce(cache, key, value)` / `CacheMarshall.Delete(cache, key)` and the two extension methods below use that cache's producer and resolved topic, so no topic string is needed:
 
-The producer always writes — there is no producer-side dedup. If you need it, consult `cache.Cache.TryGet(...)` before calling `Produce`.
+[!code-csharp[](../../../../samples/Prague.Samples/Advanced/KafkaIntegration.cs#produce-through-the-cache)]
+
+`AddOrUpdateAndProduce` is the conditional form: it produces only when the local `AddOrUpdate` reported a change (see [Conditional Updates](../core-concepts/conditional-updates.md)). `Produce` itself always writes — there is no producer-side dedup. If you need it, consult `cache.Cache.TryGet(...)` before calling `Produce`.
 
 **Your own writes are not applied to your own cache.** Every consumer drops messages stamped with its own producer instance id, so a process that calls `Produce` or `Delete` directly does not see the result in its local cache until it restarts. For deletes, use the generated `cache.RemoveAndProduce(key)` instead: it removes the key locally *and* publishes the tombstone. The tombstone is published whether or not the key was resident locally — a key excluded by an ingress filter, or not loaded yet, still gets its delete — and the `bool` it returns says only whether the local cache held the key.
 
 ## MessagePack isolation
 
-Prague routes every SerDe call through `PragueMessagePack.Options`, an internally-owned `MessagePackSerializerOptions`. Host mutations of `MessagePackSerializer.DefaultOptions` do not affect Prague's wire format. To extend the resolver chain (custom formatters for your entity types), use the global options builder:
+Prague routes every SerDe call through `PragueMessagePack.Options`, an internally-owned `MessagePackSerializerOptions`. Host mutations of `MessagePackSerializer.DefaultOptions` do not affect Prague's wire format. To extend the resolver chain (custom formatters for your entity types), use the global options builder — the third `AddKafkaCaches` argument:
 
-```csharp
-services.AddKafkaCaches(
-    o => o.BootstrapServers = "kafka:9092",
-    builder => { /* caches */ },
-    options => options.WithMessagePackResolver(defaultResolver =>
-        CompositeResolver.Create(MyCustomResolver.Instance, defaultResolver)));
-```
+[!code-csharp[](../../../../samples/Prague.Samples/Advanced/KafkaIntegration.cs#messagepack-resolver)]
 
-The lambda's input is the default Prague composite (`StringInterningFormatter` + `PragueDateTimeResolver` + `TypelessContractlessStandardResolver`); return whatever composite you want active for SerDe.
+The lambda's input is the default Prague composite (`StringInterningFormatter` + `PragueDateTimeResolver` + `TypelessContractlessStandardResolver`); return whatever composite you want active for SerDe. Put your own resolvers before `defaultResolver` so they win.
 
 ## Testing
 

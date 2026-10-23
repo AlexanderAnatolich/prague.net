@@ -5,110 +5,59 @@ description: Track the latest update per group key across several caches and que
 
 # Global Last Update Index
 
-The global last-update index tracks the timestamp of the most recent change for every entity in a cache, grouped by a property you nominate. It powers incremental sync APIs: "give me everything that changed since `t`."
+The global last-update index tracks the timestamp of the most recent change for every entity in a cache, grouped by a property you nominate. It powers incremental sync APIs: "give me everything that changed since `t`." Every block on this page runs against the sample domain and is asserted in `samples/Prague.Samples/Advanced/GlobalLastUpdateIndex.cs`.
 
 ## Why it's separate
 
-Prague's normal indices are scoped to one cache. The global index sits **above** caches: one `IDataCacheGlobalLastUpdateIndex<TGroupKey>` instance can collect timestamps from many caches whose entities share a `TGroupKey`. A typical use case is a catalog-feed pipeline where `Listing`, `Offer`, and `OrderLine` caches all hold a `ListingId`; one global index keyed by `ListingId` becomes the single source of truth for "what changed in listing 42 since last sync."
+Prague's normal indices are scoped to one cache. The global index sits **above** caches: one `IDataCacheGlobalLastUpdateIndex<TGroupKey>` instance can collect timestamps from many caches whose entities share a `TGroupKey`. In the sample domain `Customer` and `Order` both carry a customer id; one global index keyed by it becomes the single source of truth for "what changed for customer 42 since last sync" — a profile edit and a new order alike.
 
 ## Declaring the index
 
 Define a `partial` class that implements `IDataCacheGlobalLastUpdateIndex<TGroupKey>`. The interface is implemented for you by the generator:
 
-```csharp
-public partial class ListingActivityIndex : IDataCacheGlobalLastUpdateIndex<long>;
-```
+[!code-csharp[](../../../../samples/Prague.Samples/Models/CustomerActivityIndex.cs)]
 
-Then mark the group-key property on each contributing cache with `[DataCacheGlobalLastUpdateIndex<TIndex>]`:
+Then mark the group-key property on each contributing cache with `[DataCacheGlobalLastUpdateIndex<TIndex>]`. On `Customer` the group key is the primary key; on `Order` it is the `CustomerId` foreign key:
 
-```csharp
-[DataCache]
-public partial class Listing
-{
-    [DataCacheKey]
-    [DataCacheGlobalLastUpdateIndex<ListingActivityIndex>]     // group key == primary key
-    public required long ListingId { get; init; }
-}
+[!code-csharp[](../../../../samples/Prague.Samples/Models/Customer.cs)]
 
-[DataCache]
-public partial class Offer
-{
-    [DataCacheKey] public required string OfferId { get; init; }
+[!code-csharp[](../../../../samples/Prague.Samples/Models/Order.cs#order-entity)]
 
-    [DataCacheGlobalLastUpdateIndex<ListingActivityIndex>]     // group key is a foreign key here
-    public required long ListingId { get; init; }
-}
-```
+Both caches now report into `CustomerActivityIndex` on every write.
 
-Both caches now report into `ListingActivityIndex` on every write.
-
-A filtered variant, `[DataCacheGlobalLastUpdateIndex<TIndex, TFilter>]`, tracks only the entities a `readonly struct : IDataCacheGlobalLastUpdateFilter<TEntity>` admits (a `static abstract bool Include(TEntity)`); membership is re-evaluated on every update.
+A filtered variant, `[DataCacheGlobalLastUpdateIndex<TIndex, TFilter>]`, tracks only the entities a `readonly struct : IDataCacheGlobalLastUpdateFilter<TEntity>` admits (a `static abstract bool Include(TEntity)`); membership is re-evaluated on every update, so an entity that stops qualifying leaves the index.
 
 ## Timestamp source
 
-By default the index uses the `timestampMs` argument passed to `AddOrUpdate(value, timestampMs)` (which, for Kafka-backed caches, is the message timestamp). If you'd rather drive it from an entity property:
-
-```csharp
-[DataCacheGlobalLastUpdateIndex<ListingActivityIndex>(nameof(UpdatedAtUnixMs))]
-public required long ListingId { get; init; }
-
-public required long UpdatedAtUnixMs { get; init; }
-```
-
-The property type must be `long` (Unix milliseconds), `DateTime` or `DateTimeOffset`.
+By default the index uses the `timestampMs` argument passed to `AddOrUpdate(value, timestampMs)` (which, for Kafka-backed caches, is the message timestamp; the single-argument `AddOrUpdate(value)` stamps the current time). If you'd rather drive it from an entity property, name it in the attribute — `[DataCacheGlobalLastUpdateIndex<CustomerActivityIndex>(nameof(UpdatedAtUnixMs))]` — and give it type `long` (Unix milliseconds), `DateTime` or `DateTimeOffset`.
 
 ## Resolving the index
 
 The index is a singleton: resolve it from DI when the caches come from `AddKafkaCaches`, or from the registry otherwise.
 
-```csharp
-var index = serviceProvider.GetRequiredService<ListingActivityIndex>();
-var index = registry.GetGlobalIndex<ListingActivityIndex>();
-```
+[!code-csharp[](../../../../samples/Prague.Samples/Advanced/GlobalLastUpdateIndex.cs#resolve-index)]
 
-Its public surface:
+Its public surface is `IDataCacheGlobalLastUpdateIndex<TGroupKey>`:
 
-```csharp
-public interface IDataCacheGlobalLastUpdateIndex<TGroupKey>
-{
-    LastUpdatedIndex<TGroupKey> Index { get; }
-    bool TryGetMin(out long timestampMs, out TGroupKey key);
-    bool TryGetMax(out long timestampMs, out TGroupKey key);
-    bool TryGetMin(out long timestampMs);
-    bool TryGetMax(out long timestampMs);
-    int GetEntitiesCount(TGroupKey key);
-}
-```
+[!code-csharp[](../../../../samples/Prague.Samples/Advanced/GlobalLastUpdateIndex.cs#index-surface)]
 
-`Index` is the underlying `LastUpdatedIndex<TGroupKey>` with `GetValuesGt` / `GetValuesGte` / `GetValuesBetween` (…) in `long`, `DateTime` and `DateTimeOffset` forms; they return the group keys that changed in the window.
+`TryGetMin` / `TryGetMax` come with and without the `out TGroupKey key` parameter and return `false` on an empty index. `GetEntitiesCount(key)` counts the entities tracked under a group across every contributing cache. `Index` is the underlying `LastUpdatedIndex<TGroupKey>` with `GetValuesGt` / `GetValuesGte` / `GetValuesLt` / `GetValuesBetween` in `long`, `DateTime` and `DateTimeOffset` forms; they return the group keys that changed in the window.
 
 ## Querying
 
-**When the group key is the cache's primary key** (the `Listing` cache above), the generator emits `UpdatedAfter(...)` on the query builder — the same thing as `UseIndex(globalIndex, …)` on the raw cache:
+**When the group key is the cache's primary key** (`Customer` above), the generator emits `UpdatedAfter(...)` on the query builder — the same thing as `UseIndex(globalIndex, …)` on the raw cache:
 
-```csharp
-using var changedListings = listingCache.Query()
-    .UpdatedAfter(lastSyncUnixMs)                              // strictly greater than lastSyncUnixMs
-    .ExecutePooled();
+[!code-csharp[](../../../../samples/Prague.Samples/Advanced/GlobalLastUpdateIndex.cs#updated-after)]
 
-using var window = listingCache.Query()
-    .UpdatedAfter(lastSyncUnixMs, out var maxObservedUnixMs)   // highest timestamp in the result
-    .ExecutePooled();
+The customer 42 row comes back although nothing was written to the customer itself after the sync point — its order was, and the order's write stamps the group. The `out long max` form reports the highest timestamp among the rows returned, which is the watermark to commit for the next call:
 
-await CommitSyncPoint(maxObservedUnixMs);
-```
+[!code-csharp[](../../../../samples/Prague.Samples/Advanced/GlobalLastUpdateIndex.cs#updated-after-watermark)]
 
-`UpdatedAfter` has `long`, `DateTime` and `DateTimeOffset` overloads, an `(after, untilInclusive)` window form, the `out long max` form shown above, and prepared twins (`UpdatedAfter(static a => a.Since)`). It binds only when the global index is keyed by the cache's primary key type.
+On the eager builder `UpdatedAfter` takes a `long` or a `DateTimeOffset`, each with the `out long max` twin. The prepared builder adds the bound `(after, untilInclusive)` window form in `long`, `DateTime` and `DateTimeOffset`, and the argument forms `UpdatedAfter(static a => a.Since)` and `UpdatedAfter(static a => a.Since, static a => a.Until)`. It binds only when the global index is keyed by the cache's primary key type.
 
-**When the group key is not the primary key** (the `Offer` cache above), read the index itself: which groups changed, then query each group's rows through its own index.
+**When the group key is not the primary key** (`Order` above), read the index itself: which groups changed, then query each group's rows through its own index.
 
-```csharp
-foreach (var listingId in index.Index.GetValuesGt(lastSyncUnixMs))
-{
-    using var offers = offerCache.Query().WithListingId(listingId).ExecutePooled();
-    // ...
-}
-```
+[!code-csharp[](../../../../samples/Prague.Samples/Advanced/GlobalLastUpdateIndex.cs#group-key-not-pk)]
 
 ## Watermark semantics
 

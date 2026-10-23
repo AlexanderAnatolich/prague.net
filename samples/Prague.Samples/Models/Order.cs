@@ -31,7 +31,7 @@ public partial class Order {                                    // must be parti
 	[DataCacheIndex(DataCacheIndexType.Many)]                      // 1:N — many orders share a status
 	public required OrderStatus Status { get; init; }
 
-	[DataCacheHasValueIndex]                                       // key set: WithSettledAtUnixMs() / WithoutSettledAtUnixMs()
+	[DataCacheHasValueIndex]                                       // key set: WithSettledAtUnixMs() = settled (non-null)
 	public long? SettledAtUnixMs { get; init; }
 
 	public required decimal Total { get; init; }
