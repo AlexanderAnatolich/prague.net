@@ -16,6 +16,10 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.0"/>
     <PackageReference Include="NUnit" Version="4.4.0"/>
     <PackageReference Include="NUnit3TestAdapter" Version="6.0.0-beta.1"/>
+    <!-- HowTo/InspectOverHttp and the tutorial's endpoint run an in-process ASP.NET Core host (TestServer);
+         HowTo/HealthAndMetrics registers the OpenTelemetry meter provider. Neither needs a broker. -->
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" Version="$(MicrosoftRuntimeVersion)"/>
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.15.*"/>
   </ItemGroup>
 
   <ItemGroup>
