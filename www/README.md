@@ -9,7 +9,8 @@ Static site for Prague, built from two pieces and glued together at deploy time:
 
 Deployed to GitHub Pages by `.github/workflows/pages.yml` on every push to `main` that touches
 `www/**`, `src/**` (the API reference is compiled from the source), `docs/llm-readme.txt` or
-`Directory.Build.props`. It can also be run by hand (`workflow_dispatch`).
+`Directory.Build.props`, and whenever a GitHub release is published. It can also be run by hand
+(`workflow_dispatch`).
 
 Live at **https://nanov.github.io/prague.net/** — landing at the root, docs at `/docs/`, API reference
 at `/docs/api/`. The Vite app sets its `base` to `/prague.net/` at build time so asset paths resolve
@@ -50,7 +51,7 @@ docfx docfx.json --serve         # http://localhost:8080
 
 ```bash
 (cd www/site && npm ci && npm run build)
-(cd www/docs && docfx docfx.json --metadata _pragueVersion=$(sed -n 's/.*<Version>\([^<]*\)<\/Version>.*/\1/p' Directory.Build.props))
+(cd www/docs && docfx docfx.json --metadata _pragueVersion=$(gh release view --json tagName --jq '.tagName | ltrimstr("v")'))
 rm -rf www/_dist && mkdir -p www/_dist/docs
 cp -R www/site/dist/. www/_dist/
 cp -R www/docs/_site/. www/_dist/docs/
@@ -69,8 +70,11 @@ mkdir -p /tmp/prague-www && ln -sfn "$PWD/www/_dist" /tmp/prague-www/prague.net
 1. One-time: **Settings → Pages → Source** must be **"GitHub Actions"**.
 2. Push to `main` (or **Actions → Build and deploy Prague website → Run workflow**).
 
-The version shown in the docs sidebar comes from `<Version>` in `Directory.Build.props`, passed to
-DocFX as `_pragueVersion`.
+The version pill in the docs sidebar is the newest stable GitHub release (the same source
+`release.yml` bumps from; `<Version>` in `Directory.Build.props` is only a bootstrap fallback). CI passes
+it to DocFX as `--metadata _pragueVersion=…`; without that flag the pill is not rendered, so a local
+`docfx --serve` shows no version rather than a stale one. Publishing a release also triggers a site
+deploy, so the pill updates on its own.
 
 ## Brand assets
 
