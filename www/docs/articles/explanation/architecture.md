@@ -11,7 +11,7 @@ the planner, and at **run time** by a handful of pooled data structures that one
 any number of readers walk them without a lock. This page follows one entity through all three so you
 can predict what a given call will do, what it will cost, and what it will not promise.
 
-![The layers of Prague: a [DataCache] POCO, the Prague.Codegen source generator, the generated XxxCache partial with its index fields and fluent Query() and Prepare() surface, the InMemoryDataCache store with its Unique, Many, Range and key-set indexes, the eager and frozen executors, and the pooled QueryResults handed back to the caller](../../images/architecture.svg)
+[![The layers of Prague: a [DataCache] POCO, the Prague.Codegen source generator, the generated XxxCache partial with its index fields and fluent Query() and Prepare() surface, the InMemoryDataCache store with its Unique, Many, Range and key-set indexes, the eager and frozen executors, and the pooled QueryResults handed back to the caller](../../images/architecture.svg)](../../images/architecture.svg)
 
 ## What does `[DataCache]` turn into?
 
@@ -139,7 +139,7 @@ These are `internal`, but their behaviour is what you observe:
 
 An eager query has no optimizer. The call order **is** the plan.
 
-![Candidate intersection: the first lane fills the ValueSet from its index bucket, each later lane marks the survivors on a stackalloc bitmap and the sweep drops the rest, an empty lane short-circuits, Or unions two branch bitmaps, and Where runs on the rows fetched from the store](../../images/query-intersection.svg)
+[![Candidate intersection: the first lane fills the ValueSet from its index bucket, each later lane marks the survivors on a stackalloc bitmap and the sweep drops the rest, an empty lane short-circuits, Or unions two branch bitmaps, and Where runs on the rows fetched from the store](../../images/query-intersection.svg)](../../images/query-intersection.svg)
 
 1. **The first `WithXxx` seeds the candidate set.** A Unique lane adds zero or one key; a Many lane adds
    its bucket's keys in bucket order; a Range lane walks the tree between the bounds and adds in key
@@ -163,7 +163,7 @@ An eager query has no optimizer. The call order **is** the plan.
 7. **Resolvers run last.** `Sort` / `SortBounded` and every `JoinWith{T}` are resolvers appended to the
    chain by type; they see the rows the base walk produced.
 
-![Join resolution: for each left row a JoinOne resolver follows the foreign key — through a unique index, the symmetric index's Reverse map or primary key to primary key — into the right store and fills the row's slot; a JoinMany resolver records the (left, right) pairs from the right-side bucket, sizes each slot from what it recorded, then fills the slots from one shared buffer](../../images/join-resolution.svg)
+[![Join resolution: for each left row a JoinOne resolver follows the foreign key — through a unique index, the symmetric index's Reverse map or primary key to primary key — into the right store and fills the row's slot; a JoinMany resolver records the (left, right) pairs from the right-side bucket, sizes each slot from what it recorded, then fills the slots from one shared buffer](../../images/join-resolution.svg)](../../images/join-resolution.svg)
 
 A **join** is a resolver that reads a second cache. `JoinOne` has four families chosen at compile time by
 what the foreign key declares — primary key to primary key, a Unique index on the right, a symmetric Unique
@@ -190,7 +190,7 @@ hand you the cache's own instances — treat them as read-only.
 
 ### The three frozen executors
 
-![Frozen executor selection: BuildFrozen flattens the chain into a plan; a unique-equality step followed only by filters binds the PointLookup executor; every other shape the pipeline planner accepts — index steps, Or / If / Match composites, Sort or SortBounded, fusable joins — binds the Pipeline executor, which seeds from the narrowest step and probes the rest per key; everything else binds Replay, the prepared query's own execution](../../images/frozen-executors.svg)
+[![Frozen executor selection: BuildFrozen flattens the chain into a plan; a unique-equality step followed only by filters binds the PointLookup executor; every other shape the pipeline planner accepts — index steps, Or / If / Match composites, Sort or SortBounded, fusable joins — binds the Pipeline executor, which seeds from the narrowest step and probes the rest per key; everything else binds Replay, the prepared query's own execution](../../images/frozen-executors.svg)](../../images/frozen-executors.svg)
 
 `BuildFrozen()` flattens the recorded chain into descriptors and binds one of three executors
 (`FrozenPlanner` in `FrozenQuery.cs`); `Explain()` prints which:

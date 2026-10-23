@@ -7,7 +7,7 @@ description: How Prague queries plan and intersect index lanes, the Or clause, W
 
 The fluent query API is the single read surface on a Prague cache. It is shaped by the indices you declared and executed against the in-memory storage with zero reflection. Every block on this page runs against the sample `Order` and `Customer` caches and is asserted in `samples/Prague.Samples/Concepts/QueryEngine.cs`.
 
-![Query intersection: each index lane produces a candidate key set; the sets are intersected in call order on a bitmap, the Where predicate runs on the survivors, and only those keys are dereferenced into the result buffer.](../../images/query-intersection.svg)
+[![Query intersection: each index lane produces a candidate key set; the sets are intersected in call order on a bitmap, the Where predicate runs on the survivors, and only those keys are dereferenced into the result buffer.](../../images/query-intersection.svg)](../../images/query-intersection.svg)
 
 ## Anatomy of a query
 

@@ -53,7 +53,7 @@ body.prague-docs {
 	overflow: hidden;
 }
 
-code, pre, kbd, samp { font-family: var(--font-mono); }
+code, pre, kbd, samp { font-family: var(--font-mono); font-variant-ligatures: none; }
 
 ::selection { background: var(--brand-orange); color: #fff; }
 

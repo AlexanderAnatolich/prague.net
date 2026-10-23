@@ -63,4 +63,4 @@ Task-shaped pages: a prerequisite, the steps, the pitfalls.
 
 - [GitHub repository](https://github.com/nanov/prague.net) — source, issues, contributing.
 - [NuGet](https://www.nuget.org/packages/Prague/) — `Prague`, `Prague.Kafka`, `Prague.Api`, `Prague.Api.UI`.
-- [llms.txt](../llms.txt) and [llms-full.txt](../llms-full.txt) — machine-readable summaries for coding assistants.
+- [llms.txt](https://nanov.github.io/prague.net/llms.txt) and [llms-full.txt](https://nanov.github.io/prague.net/llms-full.txt) — machine-readable summaries for coding assistants.
