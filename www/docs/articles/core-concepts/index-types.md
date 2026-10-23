@@ -1,5 +1,6 @@
 ---
 title: Index Types
+description: Unique, Many and Range indices, symmetric variants, predicate key-set indices, sort definitions and indexing external types in Prague.
 ---
 
 # Index Types
@@ -8,7 +9,7 @@ Every query in Prague is planned over typed indices. Each `[DataCacheIndex]` (an
 
 ## Primary index
 
-`[DataCacheKey]` marks the PK property. It must be applied exactly once per `[DataCache]` type and drives the `TKey` of the underlying `InMemoryDataCache<TKey, TValue>`.
+`[DataCacheKey]` marks the PK property. It must be applied exactly once per `[DataCache]` type and drives the `TKey` of the underlying `InMemoryDataCache<TKey, TValue>` (`TKey : notnull, IEquatable<TKey>`). The builder narrows by it with `WithKey(...)` / `With{KeyProperty}(...)`.
 
 ```csharp
 [DataCacheKey]
@@ -23,9 +24,9 @@ public required string OrderId { get; init; }
 | --- | --- | --- |
 | `Unique` | `CacheUniqueIndex<TKey, TValue, TIndexKey>` | O(1) equality; one entity per index value. |
 | `Many` | `CacheKeyValueListIndex<TKey, TValue, TIndexKey>` | O(1) equality; many entities per index value. |
-| `Range` | `CacheRangeIndex<TKey, TValue, TIndexKey>` | Ordered range scans; property must implement `IComparable<T>`. |
+| `Range` | `CacheRangeIndex<TKey, TValue, TIndexKey>` | Ordered range scans over a pooled B+tree; property must implement `IComparable<T>`. |
 
-`Many` is the default if you omit `IndexType`.
+`Many` is the default if you omit `IndexType`. A `Many` index takes a per-key bucket capacity hint: `[DataCacheIndex(DataCacheIndexType.Many, 4)]` (other types reject it at compile time).
 
 ```csharp
 [DataCacheIndex(DataCacheIndexType.Unique)] public required string Email { get; init; }
@@ -33,13 +34,15 @@ public required string OrderId { get; init; }
 [DataCacheIndex(DataCacheIndexType.Range)]  public required long CreatedAtUnixMs { get; init; }
 ```
 
-Each emits three `WithProperty(...)` overloads:
+`Unique` and `Many` emit `WithProperty(...)` overloads for a single value, a nullable value (`null` skips the lane), a `ReadOnlySpan<T>`, an array and a `List<T>`. A multi-value call is an OR within that lane:
 
 ```csharp
 query.WithEmail("alice@example.com");
-query.WithEmail(new[] { "alice@example.com", "bob@example.com" });   // ReadOnlySpan
+query.WithEmail(new[] { "alice@example.com", "bob@example.com" });   // array / ReadOnlySpan
 query.WithEmail(new List<string> { "alice@example.com", "bob@example.com" });
 ```
+
+The index fields are public too: `cache.EmailIndex.TryGetValue(email, out var key)` (Unique), `cache.CustomerIdIndex.GetValues(42)` (Many), `cache.CreatedAtUnixMsIndex.GetValuesBetween(a, b)` / `GetValuesGte(a)` (Range).
 
 `Range` indices instead expose a sub-builder:
 
@@ -53,7 +56,7 @@ The sub-builder is type-state: open with `Gt` / `Gte` or `Lt` / `Lte`, then opti
 
 ## Symmetric variants
 
-`Symmetric = true` upgrades a `Many` index to `CacheSymmetricKeyValueListIndex<TKey, TValue, TIndexKey>` and a `Unique` index to `CacheSymmetricUniqueIndex<TKey, TValue, TIndexKey>`. The symmetric variant maintains a reverse map (`TKey → TIndexKey`), required for index-driven joins like `query.JoinOne(leftIndex, rightCache)`. See [Joins](joins.md).
+`Symmetric = true` upgrades a `Many` index to `CacheSymmetricKeyValueListIndex<TKey, TValue, TIndexKey>` and a `Unique` index to `CacheSymmetricUniqueIndex<TKey, TValue, TIndexKey>`. The symmetric variant maintains a reverse map (`TKey → TIndexKey`), required for left-index-driven joins, where the left entity carries the index value rather than the right's primary key. See [Joins](joins.md).
 
 ```csharp
 [DataCacheIndex(DataCacheIndexType.Many, Symmetric = true)]
@@ -64,7 +67,7 @@ Foreign keys declared with `[DataCacheForeignKey<T>(ManyToOne)]` get symmetric u
 
 ## Predicate-based key-set indices
 
-When a query is repeatedly filtered by `value == constant` or `value != constant` against a property, an equality-only key-set index beats a `Unique`/`Many` index by trading storage for an O(1) bitmap. Prague offers four variants:
+When a query is repeatedly filtered by `value OP constant` against a property, a key-set index — the set of keys for which the predicate holds, evaluated once per write — is cheaper than a `Many` index: it stores keys only, and the lane is one set lookup. Prague offers four variants:
 
 | Attribute | Builder method | What it tracks |
 | --- | --- | --- |
@@ -81,11 +84,11 @@ public DateTime? SettledAt { get; init; }
 public required OrderStatus Status { get; init; }
 ```
 
-Both produce O(1) `CacheKeySetIndex` lookups; the predicate is evaluated once at insert time.
+All four are backed by `CacheKeySetIndex`; the predicate is evaluated once per write. `CompareOp` is `Equal`, `NotEqual`, `GreaterThan`, `GreaterThanOrEqual`, `LessThan`, `LessThanOrEqual`. An optional `IndexName` names the generated verb (`With{IndexName}()` / `Without{IndexName}()`).
 
 ## Sort definitions
 
-`[DataCacheSort("Name", "Prop:1", "OtherProp:-1")]` declares a class-level comparer that you can pass to the `Sort(...)` operator on a query. `:1` is ascending, `:-1` is descending. Multiple sort attributes per class are allowed:
+`[DataCacheSort("Name", "Prop:1", "OtherProp:-1")]` declares a class-level comparer that you can pass to `Sort(...)` or `SortBounded(...)` on a query. `:1` is ascending, `:-1` is descending. Multiple sort attributes per class are allowed:
 
 ```csharp
 [DataCache]
@@ -94,7 +97,7 @@ Both produce O(1) `CacheKeySetIndex` lookups; the predicate is evaluated once at
 public partial class Order { ... }
 ```
 
-The generator emits `OrderCache.ByDateComparer` and `OrderCache.ByCustomerThenDateComparer` as `static readonly IComparer<Order>`. Use them with `.Sort(OrderCache.ByDateComparer)`.
+The generator emits `OrderCache.ByDateComparer` and `OrderCache.ByCustomerThenDateComparer` as `static readonly IComparer<Order>`. Use them with `.Sort(OrderCache.ByDateComparer)` or `.SortBounded(...)` — see [Sorted Paging](sorted-paging.md) for which to choose. Any `IComparer<T>` works; a `readonly struct` comparer makes either sort allocation-free.
 
 ## External types
 
@@ -107,7 +110,11 @@ If you can't add attributes to the source POCO (third-party DTOs, generated prot
 public partial class ExternalDtoCache;
 ```
 
-The generated `Clone` / `Equals` machinery for the external type is also emitted on this class.
+The generated `CacheEquals` / `Clone` machinery for the external type is also emitted on this class.
+
+## Global last-update index
+
+`[DataCacheGlobalLastUpdateIndex<TIndex>]` on a property tracks the latest update per group key, shared across caches, and emits `UpdatedAfter(...)` when the group key is the primary key. See [Global Last Update Index](../advanced/global-last-update-index.md).
 
 ## Next
 

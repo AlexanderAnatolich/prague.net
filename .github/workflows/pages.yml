@@ -1,6 +1,14 @@
 name: Build and deploy Prague website
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "www/**"
+      - "src/**"
+      - "docs/llm-readme.txt"
+      - "Directory.Build.props"
+      - ".github/workflows/pages.yml"
   workflow_dispatch:
 
 permissions:
@@ -27,10 +35,14 @@ jobs:
           cache: npm
           cache-dependency-path: www/site/package-lock.json
 
-      - name: Setup .NET 9
+      # Every project multi-targets net9.0;net10.0, and DocFX compiles them
+      # to extract the API reference, so both SDKs are needed.
+      - name: Setup .NET 9 + 10
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 9.0.x
+          dotnet-version: |
+            9.0.x
+            10.0.x
 
       - name: Restore .NET solution
         run: dotnet restore Prague.Publish.slnf
@@ -38,7 +50,14 @@ jobs:
       - name: Install DocFX
         run: dotnet tool update -g docfx
 
-      - name: Build landing (Vite)
+      - name: Read library version
+        id: version
+        run: |
+          v=$(sed -n 's/.*<Version>\([^<]*\)<\/Version>.*/\1/p' Directory.Build.props | head -1)
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "Prague version: $v"
+
+      - name: Build landing (Vite, prerendered to static HTML)
         working-directory: www/site
         run: |
           npm ci
@@ -46,14 +65,19 @@ jobs:
 
       - name: Build docs (DocFX)
         working-directory: www/docs
-        run: docfx docfx.json
+        run: docfx docfx.json --metadata _pragueVersion=${{ steps.version.outputs.version }}
 
       - name: Assemble _site
         run: |
-          mkdir -p _site
-          cp -R www/site/dist/. _site/
           mkdir -p _site/docs
+          cp -R www/site/dist/. _site/
           cp -R www/docs/_site/. _site/docs/
+          cp docs/llm-readme.txt _site/llms-full.txt
+          touch _site/.nojekyll
+          test -f _site/index.html
+          test -f _site/docs/index.html
+          test -f _site/docs/api/index.html
+          grep -q 'Fast as' _site/index.html   # prerender actually ran
 
       - name: Setup Pages
         uses: actions/configure-pages@v5

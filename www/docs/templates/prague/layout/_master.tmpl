@@ -3,15 +3,24 @@
 {{!include(favicon.ico)}}
 {{!include(logo.svg)}}
 <!DOCTYPE html>
-<html {{#_lang}}lang="{{_lang}}"{{/_lang}}>
+<html lang="{{#_lang}}{{_lang}}{{/_lang}}{{^_lang}}en{{/_lang}}">
 	<head>
 		<meta charset="utf-8">
 		{{#redirect_url}}<meta http-equiv="refresh" content="0;URL='{{redirect_url}}'">{{/redirect_url}}
 		{{^redirect_url}}
 			<title>{{#title}}{{title}}{{/title}}{{^title}}{{>partials/title}}{{/title}} {{#_appTitle}}| {{_appTitle}}{{/_appTitle}}</title>
 			<meta name="viewport" content="width=device-width, initial-scale=1.0">
+			<meta name="color-scheme" content="light">
+			<meta name="theme-color" content="#141414">
 			{{#description}}<meta name="description" content="{{description}}">{{/description}}
+			{{^description}}{{#summary}}<meta name="description" content="{{summary}}">{{/summary}}{{/description}}
+			<meta property="og:type" content="article">
+			<meta property="og:site_name" content="{{_appName}}{{^_appName}}Prague{{/_appName}}">
+			<meta property="og:title" content="{{#title}}{{title}}{{/title}}{{^title}}{{>partials/title}}{{/title}}">
+			{{#description}}<meta property="og:description" content="{{description}}">{{/description}}
+			<meta name="twitter:card" content="summary">
 			<link rel="icon" href="{{_rel}}{{{_appFaviconPath}}}{{^_appFaviconPath}}favicon.ico{{/_appFaviconPath}}">
+			<link rel="alternate" type="text/plain" href="{{_rel}}../llms.txt" title="llms.txt">
 			<link rel="preconnect" href="https://fonts.googleapis.com">
 			<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 			<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap">
@@ -33,97 +42,97 @@
 			<meta name="loc:changeTheme" content="Change theme">
 			<meta name="loc:copy" content="Copy">
 			<script type="module" src="./{{_rel}}public/docfx.min.js"></script>
-			<script>
-				const theme = localStorage.getItem('theme') || 'light'
-				document.documentElement.setAttribute('data-bs-theme', theme === 'auto' ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : theme)
-			</script>
+			<script>document.documentElement.setAttribute('data-bs-theme', 'light')</script>
 		{{/redirect_url}}
 	</head>
 
 	{{^redirect_url}}
 	<body class="prague-docs" data-layout="{{_layout}}{{layout}}" data-yaml-mime="{{yamlmime}}">
+		<a class="prague-skip-link" href="#prague-article">Skip to content</a>
 		<div class="prague-shell">
 
-			<nav class="prague-nav">
+			<header class="prague-nav">
 				<div class="prague-nav-left">
-					<a class="prague-brand" href="{{_appLogoUrl}}{{^_appLogoUrl}}{{_rel}}index.html{{/_appLogoUrl}}">
+					<button class="prague-toc-toggle" type="button" data-bs-toggle="offcanvas" data-bs-target="#tocOffcanvas" aria-controls="tocOffcanvas" aria-label="Open table of contents">
+						<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path d="M2 4h12M2 8h12M2 12h12"/></svg>
+					</button>
+					<a class="prague-brand" href="{{_pragueHomeUrl}}{{^_pragueHomeUrl}}{{_rel}}index.html{{/_pragueHomeUrl}}" aria-label="Prague home">
 						<span class="prague-brand-mark">
-							<img src="{{_rel}}{{{_appLogoPath}}}{{^_appLogoPath}}logo.svg{{/_appLogoPath}}" alt="Prague">
+							<img src="{{_rel}}{{{_appLogoPath}}}{{^_appLogoPath}}logo.svg{{/_appLogoPath}}" alt="" width="32" height="32">
 						</span>
 						<span class="prague-brand-text">Prague</span>
 					</a>
-					<div class="prague-nav-tabs">
-						<a href="{{_rel}}articles/getting-started/introduction.html" class="prague-nav-tab is-active">Documentation</a>
-						<a href="{{_rel}}api/" class="prague-nav-tab">API Reference</a>
-						{{#_pragueHomeUrl}}<a href="{{_pragueHomeUrl}}" class="prague-nav-tab">← Back to home</a>{{/_pragueHomeUrl}}
-					</div>
+					<nav class="prague-nav-tabs" aria-label="Site">
+						<a href="{{_rel}}index.html" class="prague-nav-tab{{^_isApiPage}} is-active{{/_isApiPage}}">Documentation</a>
+						<a href="{{_rel}}api/index.html" class="prague-nav-tab{{#_isApiPage}} is-active{{/_isApiPage}}">API Reference</a>
+						{{#_pragueHomeUrl}}<a href="{{_pragueHomeUrl}}" class="prague-nav-tab">Home</a>{{/_pragueHomeUrl}}
+					</nav>
 				</div>
 				<div class="prague-nav-right">
 					{{#_enableSearch}}
 					<form class="prague-search" role="search" id="search">
-						<svg class="prague-search-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="7" cy="7" r="5"/><path d="M11 11l3 3"/></svg>
-						<input class="form-control" id="search-query" type="search" disabled placeholder="Search" autocomplete="off" aria-label="Search">
+						<svg class="prague-search-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="7" cy="7" r="5"/><path d="M11 11l3 3"/></svg>
+						<input class="form-control" id="search-query" type="search" disabled placeholder="Search" autocomplete="off" aria-label="Search the documentation">
 					</form>
 					{{/_enableSearch}}
-					{{#_pragueGithubUrl}}<a class="prague-nav-icon" href="{{_pragueGithubUrl}}" aria-label="GitHub">
-						<svg viewBox="0 0 16 16" fill="currentColor"><path d="M5.5 12.5l-1 1m6-9l3 3-6 6-3-3 6-6zM3 13l1-3 2 2-3 1z"/></svg>
+					{{#_pragueGithubUrl}}<a class="prague-nav-icon" href="{{_pragueGithubUrl}}" aria-label="Prague on GitHub">
+						<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
 					</a>{{/_pragueGithubUrl}}
 				</div>
-			</nav>
+			</header>
 
 			<div class="prague-body">
-				<aside class="prague-sidebar" id="tocOffcanvas">
-					<h3 class="prague-sidebar-title">Table of Contents</h3>
-					<nav class="prague-sidebar-nav toc" id="toc"></nav>
+				<aside class="prague-sidebar offcanvas-lg offcanvas-start" id="tocOffcanvas" tabindex="-1" aria-label="Table of contents">
+					<div class="prague-sidebar-head">
+						<h2 class="prague-sidebar-title">Table of contents</h2>
+						<button type="button" class="prague-toc-close" data-bs-dismiss="offcanvas" data-bs-target="#tocOffcanvas" aria-label="Close table of contents">
+							<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13"/></svg>
+						</button>
+					</div>
+					<nav class="prague-sidebar-nav toc" id="toc" aria-label="Pages"></nav>
 					<div class="prague-sidebar-footer">
-						<div class="prague-version-pill">
-							<span>Prague v{{_pragueVersion}}{{^_pragueVersion}}0.1.0{{/_pragueVersion}}</span>
-							<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M7 2h3v3M10 2L5 7M3 4v6a1 1 0 0 0 1 1h6"/></svg>
-						</div>
+						<a class="prague-version-pill" href="https://www.nuget.org/packages/Prague/">
+							<span>Prague v{{_pragueVersion}}{{^_pragueVersion}}0.6.0{{/_pragueVersion}}</span>
+							<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M7 2h3v3M10 2L5 7M3 4v6a1 1 0 0 0 1 1h6"/></svg>
+						</a>
 					</div>
 				</aside>
 
 				<div class="prague-main">
 					<div class="prague-content">
-						<article class="prague-article" data-uid="{{uid}}">
-							<header class="prague-article-header">
-								<h1>{{#title}}{{title}}{{/title}}{{^title}}{{>partials/title}}{{/title}}</h1>
-								<div class="prague-article-actions">
-									{{#docurl}}<a href="{{docurl}}" class="prague-article-action">
-										<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 1h4l3 3v7H3V1zM7 1v3h3"/></svg>
-										Improve this Doc
-									</a>{{/docurl}}
-									{{#sourceurl}}<a href="{{sourceurl}}" class="prague-article-action">
-										<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 3L1 6l3 3M8 3l3 3-3 3"/></svg>
-										View Source
-									</a>{{/sourceurl}}
-								</div>
-							</header>
+						<article class="prague-article" id="prague-article" data-uid="{{uid}}">
+							{{#docurl}}{{#sourceurl}}{{/sourceurl}}
+							<div class="prague-article-actions">
+								<a href="{{docurl}}" class="prague-article-action">
+									<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 1h4l3 3v7H3V1zM7 1v3h3"/></svg>
+									Improve this page
+								</a>
+							</div>
+							{{/docurl}}
 
 							<div class="prague-article-body">
 								{{!body}}
 							</div>
 						</article>
 
-						<div class="prague-article-footer">
+						<footer class="prague-article-footer">
 							<div class="prague-article-meta">
-								{{#updated_at}}Last Updated: {{updated_at}}{{/updated_at}}{{^updated_at}}Prague Documentation{{/updated_at}}
+								{{#updated_at}}Last updated {{updated_at}}{{/updated_at}}{{^updated_at}}{{_appFooter}}{{/updated_at}}
 							</div>
 							{{^_disableNextArticle}}
 							<div class="prague-article-nav" id="nextArticle"></div>
 							{{/_disableNextArticle}}
-						</div>
+						</footer>
 					</div>
 
 					{{^_disableAffix}}
-					<aside class="prague-affix">
-						<h4 class="prague-affix-title">In this article</h4>
+					<aside class="prague-affix" aria-label="In this article">
 						<nav class="prague-affix-nav" id="affix"></nav>
 						<div class="prague-help">
-							<svg class="prague-help-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 3h10v12l-5-2.5L4 15V3z"/></svg>
-							<h5>Need Help?</h5>
-							<p>Join our discussions for real-time support from the maintainers.</p>
-							{{#_pragueGithubUrl}}<a class="prague-help-button" href="{{_pragueGithubUrl}}/discussions">Join Community</a>{{/_pragueGithubUrl}}
+							<svg class="prague-help-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M4 3h10v12l-5-2.5L4 15V3z"/></svg>
+							<h2>Need help?</h2>
+							<p>Found a gap or a bug in the docs? Open an issue and the maintainers will pick it up.</p>
+							{{#_pragueGithubUrl}}<a class="prague-help-button" href="{{_pragueGithubUrl}}/issues">Open an issue</a>{{/_pragueGithubUrl}}
 						</div>
 					</aside>
 					{{/_disableAffix}}

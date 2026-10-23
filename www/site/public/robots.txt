@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://nanov.github.io/prague.net/sitemap.xml
+Sitemap: https://nanov.github.io/prague.net/docs/sitemap.xml

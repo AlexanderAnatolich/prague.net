@@ -1,5 +1,6 @@
 ---
 title: Query Engine
+description: How Prague queries plan and intersect index lanes, the Or clause, Where filters, pooled and allocating execution, QueryResults and result mapping.
 ---
 
 # Query Engine
@@ -20,12 +21,12 @@ using var results = orderCache.Query()
 Three phases run end-to-end:
 
 1. **Planning** — each `WithXxx`/`UseIndex` call appends a candidate-narrowing step to a compile-time-typed builder. The C# type of the builder grows with every chained call; no runtime plan tree exists.
-2. **Intersection** — at `Execute*`, the planner walks the steps in declaration order and intersects the candidate sets. Index hits feed an `IncrementalIntersecter` whose internal bitmap is `stackalloc`'d when small.
-3. **Materialization** — surviving keys are dereferenced into the result array (pooled or allocated).
+2. **Intersection** — at `Execute*`, the first lane seeds the candidate set and every later lane intersects it, in declaration order, on a `stackalloc` bitmap. The first empty lane stops the query. (A [frozen query](prepared-queries.md) picks the seed itself at execution time.)
+3. **Materialization** — `Where` predicates run on the survivors, then the keys are dereferenced into the result array (pooled or allocated).
 
 ## Execute variants
 
-Every query terminates in one of four methods on the combined builder:
+Every query terminates in one of these methods on the combined builder:
 
 | Method | Allocates | Clones | Use case |
 | --- | --- | --- | --- |
@@ -33,8 +34,9 @@ Every query terminates in one of four methods on the combined builder:
 | `ExecuteCloned()` | new `T[]` | yes | Caller mutates and we don't want the cache copy mutated. |
 | `ExecutePooled()` | `ArrayPool` rent | no | **Default on hot paths.** Caller must `using`. |
 | `ExecutePooledCloned()` | `ArrayPool` rent | yes | Pooled buffer + safe-to-mutate elements. |
+| `Count()` | none | — | Matching count without materializing values. |
 
-All four accept `skip` and `take` integer arguments for offset pagination.
+The `Execute*` methods accept `skip` and `take` integer arguments for offset pagination.
 
 The return type is `QueryResults<T>`:
 
@@ -44,6 +46,7 @@ public readonly struct QueryResults<T> :
 {
     int Count { get; }
     int TotalCount { get; }                // pre-pagination count, useful for "X of Y" UIs
+    bool Truncated { get; }                // true only if a result slot could not hold every row; expected false
     Span<T> AsSpan();
     Memory<T> AsMemory();
     QueryResults<T> Slice(int index, int count);
@@ -54,11 +57,12 @@ public readonly struct QueryResults<T> :
     List<T> ToList();
     HashSet<T> ToHashSet();
     Dictionary<TKey, T> ToDictionary<TKey>(Func<T, TKey>);
+    void CloneElements();                  // deep-clone every row in place
     void Dispose();
 }
 ```
 
-`QueryResults<T>` has an implicit conversion to `ReadOnlySpan<T>`. Disposing returns the pooled buffer to `ArrayPool.Shared`; the struct is safe to dispose twice but the buffer must not outlive disposal.
+`QueryResults<T>` has an implicit conversion to `ReadOnlySpan<T>`, a static `Empty`, and a **ref enumerator**: `foreach (ref var x in results)` edits the backing array in place. Disposing returns the pooled buffer to the pool; the buffer must not be used after disposal. Pooled join results share one rented buffer, returned by the single `Dispose()` on the outer result.
 
 ## Intersection semantics
 
@@ -67,11 +71,22 @@ public readonly struct QueryResults<T> :
 - Empty candidate sets short-circuit: subsequent narrowing steps are skipped, and `Execute*` returns `QueryResults<T>.Empty` without scanning the storage.
 - Range indices contribute via B-Tree walks bounded by the operator (`Gte`, `Lt`, etc.); the walked node range feeds the same intersecter.
 
-There is **no** runtime cost-based optimizer — your call order is the order. Place the most selective index first to keep intermediate sets small.
+On the eager path there is **no** runtime cost-based optimizer — your call order is the plan. Place the most selective index first to keep intermediate sets small. `BuildFrozen()` lifts this restriction by seeding from the narrowest lane for each execution's arguments; see [Prepared and Frozen Queries](prepared-queries.md).
+
+## Where — residual filter
+
+`Where(v => bool)` runs on the survivors of all index lanes and never uses an index. It is the right place for predicates on non-indexed properties; a `Where` with no preceding lane walks the whole cache.
+
+```csharp
+using var pending = orderCache.Query()
+    .WithCustomerId(42)
+    .Where(o => o.Status == OrderStatus.Pending)
+    .ExecutePooled();
+```
 
 ## UseIndex — manual planning
 
-When you have a reference to a generated `CacheUniqueIndex<...>` / `CacheKeyValueListIndex<...>` (often because you want to compose with a foreign-key selector or feed values from another cache), `UseIndex` lets you narrow the candidate set without going through `WithProperty`:
+When you have a reference to a generated `CacheUniqueIndex<...>` / `CacheKeyValueListIndex<...>` (often because you want to feed values from another cache), `UseIndex` lets you narrow the candidate set without going through `WithProperty`. It is also the only form on the raw `InMemoryDataCache<TKey, TValue>`, which has no generated `WithXxx`:
 
 ```csharp
 using var spans = books.Query()
@@ -137,8 +152,8 @@ The above is equivalent to `Status = Open AND (CustomerId = 42 OR CustomerId = 4
 - **No-op branch excluded.** A branch lambda that doesn't call any `WithXxx`
   contributes nothing to the union — useful for conditional inclusion.
 
-- **Reachable inside `JoinOne` filters.** The right-cache filter callback in a
-  `JoinOne(..., filter)` is itself a narrow-capable builder, so `q.Or(...)`
+- **Reachable inside join filters.** The right-cache filter callback of a
+  `JoinWith{T}(q => ...)` / `JoinOne(..., filter)` is itself a narrow-capable builder, so `q.Or(...)`
   inside the filter narrows which right-cache entries attach to each left row.
 
 ### Zero-allocation `TArg` overload
@@ -170,18 +185,18 @@ using var results = orderCache.Query()
 - Zero GC allocations with `static` lambdas (or with the `TArg` overload when state
   must flow through).
 
-## Sort
+## Sort and SortBounded
 
-`Sort` wraps the builder in `SortedQuery<TDiscriminator>` and composes with downstream joins:
+Two sorted plans exist and you pick one: `Sort` materializes every candidate and runs a stable full sort; `SortBounded` selects just the requested page (top-k) and is the choice for paging.
 
 ```csharp
 using var page = orderCache.Query()
     .WithCustomerId(42)
-    .Sort(OrderCache.ByDateComparer)
+    .SortBounded(OrderCache.ByDateComparer)
     .ExecutePooled(skip: 0, take: 25);
 ```
 
-`Sort` takes any `IComparer<T>`. The generator emits one per `[DataCacheSort]` declaration (see [Index Types](index-types.md)). Sort runs after intersection on the candidate set, not on the whole cache.
+Both take any `IComparer<T>`; the generator emits one per `[DataCacheSort]` declaration (see [Index Types](index-types.md)), and a `readonly struct` comparer makes either sort 0 B. Sorting runs after intersection on the candidate set, not on the whole cache. After `Sort` / `SortBounded` only the outer, unfiltered `JoinWith{T}()` binds. Which plan to choose, and why a comparer with ties needs care, is in [Sorted Paging](sorted-paging.md).
 
 ## Counting
 
@@ -195,6 +210,35 @@ var n = orderCache.Query()
 
 It uses the same intersection plan but skips the result-array allocation.
 
+## Result mapping
+
+`Map` lives on `QueryResults<T>`, not on the builder: execute first, then project. It returns a result of the same pooled kind with `TotalCount` preserved and **consumes the source** (the source is disposed for you), so dispose the mapped result.
+
+```csharp
+using var totals = orderCache.Query()
+    .WithCustomerId(42)
+    .ExecutePooled(skip: 20, take: 10)
+    .Map(o => new { o.OrderId, o.Total });
+```
+
+## Deep cloning
+
+The generator emits `Clone()` for every `[DataCache]` type (recursive, collection-aware, no reflection). `ExecuteCloned()` / `ExecutePooledCloned()` return cloned rows you can mutate without touching the cache; `results.CloneElements()` does the same after the fact.
+
+## Batch reads
+
+For a known set of keys, skip the builder:
+
+```csharp
+var keys = new[] { "ORD-001", "ORD-002", "ORD-003" };
+
+Span<Order> buffer = new Order[keys.Length];
+int found = orderCache.Cache.TryGet(keys, buffer);                   // fills the span, returns the hit count
+
+List<Order> orders = orderCache.Cache.TryGet(keys);                 // only the found items
+List<Order> big    = orderCache.Cache.TryGet(keys, o => o.Total > 100m);
+```
+
 ## String queries
 
 Each generated cache also exposes `IQueryParser<TValue> QueryParser { get; }` for string-driven queries — useful for read APIs:
@@ -203,9 +247,11 @@ Each generated cache also exposes `IQueryParser<TValue> QueryParser { get; }` fo
 using var results = orderCache.QueryParser.StringQueryPooled("customerId=42&total>100");
 ```
 
-The query language is simple equality + range over the queryable fields enumerated by `QueryParser.QueryableFields`.
+The query language is simple equality + range over the queryable fields enumerated by `QueryParser.QueryableFields`. `Prague.Api`'s `app.MapPragueEndpoints()` exposes the same parser over HTTP: `GET /prague` (statistics), `GET /prague/{CacheName}?customerId=42`, `GET /prague/{CacheName}/{id}`; `Prague.Api.UI` adds a MudBlazor front end (`AddPragueUI()` / `MapPragueUI()`).
 
 ## Next
 
+- [Sorted Paging](sorted-paging.md) — `Sort` vs `SortBounded`.
+- [Prepared and Frozen Queries](prepared-queries.md) — build once, execute at 0 B.
 - [Conditional Updates](conditional-updates.md) — how writes interact with deep equality.
 - [Joins](joins.md) — extending a query with another cache's view.

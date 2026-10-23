@@ -1,7 +1,17 @@
 /* Prague DocFX theme — 1:1 translation of Docs.tsx (branding kit) */
 
+/* The site is light-only. docfx.min.js flips data-bs-theme to "dark" when the
+   OS prefers dark, so the same tokens are declared for both themes; otherwise
+   Bootstrap's dark emphasis colour paints table text white on our white cells. */
 :root,
-[data-bs-theme="light"] {
+[data-bs-theme="light"],
+[data-bs-theme="dark"] {
+	color-scheme: light;
+	--bs-emphasis-color: #000;
+	--bs-emphasis-color-rgb: 0, 0, 0;
+	--bs-secondary-color: rgba(20, 20, 20, 0.75);
+	--bs-tertiary-bg: #F9F9F8;
+	--bs-secondary-bg: #F2F2F2;
 	--brand-orange: #F27D26;
 	--brand-orange-dim: #c5631b;
 	--brand-black: #141414;
@@ -49,6 +59,29 @@ code, pre, kbd, samp { font-family: var(--font-mono); }
 
 a { color: inherit; text-decoration: none; }
 
+:focus-visible { outline: 3px solid var(--brand-orange); outline-offset: 2px; }
+
+img, svg { max-width: 100%; }
+img { height: auto; }
+
+@media (prefers-reduced-motion: reduce) {
+	*, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}
+
+.prague-skip-link {
+	position: absolute;
+	left: 16px;
+	top: -64px;
+	z-index: 100;
+	padding: 10px 14px;
+	background: var(--brand-black);
+	color: #fff;
+	font-weight: 700;
+	border-radius: 6px;
+}
+
+.prague-skip-link:focus { top: 12px; }
+
 /* ────────────────────────────── shell ────────────────────────────── */
 
 .prague-shell {
@@ -76,7 +109,34 @@ a { color: inherit; text-decoration: none; }
 .prague-nav-left {
 	display: flex;
 	align-items: center;
-	gap: 32px;
+	gap: 16px;
+	min-width: 0;
+}
+
+@media (min-width: 992px) {
+	.prague-nav-left { gap: 32px; }
+}
+
+.prague-toc-toggle,
+.prague-toc-close {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 40px;
+	height: 40px;
+	border: 1px solid rgba(20, 20, 20, 0.12);
+	border-radius: 8px;
+	background: #fff;
+	color: var(--brand-black);
+	cursor: pointer;
+	padding: 0;
+}
+
+.prague-toc-toggle svg,
+.prague-toc-close svg { width: 18px; height: 18px; }
+
+@media (min-width: 992px) {
+	.prague-toc-toggle, .prague-toc-close { display: none; }
 }
 
 .prague-brand {
@@ -123,11 +183,11 @@ a { color: inherit; text-decoration: none; }
 }
 
 .prague-nav-tab {
-	font-size: 10px;
+	font-size: 11px;
 	font-weight: 700;
 	text-transform: uppercase;
 	letter-spacing: 0.1em;
-	color: rgba(20, 20, 20, 0.4);
+	color: rgba(20, 20, 20, 0.65);
 	padding: 4px 0;
 	transition: color 120ms ease;
 }
@@ -158,7 +218,7 @@ a { color: inherit; text-decoration: none; }
 	transform: translateY(-50%);
 	width: 12px;
 	height: 12px;
-	color: rgba(20, 20, 20, 0.3);
+	color: rgba(20, 20, 20, 0.5);
 	pointer-events: none;
 }
 
@@ -187,7 +247,7 @@ a { color: inherit; text-decoration: none; }
 	width: 32px;
 	height: 32px;
 	border-radius: 9999px;
-	color: rgba(20, 20, 20, 0.5);
+	color: rgba(20, 20, 20, 0.7);
 	transition: background 120ms ease, color 120ms ease;
 }
 
@@ -216,24 +276,43 @@ a { color: inherit; text-decoration: none; }
 	flex-shrink: 0;
 	background: #fff;
 	border-right: 1px solid rgba(20, 20, 20, 0.05);
-	display: flex;
 	flex-direction: column;
 	padding-top: 24px;
 }
 
-@media (max-width: 1023px) {
-	.prague-sidebar { display: none; }
+/* ≥ lg: a plain column. < lg: Bootstrap's offcanvas-lg takes over (slide-in
+   panel toggled by the hamburger in the top bar). */
+@media (min-width: 992px) {
+	.prague-sidebar { display: flex; height: 100%; }
+}
+
+@media (max-width: 991.98px) {
+	.prague-sidebar {
+		width: min(var(--sidebar-w), 85vw);
+		z-index: 1045;
+		padding-top: 16px;
+	}
+	.prague-sidebar.show,
+	.prague-sidebar.showing,
+	.prague-sidebar.hiding { display: flex; }
+}
+
+.prague-sidebar-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 0 24px;
+	margin-bottom: 16px;
 }
 
 .prague-sidebar-title {
-	margin: 0 0 16px;
-	padding: 0 24px;
-	font-size: 10px;
+	margin: 0;
+	font-size: 11px;
 	font-weight: 700;
 	font-style: italic;
 	text-transform: uppercase;
 	letter-spacing: 0.2em;
-	color: rgba(20, 20, 20, 0.4);
+	color: rgba(20, 20, 20, 0.65);
 }
 
 .prague-sidebar-nav {
@@ -259,11 +338,13 @@ a { color: inherit; text-decoration: none; }
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	font-size: 10px;
+	font-size: 11px;
 	font-family: var(--font-mono);
 	font-weight: 700;
-	color: var(--brand-orange);
+	color: var(--brand-orange-dim);
 }
+
+.prague-version-pill:hover { border-color: var(--brand-orange); }
 
 .prague-version-pill svg { width: 12px; height: 12px; }
 
@@ -288,9 +369,9 @@ a { color: inherit; text-decoration: none; }
 	gap: 8px;
 	padding: 0 12px;
 	margin-bottom: 8px;
-	font-size: 11px;
+	font-size: 12px;
 	font-weight: 700;
-	color: rgba(20, 20, 20, 0.8);
+	color: rgba(20, 20, 20, 0.85);
 	text-transform: none;
 }
 
@@ -312,8 +393,8 @@ a { color: inherit; text-decoration: none; }
 .prague-sidebar-nav > ul > li ul li a {
 	display: block;
 	padding: 6px 16px;
-	font-size: 12px;
-	color: rgba(20, 20, 20, 0.5);
+	font-size: 13px;
+	color: rgba(20, 20, 20, 0.7);
 	border-left: 2px solid transparent;
 	margin-left: -1px;
 	transition: color 100ms ease, background 100ms ease, border-color 100ms ease;
@@ -343,15 +424,22 @@ a { color: inherit; text-decoration: none; }
 
 .prague-main {
 	flex: 1;
+	min-width: 0;
 	display: flex;
 	overflow: hidden;
 }
 
 .prague-content {
 	flex: 1;
+	min-width: 0;
 	overflow-y: auto;
+	overflow-x: hidden;
 	background: #fff;
-	padding: 48px 24px;
+	padding: 32px 16px;
+}
+
+@media (min-width: 640px) {
+	.prague-content { padding: 48px 24px; }
 }
 
 @media (min-width: 1024px) {
@@ -366,42 +454,36 @@ a { color: inherit; text-decoration: none; }
 	margin: 0 auto;
 }
 
-.prague-article-header {
-	display: flex;
-	justify-content: space-between;
-	align-items: flex-start;
-	margin-bottom: 32px;
+.prague-article-body h1 {
+	margin: 0 0 24px;
 	padding-bottom: 16px;
 	border-bottom: 1px solid rgba(20, 20, 20, 0.05);
-	gap: 24px;
-}
-
-.prague-article-header h1 {
-	margin: 0;
-	font-size: 2.25rem;
+	font-size: clamp(1.75rem, 4vw, 2.25rem);
 	font-weight: 900;
 	font-style: italic;
 	text-transform: uppercase;
 	letter-spacing: -0.03em;
 	color: var(--brand-black);
 	line-height: 1.05;
+	overflow-wrap: anywhere;
 }
 
 .prague-article-actions {
 	display: flex;
+	justify-content: flex-end;
 	gap: 16px;
-	flex-shrink: 0;
+	margin-bottom: 8px;
 }
 
 .prague-article-action {
 	display: inline-flex;
 	align-items: center;
 	gap: 6px;
-	font-size: 10px;
+	font-size: 11px;
 	font-weight: 700;
 	text-transform: uppercase;
 	letter-spacing: 0.1em;
-	color: rgba(20, 20, 20, 0.4);
+	color: rgba(20, 20, 20, 0.65);
 	transition: opacity 120ms ease;
 }
 
@@ -417,10 +499,10 @@ a { color: inherit; text-decoration: none; }
 	font-size: 15px;
 }
 
-.prague-article-body > p:first-child {
-	font-size: 1.25rem;
-	color: rgba(20, 20, 20, 0.6);
-	font-weight: 300;
+.prague-article-body > h1 + p {
+	font-size: 1.2rem;
+	color: rgba(20, 20, 20, 0.75);
+	font-weight: 400;
 	line-height: 1.55;
 }
 
@@ -525,7 +607,7 @@ a { color: inherit; text-decoration: none; }
 	font-weight: 500;
 	text-transform: uppercase;
 	letter-spacing: 0.15em;
-	color: rgba(20, 20, 20, 0.5);
+	color: rgba(20, 20, 20, 0.65);
 }
 
 /* tables */
@@ -537,6 +619,14 @@ a { color: inherit; text-decoration: none; }
 	text-align: left;
 }
 
+@media (max-width: 767.98px) {
+	.prague-article-body table {
+		display: block;
+		overflow-x: auto;
+		-webkit-overflow-scrolling: touch;
+	}
+}
+
 .prague-article-body thead tr {
 	background: rgba(20, 20, 20, 0.05);
 	border-bottom: 1px solid rgba(20, 20, 20, 0.1);
@@ -544,11 +634,11 @@ a { color: inherit; text-decoration: none; }
 
 .prague-article-body thead th {
 	padding: 12px 16px;
-	font-size: 10px;
+	font-size: 11px;
 	font-weight: 700;
 	text-transform: uppercase;
 	letter-spacing: 0.1em;
-	color: rgba(20, 20, 20, 0.4);
+	color: rgba(20, 20, 20, 0.65);
 }
 
 .prague-article-body tbody td {
@@ -569,17 +659,19 @@ a { color: inherit; text-decoration: none; }
 	display: flex;
 	justify-content: space-between;
 	align-items: center;
-	font-size: 10px;
+	font-size: 11px;
 	font-family: var(--font-mono);
 	text-transform: uppercase;
 	letter-spacing: 0.1em;
-	color: rgba(20, 20, 20, 0.4);
+	color: rgba(20, 20, 20, 0.65);
+	flex-wrap: wrap;
+	gap: 12px;
 }
 
 .prague-article-nav { display: flex; gap: 16px; align-items: center; }
 
 .prague-article-nav a {
-	color: rgba(20, 20, 20, 0.5);
+	color: rgba(20, 20, 20, 0.7);
 	transition: color 120ms ease;
 }
 
@@ -601,14 +693,14 @@ a { color: inherit; text-decoration: none; }
 	.prague-affix { display: none; }
 }
 
-.prague-affix-title {
-	margin: 0 0 24px;
-	font-size: 10px;
+.prague-affix-nav h5 {
+	margin: 0 0 16px;
+	font-size: 11px;
 	font-weight: 700;
 	font-style: italic;
 	text-transform: uppercase;
 	letter-spacing: 0.2em;
-	color: rgba(20, 20, 20, 0.4);
+	color: rgba(20, 20, 20, 0.65);
 }
 
 .prague-affix-nav ul,
@@ -625,8 +717,8 @@ a { color: inherit; text-decoration: none; }
 .prague-affix-nav a {
 	display: block;
 	padding: 2px 16px;
-	font-size: 11px;
-	color: rgba(20, 20, 20, 0.4);
+	font-size: 12px;
+	color: rgba(20, 20, 20, 0.7);
 	border-left: 2px solid transparent;
 	transition: color 120ms ease, border-color 120ms ease;
 }
@@ -657,9 +749,9 @@ a { color: inherit; text-decoration: none; }
 	margin-bottom: 12px;
 }
 
-.prague-help h5 {
+.prague-help h2 {
 	margin: 0 0 8px;
-	font-size: 11px;
+	font-size: 12px;
 	font-weight: 700;
 	text-transform: uppercase;
 	letter-spacing: -0.02em;
@@ -667,9 +759,8 @@ a { color: inherit; text-decoration: none; }
 
 .prague-help p {
 	margin: 0 0 16px;
-	font-size: 10px;
-	font-style: italic;
-	color: rgba(20, 20, 20, 0.6);
+	font-size: 12px;
+	color: rgba(20, 20, 20, 0.75);
 	line-height: 1.5;
 }
 
@@ -679,7 +770,7 @@ a { color: inherit; text-decoration: none; }
 	padding: 8px;
 	background: var(--brand-black);
 	color: #fff;
-	font-size: 9px;
+	font-size: 11px;
 	font-weight: 700;
 	text-transform: uppercase;
 	letter-spacing: 0.1em;
@@ -743,6 +834,10 @@ a { color: inherit; text-decoration: none; }
 
 /* docfx-injected breadcrumb (we'll keep it hidden — the page header H1 is enough) */
 #breadcrumb { display: none; }
+
+/* code blocks must scroll, never widen the column */
+.prague-article-body pre { max-width: 100%; }
+.prague-article-body .level1, .prague-article-body .level2, .prague-article-body .level3 { overflow-x: auto; }
 
 /* hide modern's leftover navbar/affix bootstrap markup we don't use */
 header.bg-body,

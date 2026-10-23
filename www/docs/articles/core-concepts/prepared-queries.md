@@ -1,5 +1,6 @@
 ---
 title: Prepared and Frozen Queries
+description: Prepare a Prague query once with a parameter struct, Build or BuildFrozen it, and execute at zero allocation; executors, branching and the ordering contract.
 ---
 
 # Prepared and Frozen Queries
@@ -51,7 +52,8 @@ lambdas so the delegate is created once, at build.
 for the parameterless `Prepare()`. A class is a compile error: the whole prepared path is constrained
 `where TArgs : struct`, which keeps every generic over it JIT-specialized.
 
-`Execute`, `ExecutePooled`, `Count` and the `*Cloned` variants take `in TArgs` plus the usual `skip` /
+Prepared builders have no `Execute*`; `Build()` / `BuildFrozen()` are the only terminals. On the built
+query, `Execute`, `ExecutePooled`, `Count` and the `*Cloned` variants take `in TArgs` plus the usual `skip` /
 `take`. Every selector callback receives `TArgs` by value and runs once per execution, so no spelling
 changes there. **One callback is different: the arg `Where` predicate.** It runs once per candidate row,
 so it takes `TArgs` by `in` through the `ArgFilter<TValue, TArgs>` delegate, and the lambda must spell

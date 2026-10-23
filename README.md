@@ -862,6 +862,8 @@ zero-copy from the broker's buffer to your POCO.
 
 ## 📚 Documentation
 
+- **Docs site** — [nanov.github.io/prague.net](https://nanov.github.io/prague.net/): guides at [`/docs/`](https://nanov.github.io/prague.net/docs/),
+  generated [API reference](https://nanov.github.io/prague.net/docs/api/index.html), and [`/llms.txt`](https://nanov.github.io/prague.net/llms.txt) for assistants.
 - **Docs site sources** — [`www/docs/`](www/docs/): [Introduction](www/docs/articles/getting-started/introduction.md)
   · [Installation](www/docs/articles/getting-started/installation.md)
   · [Quick Start](www/docs/articles/getting-started/quick-start.md)
