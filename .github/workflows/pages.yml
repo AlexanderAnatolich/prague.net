@@ -90,6 +90,11 @@ jobs:
         working-directory: www/docs
         run: docfx docfx.json --metadata _pragueVersion=${{ steps.version.outputs.version }}
 
+      # Excalidraw's SVG export names Excalifont but does not embed it; inline it so the
+      # diagrams render with the handwriting font instead of a system cursive fallback.
+      - name: Embed diagram font
+        run: python3 www/docs/scripts/embed-svg-fonts.py www/docs/_site/images
+
       - name: Assemble _site
         run: |
           mkdir -p _site/docs

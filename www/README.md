@@ -61,6 +61,7 @@ sidebar link is dead. It uses `GH_TOKEN` when set (CI passes `github.token`; loc
 (cd www/site && npm ci && npm run build)
 GH_TOKEN=$(gh auth token) www/docs/scripts/release-notes.sh      # articles/reference/release-notes.md (gitignored)
 (cd www/docs && docfx docfx.json --metadata _pragueVersion=$(gh release view --json tagName --jq '.tagName | ltrimstr("v")'))
+python3 www/docs/scripts/embed-svg-fonts.py www/docs/_site/images   # inline Excalifont into the diagram SVGs
 rm -rf www/_dist && mkdir -p www/_dist/docs
 cp -R www/site/dist/. www/_dist/
 cp -R www/docs/_site/. www/_dist/docs/
@@ -91,6 +92,13 @@ Logo PNGs live in `www/site/public/` (`logo-mark.png`, `logo-full.png`); the alt
 produced are kept in `www/site/src/assets/images/` and are not shipped. The DocFX brand override
 (`www/docs/templates/prague/public/main.css`) re-uses the same color tokens (`--brand-orange #F27D26`,
 `--brand-black #141414`) and fonts so the two halves of the site feel like one.
+
+## Diagrams
+
+Diagrams are Excalidraw files in `www/docs/images/*.excalidraw`, drawn with the `excalidraw-architect`
+MCP tooling and exported next to the source as `*.svg` (commit both). The export only names the
+Excalifont typeface; `scripts/embed-svg-fonts.py` inlines the Latin subset from `www/docs/fonts/` into
+the built SVGs so they look the same in every browser (see `www/docs/fonts/README.md`).
 
 ## Adding a doc article
 
