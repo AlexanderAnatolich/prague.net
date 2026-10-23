@@ -46,3 +46,27 @@ public class AddOrUpdateAndProduceForceTests {
 		Assert.That(cache.TryGet(1, out var resident) && ReferenceEquals(resident, changed), "the local write landed before the produce step");
 	}
 }
+
+/// <summary>
+///   <c>ForceProduceAll()</c> is a repair operation and refuses to run without a producer, before taking
+///   the store snapshot — an unconfigured cache fails fast instead of silently producing nothing.
+/// </summary>
+[TestFixture]
+public class ForceProduceAllTests {
+	[Test]
+	public void NoProducer_Throws_EvenForAnEmptyCache() {
+		var cache = new TestEntityWithoutTimestampCache();
+		var ex = Assert.Throws<InvalidOperationException>(() => cache.ForceProduceAll());
+		Assert.That(ex!.Message, Does.Contain("Producer not configured"));
+	}
+
+	[Test]
+	public void NoProducer_LeavesResidentRecordsUntouched() {
+		var cache = new TestEntityWithoutTimestampCache();
+		var doc = new TestEntityWithoutTimestamp { Id = 1, Name = "a" };
+		cache.AddOrUpdate(doc);
+
+		Assert.Throws<InvalidOperationException>(() => cache.ForceProduceAll());
+		Assert.That(cache.TryGet(1, out var kept) && ReferenceEquals(kept, doc), "produce-all never writes locally");
+	}
+}

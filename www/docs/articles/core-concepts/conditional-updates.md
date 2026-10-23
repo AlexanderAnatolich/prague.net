@@ -61,6 +61,8 @@ When the current state has to go back onto the topic even though nothing changed
 
 [!code-csharp[](../../../../samples/Prague.Samples/Advanced/KafkaIntegration.cs#produce-forced)]
 
+For the whole cache at once there is `cache.ForceProduceAll()`, which snapshots every resident record and produces each one unconditionally. It is a repair operation (re-seeding a topic, bootstrapping a consumer that cannot replay), not something to call in normal operation; the details are in [Kafka integration](../advanced/kafka-integration.md#producer).
+
 ## Why this matters
 
 Compacted Kafka topics naturally re-emit the latest state on each rebalance and rebuild. Without conditional updates a downstream projector would see thousands of `Update` events on startup that are no-ops. With them the count of `Update` events is exactly the number of state transitions across the topic's lifetime.

@@ -214,6 +214,10 @@ When a cache is registered with `AddCache` (not `AddInternalCache`), the generat
 
 [!code-csharp[](../../../../samples/Prague.Samples/Advanced/KafkaIntegration.cs#produce-forced)]
 
+`ForceProduceAll()` is the whole-cache version of that re-publish, and it is a repair tool rather than part of normal writing: it snapshots every resident record (taking every store lock while the snapshot is copied), then produces one record per key whether or not anything changed, and returns how many it produced. Reach for it to re-seed a topic after a retention or compaction mishap, to bootstrap a downstream consumer that cannot replay, or to re-publish state written under an older schema. The snapshot is taken once, before the first produce, so writes that land during the pass are not included; the pass does not wait for delivery. Consumers receive the records through their ordinary equality gate, so a replica that already holds the same state reports `Same` for each one, and this process's own consumer skips them as self-produced.
+
+[!code-csharp[](../../../../samples/Prague.Samples/Advanced/KafkaIntegration.cs#produce-all)]
+
 **Your own writes are not applied to your own cache.** Every consumer drops messages stamped with its own producer instance id, so a process that calls `Produce` or `Delete` directly does not see the result in its local cache until it restarts. For deletes, use the generated `cache.RemoveAndProduce(key)` instead: it removes the key locally *and* publishes the tombstone. The tombstone is published whether or not the key was resident locally — a key excluded by an ingress filter, or not loaded yet, still gets its delete — and the `bool` it returns says only whether the local cache held the key.
 
 ## MessagePack isolation

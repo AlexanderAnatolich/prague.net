@@ -307,6 +307,11 @@ public class KafkaIntegration {
 	}
 	#endregion
 
+	#region produce-all
+	// Repair only: snapshots the whole store under its locks, then produces one record per resident key.
+	public static int ReSeedTopic(OrderCache orders) => orders.ForceProduceAll();
+	#endregion
+
 	private static ServiceCollection NewServices() {
 		var services = new ServiceCollection();
 		services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());   // a host registers this for you

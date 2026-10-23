@@ -2611,6 +2611,39 @@ public class CacheGenerator : IIncrementalGenerator {
 						w.Line("return removed;");
 					});
 
+					// ForceProduceAll: re-emit every resident record onto the topic. A repair tool, not an operation:
+					// the snapshot takes every store lock, and the produce is one record per resident key. It reuses
+					// the same full-scan the generated CreateDump takes (Query().ExecutePooled()), so Core gains no
+					// new surface and the per-record produce is the ordinary CacheMarshall.Produce.
+					w.Line();
+					w.Summary("Produces every record currently resident in this cache to Kafka, unconditionally.",
+						"<para>",
+						"This is a repair operation, not part of normal writing: it snapshots the whole store (taking every",
+						"store lock for the duration of the snapshot) and then produces one record per resident key, whether",
+						"or not anything changed. Use it to re-seed a topic — after a retention or compaction mishap, to",
+						"bootstrap a new downstream consumer, or to re-publish state produced by an older schema. Every",
+						"consumer receives the records through its ordinary equality gate, so a consumer that already holds",
+						"the same state sees no change; this process's own consumer skips them as self-produced.",
+						"</para>",
+						"<para>",
+						"The snapshot is taken once, before the first produce; records written after it are not included.",
+						"The method does not block on delivery. Returns the number of records produced.",
+						"</para>");
+					w.Method($"public static int ForceProduceAll(this {cacheFullName} cache)", (ref CodeWriter w) => {
+						w.If("cache._producer == null || cache._topicName == null", (ref CodeWriter w) => {
+							w.Line("throw new System.InvalidOperationException(\"Producer not configured. Ensure this cache is registered with Kafka.\");");
+						});
+						w.Line("using var all = cache.Query().ExecutePooled();");
+						w.For("var i = 0; i < all.Count; i++", (ref CodeWriter w) => {
+							w.Line("var document = all[i];");
+							if (!string.IsNullOrEmpty(keyPropertyName))
+								w.Line($"{namespaceName}.CacheMarshall.Produce(cache, document.{keyPropertyName}, document);");
+							else
+								w.Line($"{namespaceName}.CacheMarshall.Produce(cache, document.GetKey(), document);");
+						});
+						w.Line("return all.Count;");
+					});
+
 					// Internal configuration method
 					w.Line();
 					w.Summary("Configures the Kafka producer for this cache instance (internal use only).");

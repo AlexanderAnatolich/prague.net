@@ -527,7 +527,8 @@ bool changed = cache.AddOrUpdate(order, out var previous);   // true: Add or Upd
   to `ICacheAfterHandler<TKey, TValue>`.
 - `cache.AddOrUpdateAndProduce(order)` produces only when the local write changed something;
   `cache.AddOrUpdateAndProduce(order, force: true)` keeps the local write conditional but always
-  produces, to re-publish the current state onto the topic.
+  produces, to re-publish the current state onto the topic. `cache.ForceProduceAll()` does that for
+  every resident record at once — a repair tool for re-seeding a topic, not a normal write.
 
 ### **Deep cloning**
 

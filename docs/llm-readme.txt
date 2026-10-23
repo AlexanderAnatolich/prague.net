@@ -135,6 +135,8 @@ InvoiceNumber (Unique), sort "ByPriority":
   With Prague.Kafka referenced, extension methods:
     orderCache.AddOrUpdateAndProduce(order)         local write; produces ONLY if changed
     orderCache.AddOrUpdateAndProduce(order, force: true)   local write; produces ALWAYS
+    orderCache.ForceProduceAll() → int              REPAIR ONLY: snapshot every resident record (all store
+                                                    locks held during the copy), produce each one, return count
     orderCache.RemoveAndProduce(key) → bool         local remove + tombstone (published either way)
     IEnrichable<Order>                              header/timestamp enrichment
 
@@ -156,6 +158,8 @@ Semantics: AddOrUpdate compares with CacheEquals; equal → nothing swapped, no 
   cache.AddOrUpdateAndProduce(doc)               local conditional write, Produce only if it changed
   cache.AddOrUpdateAndProduce(doc, force: true)  same local write, Produce ALWAYS (re-publish current
                                                  state; consumers still apply it through CacheEquals)
+  cache.ForceProduceAll() → int                  REPAIR ONLY: re-seed the topic with every resident record
+                                                 (one snapshot, then one Produce per key; no local write)
 
 
 5. READING — THE EAGER BUILDER
