@@ -9,7 +9,7 @@ Static site for Prague (`Prague`), built from two pieces and glued together at d
 
 Deployed to GitHub Pages from `.github/workflows/pages.yml`, **manually triggered** (`workflow_dispatch`).
 
-The Pages URL is `https://<owner>.github.io/internal-be-kafka-cache-lib/` — the landing lives at the root, the docs at `/docs/`. The Vite app sets its `base` to `/internal-be-kafka-cache-lib/` at build time so all asset paths resolve correctly under the project-page subpath.
+The Pages URL is `https://nanov.github.io/prague.net/` — the landing lives at the root, the docs at `/docs/`. The Vite app sets its `base` to `/prague.net/` at build time so all asset paths resolve correctly under the project-page subpath.
 
 ## Build locally
 
@@ -54,4 +54,4 @@ Logo PNGs live in `www/site/src/assets/images/`. The DocFX brand override (`www/
 
 ## Editing the landing
 
-Edit `www/site/src/App.tsx`. `import.meta.env.BASE_URL` resolves to `/` in dev and `/internal-be-kafka-cache-lib/` in production builds — use it for any cross-page links (e.g. `${BASE_URL}docs/`).
+Edit `www/site/src/App.tsx`. `import.meta.env.BASE_URL` resolves to `/` in dev and `/prague.net/` in production builds — use it for any cross-page links (e.g. `${BASE_URL}docs/`).

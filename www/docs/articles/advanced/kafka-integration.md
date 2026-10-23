@@ -10,6 +10,44 @@ title: Kafka Integration
 
 Prague assumes each cache is backed by a single compacted Kafka topic where the message key maps to the cache's primary key. Tombstones (`null` value) delete; non-null values upsert. Partition EOF marks the boundary between *initial load* (replay of the topic state) and *live* (subsequent live updates). Consumer group offset commit, partition rebalance, and broker failover are delegated to `Confluent.Kafka` and librdkafka. If you want a refresher, read the Confluent intro to log compaction — you only need to know that, and the rest of this page makes sense.
 
+## Creating a topic
+
+Prague never creates topics (the producer runs with auto-creation off), so create each one in advance. The suggested settings for a Prague topic, as Terraform:
+
+```hcl
+"orders" = {
+  partitions = 1
+  config = {
+    "cleanup.policy"            = "compact"
+    "max.compaction.lag.ms"     = "86400000"
+    "max.message.bytes"         = "1048588"
+    "min.cleanable.dirty.ratio" = "0.1"
+    "min.insync.replicas"       = "2"
+    "retention.bytes"           = "-1"
+    "retention.ms"              = "345600000"
+    "segment.bytes"             = "104857600"
+    "segment.ms"                = "300000"
+  }
+}
+```
+
+| Setting | Value | Why |
+| --- | --- | --- |
+| `partitions` | 1 | The whole topic is one ordered log, read to a single EOF. |
+| `cleanup.policy` | `compact` | Kafka keeps the last value per key, which is what an initial load replays. |
+| `segment.ms` | 5 minutes | The active segment is never compacted. Rolling it every 5 minutes makes new writes compactable within minutes. |
+| `segment.bytes` | 100 MiB | Rolls a busy topic's segment before 5 minutes are up. |
+| `min.cleanable.dirty.ratio` | 0.1 | The cleaner runs once 10% of the log is superseded (Kafka's default is 0.5). |
+| `max.compaction.lag.ms` | 1 day | A superseded value is compacted within a day, even when the dirty ratio is not reached. |
+| `max.message.bytes` | 1048588 | Kafka's default: the largest record batch, after gzip, the broker accepts. |
+| `min.insync.replicas` | 2 | A write needs two in-sync replicas. Use a replication factor of 3 so one broker can be down. |
+| `retention.bytes` | -1 | No size limit. |
+| `retention.ms` | 4 days | Applies only when `cleanup.policy` includes `delete`. With `compact` alone, Kafka deletes nothing by age. |
+
+The compaction settings keep an initial load short: the fewer superseded values left on the topic, the fewer the consumer replays before EOF.
+
+`min.insync.replicas` matters because Prague's producer uses librdkafka's default `acks=all`. When fewer than two replicas are in sync, the broker rejects the write, and the fire-and-forget producer only logs it (see [Producer](#producer)). On a single-broker development cluster (replication factor 1), leave `min.insync.replicas` out, or every write fails.
+
 ## Wiring up
 
 ```csharp
@@ -213,7 +251,7 @@ public sealed class OrderService([FromKeyedServices("kafkaCaches")] KafkaCachePr
 
 `Produce` takes any `[DataCache]` type (it needs the generated `IEnrichable<T>`); the topic does not have to be one this process consumes. A section with no cache at all is a producer-only registration: its consumer subscribes to nothing and its initial load completes at once.
 
-The producer is fire-and-forget. `Produce` and `Delete` return once the message is queued in librdkafka: there is no delivery report and no awaitable result, and a broker-side failure is only logged. It is built from the section's `ClientSettings` (the same dictionary the consumer uses) with gzip compression and topic auto-creation off; acks, idempotence and retries are librdkafka's defaults unless `ClientSettings` sets them. Only a full local queue (`Local_QueueFull`) is retried, up to five times with a short backoff, before it throws. `Dispose` flushes; after it, `Produce` and `Delete` do nothing.
+The producer is fire-and-forget. `Produce` and `Delete` return once the message is queued in librdkafka: there is no delivery report and no awaitable result, and a broker-side failure is only logged. It is built from the section's `ClientSettings` (the same dictionary the consumer uses) with gzip compression and topic auto-creation off; acks, idempotence and retries are librdkafka's defaults (`acks=all`, idempotence off) unless `ClientSettings` sets them. Only a full local queue (`Local_QueueFull`) is retried, up to five times with a short backoff, before it throws. `Dispose` flushes; after it, `Produce` and `Delete` do nothing.
 
 When a cache is registered with `AddCache` (not `AddInternalCache`), the generated `CacheMarshall.Produce(cache, key, value)` / `CacheMarshall.Delete(cache, key)` and `cache.AddOrUpdateAndProduce(value)` use that cache's producer and topic, so no topic string is needed.
 

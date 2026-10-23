@@ -2,73 +2,80 @@
 
 **The High-Performance Event Cache from Kafka's City**
 
-Prague is a blazing-fast, compile-time safe, in-memory cache designed for event sourcing and real-time data streams. Built for .NET, it transforms raw Kafka events into lightning-fast queryable data with automatic index management and zero-reflection overhead.
+Prague is a compile-time-safe, in-memory event cache for .NET. It turns `[DataCache]` POCOs fed by
+event-sourced Kafka topics into typed, indexed, queryable in-process views — with a Roslyn source
+generator doing the wiring, zero reflection on the read path, and pooled, zero-allocation results.
 
 [![NuGet](https://img.shields.io/nuget/v/Prague.svg)](https://www.nuget.org/packages/Prague/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![.NET](https://img.shields.io/badge/.NET-9.0-purple.svg)](https://dotnet.microsoft.com/)
+[![.NET](https://img.shields.io/badge/.NET-9.0%20%7C%2010.0-purple.svg)](https://dotnet.microsoft.com/)
+
+> Working with an AI assistant? Point it at [`docs/llm-readme.txt`](docs/llm-readme.txt) — a dense,
+> factual description of the API, its invariants and the mistakes it should not make.
 
 ```csharp
-// Define your entities with relationships
+// Define your entities with relationships — every [DataCache] type is partial.
 [DataCache]
 public partial class Product {
-    [DataCacheKey]
-    public int Id { get; set; }
-    
+    [DataCacheKey] public int Id { get; set; }
+
     [DataCacheIndex(DataCacheIndexType.Range)]
     public long ReleaseDate { get; set; }
-    
+
     public string Brand { get; set; }
     public bool IsPublished { get; set; }
 }
 
 [DataCache]
 public partial class ProductInfo {
-    [DataCacheKey] 
-    public int Id { get; set; }
-    
+    [DataCacheKey] public int Id { get; set; }
+
     [DataCacheForeignKey<Product>(DataCacheJoinType.OneToOne)]
     public int ProductId { get; set; }
-    
+
     public string Warehouse { get; set; }
 }
 
 [DataCache]
 public partial class Offer {
-    [DataCacheKey] 
-    public int Id { get; set; }
-    
+    [DataCacheKey] public int Id { get; set; }
+
     [DataCacheForeignKey<Product>(DataCacheJoinType.OneToMany)]
     public int ProductId { get; set; }
-    
+
     public decimal Price { get; set; }
 }
 
-// Query with joins - compile-time safe, zero-allocation pooled results
-var results = productCache.Query()
-    .WithReleaseDate(q => q.Gte(now))            // Range query
-    .JoinWithProductInfo()                       // 1:1 join
-    .JoinWithOffer()                             // 1:N join
-    .ExecutePooled();                            // Zero-allocation
+// Query with joins — compile-time safe, pooled, zero-allocation results.
+using var results = productCache.Query()
+    .WithReleaseDate(q => q.Gte(now))            // range index
+    .Where(p => p.IsPublished)                   // residual filter
+    .JoinWithProductInfo()                       // 1:1 join (generated from the FK)
+    .JoinWithOffer()                             // 1:N join (generated from the FK)
+    .ExecutePooled();                            // rents from ArrayPool; Dispose() returns it
 
-foreach (var result in results) {
-    var product = result.Left;                   // Product entity
-    var info = result.Right1;                    // ProductInfo (1:1)
-    var offers = result.Right2;                  // List<Offer> (1:N)
+foreach (var row in results) {
+    var product = row.Left;                      // Product
+    var info    = row.Right;                     // ProductInfo? (1:1, null when missing)
+    var offers  = row.Right2;                    // QueryResults<Offer> (1:N)
 }
-
-results.Dispose();                               // Return to pool
 ```
 
 ## 🗺️ At a glance
 
-Kafka topic → consumer → typed `InMemoryDataCache` with secondary indices → pooled `QueryResults<T>`. After-handlers fire on the live phase only; conditional updates (`UpdateType.Same`) suppress phantom churn.
+Kafka topic → consumer → typed `InMemoryDataCache` with secondary indices → pooled `QueryResults<T>`.
+After-handlers fire on the live phase only; conditional updates (`UpdateType.Same`) suppress phantom churn.
 
-> **Topic requirement — one partition per cache topic.** The initial-load handshake completes per cache on the first partition EOF, so a multi-partition cache topic both goes live before the load has finished *and* leaves readiness permanently reporting `InitialLoadIncomplete`. Prague never creates its own topics (`AllowAutoCreateTopics = false`), so provision them with `--partitions 1`.
+> **Topic requirement — one partition per cache topic.** The initial-load handshake completes per cache
+> on the first partition EOF, so a multi-partition cache topic goes live before the load has finished.
+> Prague never creates its own topics (`AllowAutoCreateTopics = false`), so provision them with
+> `--partitions 1` and `cleanup.policy=compact`. The full suggested topic configuration is in
+> [`www/docs/articles/advanced/kafka-integration.md`](www/docs/articles/advanced/kafka-integration.md#creating-a-topic).
 
 ![Prague data flow](www/docs/images/data-flow.png)
 
-Every `WithXxx` adds a candidate-narrowing lane. The runtime intersects them on a stackalloc bitmap and short-circuits on the first empty set — no further index walks, no allocations.
+Every `WithXxx` adds a candidate-narrowing lane. The runtime intersects them on a stackalloc bitmap and
+short-circuits on the first empty set — no further index walks, no allocations.
 
 ![Query intersection](www/docs/images/query-intersection.png)
 
@@ -76,189 +83,188 @@ Every `WithXxx` adds a candidate-narrowing lane. The runtime intersects them on 
 
 ### **🚀 Extreme Performance**
 - **15.9M+ reads/sec** with pooled queries (concurrent benchmark)
-- **<100ns** indexed lookups
-- **<50ns** conditional updates
-- **Zero allocations** with pooled execution (90KB vs 4.7GB without pooling)
+- **<100 ns** indexed lookups; **18 ns** for a frozen unique-key point lookup
+- **0 B per execution** on pooled and frozen paths
+- **3–36×** over the eager builder with `BuildFrozen()` on indexed shapes
 
-> _Reads/sec is measured by the concurrent `HeavyJoinPooledBenchmarks` (10 reader threads + writers, pooled 3-level join): the count is the sum of result rows returned ÷ wall-clock seconds. Figures are from an Apple M4 Pro; absolute numbers vary by hardware._
+> _Reads/sec is measured by the concurrent `HeavyJoinPooledBenchmarks` (10 reader threads + writers,
+> pooled 3-level join): the count is the sum of result rows returned ÷ wall-clock seconds. All figures
+> are from an Apple M4 Pro; absolute numbers vary by hardware. Every measured table lives in
+> [`benchmarks/Prague.Benchmarks/RESULTS.MD`](benchmarks/Prague.Benchmarks/RESULTS.MD)._
 
 ### **🛡️ Compile-Time Safety**
-- Fluent query API with IntelliSense
-- Index usage validated at compile time
-- Type-safe range builders
-- No reflection, no magic strings
+- Fluent query API generated from your attributes — IntelliSense lists exactly the indices you declared
+- Which verbs are reachable where (`Where`, `Sort`, `Join`, `Execute*`, inside an `Or` branch, inside a
+  join filter, on a prepared builder) is enforced by the type system, not at runtime
+- Type-state range builders, struct comparers, `static` lambdas — no reflection, no magic strings
 
 ### **🎯 Built for Event Sourcing**
-- Conditional updates (only modify on change)
-- Deep equality checks (structural comparison)
-- **Compile-time joins** with 1:1 and 1:N relationships
-- Kafka integration with change detection
+- Conditional updates: generated deep structural equality decides `Add` / `Update` / `Same`
+- Compile-time joins (1:1 and 1:N) driven by `[DataCacheForeignKey<T>]`
+- Kafka consumer/producer on a raw, span-based zero-copy path; header/key/value filters; tombstones
+- Global last-update index for incremental sync ("everything changed since T")
 
-### **📊 Automatic Query Optimization**
-- Three index types: KeyValue (1:1), KeyValueList (1:N), Range (sorted)
-- Automatic index intersection
-- Query engine picks optimal execution plan
-- Short-circuits on empty results
+### **📊 Automatic Query Planning**
+- `Unique`, `Many`, `Range` indices plus symmetric variants and predicate key-set indices
+- Automatic intersection with short-circuit on the first empty lane
+- Two query flavors: eager `Query()…Execute()` and prepared `Prepare()…Build()` / `BuildFrozen()`
+  (plan once, bind one of three executors, execute at 0 B from any thread)
 
 ### **⚡ Modern .NET**
-- Source generators (zero runtime overhead)
-- Span-based APIs
-- Stack allocation where possible
-- SIMD-optimized operations
+- Targets `net9.0` and `net10.0`; C# 14
+- Source generators, `Span<T>`, `stackalloc`, `ArrayPool<T>`, static-abstract strategy structs,
+  SIMD bitmap unions, lock-free readers
 
 ---
 
-## 📦 Installation
+## 📦 Packages & installation
 
 ```bash
-dotnet add package Prague
-dotnet add package Prague.Kafka  # For Kafka integration
+dotnet add package Prague          # facade: Core + Attributes + Codegen
+dotnet add package Prague.Kafka    # Kafka consumer/producer, filters, health, OpenTelemetry
+dotnet add package Prague.Api      # optional: HTTP inspection endpoints
+dotnet add package Prague.Api.UI   # optional: Blazor UI over Prague.Api
 ```
+
+| Package | What it is |
+|---|---|
+| `Prague` | Top-level facade. References `Prague.Core`, `Prague.Attributes` and `Prague.Codegen`. Add this one. |
+| `Prague.Core` | Runtime: `InMemoryDataCache`, indices, query engine, prepared/frozen queries, joins. |
+| `Prague.Attributes` | `[DataCache]`, `[DataCacheKey]`, `[DataCacheIndex]`, `[DataCacheForeignKey<T>]`, … |
+| `Prague.Codegen` | Roslyn source generator (`netstandard2.0`, referenced as an analyzer). |
+| `Prague.Kafka` | Consumer/producer on the `Nanov.Confluent.Kafka` fork, SerDe, filters, health checks, OTel. |
+| `Prague.Api` / `Prague.Api.UI` | `MapPragueEndpoints()` HTTP surface over live caches, and a MudBlazor UI for it. |
+
+Every package multi-targets `net9.0;net10.0`. Published versions are on the `0.6.0-pre.*` line.
 
 ---
 
 ## 🚀 Quick Start
 
-### **1. Define Your Entity**
+### **1. Define your entity**
 
 ```csharp
 using Prague.Core;
 
-[DataCache(CacheClassName = "OrderCache")]
-[DataCacheTopic("orders.events")]
+[DataCache]                                        // optional: [DataCache("OrdersCache")] to name the class
+[DataCacheTopic("orders.events")]                  // optional: default template is "Cache.{ClassName}"
 [DataCacheSort("ByPriority", "Priority:1", "CreatedAt:-1")]
-public class Order : IDataCacheItem<string, Order> {
+public partial class Order {                       // must be partial
     [DataCacheKey]
     public string OrderId { get; set; }
-    
-    [DataCacheIndex(DataCacheIndexType.Many)]
+
+    [DataCacheIndex(DataCacheIndexType.Many)]      // 1:N — many orders per customer
     public int CustomerId { get; set; }
-    
-    [DataCacheIndex(DataCacheIndexType.Range)]
+
+    [DataCacheIndex(DataCacheIndexType.Range)]     // sorted — Gte / Lt / … queries
     public long CreatedAt { get; set; }
-    
-    [DataCacheIndex(DataCacheIndexType.Unique)]
+
+    [DataCacheIndex(DataCacheIndexType.Unique)]    // 1:1 — alternate key
     public string InvoiceNumber { get; set; }
-    
+
     public decimal Total { get; set; }
     public int Priority { get; set; }
     public OrderStatus Status { get; set; }
-    
-    // IDataCacheItem implementation
-    public string GetKey() => OrderId;
 }
 ```
 
-**What happens at compile time:**
-- `OrderCache` class is generated with indices
-- Fluent query builder with type-safe methods
-- Deep clone and equality methods
-- Kafka integration (if Prague.Kafka referenced)
+**What the generator emits:** `OrderCache` (the wrapper: index fields, `Cache`, `Query()`, `Prepare()`,
+`AddOrUpdate`, `TopicNameTemplate`, `ByPriorityComparer`), `Order.CacheEquals` / `CacheGetHashCode`
+(deep structural equality), `Order.Clone()`, a query-string parser, and — when `Prague.Kafka` is
+referenced — the enrichment and `AddOrUpdateAndProduce` / `RemoveAndProduce` helpers.
 
-### **2. Use the Generated Cache**
+### **2. Create the cache**
 
 ```csharp
-// Cache is generated - just instantiate it
+// Stand-alone (tests, in-process views)
 var cache = new OrderCache();
 
-// Add items
-cache.AddOrUpdate(new Order {
-    OrderId = "ORD-001",
-    CustomerId = 42,
-    CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-    InvoiceNumber = "INV-001",
-    Total = 99.99m,
-    Priority = 1,
-    Status = OrderStatus.Pending
-});
+// Or through the registry, which also wires joins and global indexes between caches
+var registry = new DataCacheRegistryBuilder()
+    .Register<OrderCache>()
+    .Register<CustomerCache>()
+    .Build();
+var cache = registry.GetCache<OrderCache>();
 
-// Conditional update (returns false if unchanged)
-bool changed = cache.AddOrUpdate(sameOrder); // false - no change detected
+// Or from Kafka through DI — see "Kafka integration"
+services.AddKafkaCaches(o => o.BootstrapServers = "kafka:9092",
+    b => b.AddCache<OrderCache, string, Order>());
 ```
 
-### **3. Query with Automatic Index Selection**
+### **3. Write**
 
 ```csharp
-// Single index
-var customerOrders = cache.Query()
-    .WithCustomerId(42)
-    .Execute();
+cache.AddOrUpdate(new Order { OrderId = "ORD-001", CustomerId = 42, /* … */ });   // timestamp = now
+cache.AddOrUpdate(order, timestampMs);                                             // explicit timestamp
 
-// Multiple index intersection (automatic optimization)
-var recentHighPriority = cache.Query()
-    .WithCustomerId(42)                          // CustomerID index
-    .WithCreatedAt(q => q.Gte(yesterdayMs))     // Range index
-    .Where(o => o.Status == OrderStatus.Pending) // Filter
-    .Execute();
-
-// With sorting and pagination
-var results = cache.Query()
-    .WithCustomerId(42)
-    .SortByPriority()                            // Generated comparer
-    .Execute(skip: 0, take: 20);
-
-Console.WriteLine($"Found {results.TotalCount} orders, showing {results.Items.Count}");
+// Conditional update: false when the stored value is structurally equal
+bool changed = cache.AddOrUpdate(sameOrder, out var previous);
 ```
 
-### **4. Direct Index Access**
+### **4. Query**
 
 ```csharp
-// KeyValue index (1:1 - unique mapping)
-if (cache.InvoiceNumberIndex.TryGetValue("INV-001", out var orderId)) {
-    cache.TryGet(orderId, out var order);
-}
+// One index
+using var customerOrders = cache.Query()
+    .WithCustomerId(42)
+    .ExecutePooled();
 
-// KeyValueList index (1:N - multiple values)
-var orderIds = cache.CustomerIdIndex.GetValues(42);
+// Several indices intersect; Where runs only on the survivors
+using var recent = cache.Query()
+    .WithCustomerId(42)
+    .WithCreatedAt(q => q.Gte(yesterdayMs))
+    .Where(o => o.Status == OrderStatus.Pending)
+    .ExecutePooled();
 
-// Range index
-var recentOrders = cache.CreatedAtIndex.GetValuesBetween(
-    startTime, 
-    endTime
-);
+// Sorted page — SortBounded for a page, Sort for the whole result (see "Sorted paging")
+using var page = cache.Query()
+    .WithCustomerId(42)
+    .SortBounded(OrderCache.ByPriorityComparer)
+    .ExecutePooled(skip: 0, take: 20);
+
+Console.WriteLine($"Found {page.TotalCount} orders, showing {page.Count}");
+```
+
+`ExecutePooled()` rents from `ArrayPool` and **must be disposed** — `using var` is the idiom.
+`Execute()` allocates and needs no disposal.
+
+### **5. Direct index access**
+
+```csharp
+if (cache.InvoiceNumberIndex.TryGetValue("INV-001", out var orderId))   // Unique → TKey
+    cache.Cache.TryGet(orderId, out var order);
+
+var orderIds   = cache.CustomerIdIndex.GetValues(42);                      // Many → keys
+var recentIds  = cache.CreatedAtIndex.GetValuesBetween(startMs, endMs);    // Range → keys
 ```
 
 ---
 
 ## 🎓 Core Concepts
 
-### **Index Types**
+### **Index types**
 
-Prague provides three index types, each optimized for different query patterns:
+| Attribute | Index class | Shape | Generated query verb |
+|---|---|---|---|
+| `[DataCacheIndex(Unique)]` | `CacheUniqueIndex` | 1:1, O(1) | `WithXxx(value)`, `WithXxx(span / array / list)` |
+| `[DataCacheIndex(Many)]` (default) | `CacheKeyValueListIndex` | 1:N, O(1) + bucket | same; a multi-value call is an OR within the lane |
+| `[DataCacheIndex(Range)]` | `CacheRangeIndex` (pooled B+tree) | sorted | `WithXxx(q => q.Gte(a).Lt(b))` |
+| `[DataCacheIndex(Many, Symmetric = true)]` | `CacheSymmetricKeyValueListIndex` | 1:N + reverse map | as `Many`; enables left-index-driven joins |
+| `[DataCacheIndex(Unique, Symmetric = true)]` | `CacheSymmetricUniqueIndex` | 1:1 + reverse map | as `Unique` |
+| `[DataCacheHasValueIndex]` / `[DataCacheHasNotValueIndex]` | `CacheKeySetIndex` | keys with non-null / null (or `true` / `false`) | `WithXxx()` / `WithoutXxx()` |
+| `[DataCacheValueIndex(CompareOp, value)]` / `[DataCacheNoValueIndex(…)]` | `CacheKeySetIndex` | keys matching / not matching a constant comparison | `With{IndexName}()` / `Without{IndexName}()` |
+| `[DataCacheGlobalLastUpdateIndex<TIndex>]` | `LastUpdatedIndex` | recency per group key, shared across caches | `UpdatedAfter(...)` — see below |
 
-#### **1. KeyValue Index (1:1 Unique Mapping)**
-```csharp
-[DataCacheIndex(DataCacheIndexType.Unique)]
-public string InvoiceNumber { get; set; }
-```
-- **Use case**: Alternate unique keys (email, invoice number, SKU)
-- **Lookup**: O(1)
-- **Storage**: `ConcurrentDictionary<TIndexKey, TKey>`
-- **Generated**: `InvoiceNumberIndex.TryGetValue(invoice, out orderId)`
+- A `Many` index takes an `InitialCapacity` hint for its per-key buckets: `[DataCacheIndex(Many, 4)]`.
+- `[DataCacheKey]` is the primary key; `WithKey(...)` / `With{KeyProperty}(...)` narrow by it.
+- **External types you don't own:** `[DataCache<ExternalDto>(nameof(ExternalDto.Id))]` on a `partial`
+  class plus class-level `[DataCacheIndex(nameof(ExternalDto.CustomerId), DataCacheIndexType.Many)]`
+  and the property-name forms of the other attributes.
 
-#### **2. KeyValueList Index (1:N Multi-Value)**
-```csharp
-[DataCacheIndex(DataCacheIndexType.Many)]
-public int CustomerId { get; set; }
-```
-- **Use case**: Foreign keys, categories, tags
-- **Lookup**: O(1) + set enumeration
-- **Storage**: `ConcurrentDictionary<TIndexKey, ImmutableHashSet<TKey>>`
-- **Thread-safe**: Immutable sets with structural sharing
-- **Generated**: `CustomerIdIndex.GetValues(customerId)`
+**Range builder.** The sub-builder is type-state: open a lower bound with `Gt` / `Gte` *or* an upper
+bound with `Lt` / `Lte`, then optionally close the other side. There is no `Between` and no `Or` on
+it — a disjunction is written with the query-level `.Or(...)` clause.
 
-#### **3. Range Index (Sorted Queries)**
-```csharp
-[DataCacheIndex(DataCacheIndexType.Range)]
-public long CreatedAt { get; set; }
-```
-- **Use case**: Timestamps, prices, scores, ratings
-- **Lookup**: O(log n) binary search + range scan
-- **Storage**: `ConcurrentSortedList<TIndexKey, TKey>`
-- **Operations**: `Gte`, `Lte`, `Gt`, `Lt`, `Between`
-- **Generated**: Type-safe fluent range builder
-
-**Range query builder:**
 ```csharp
 .WithCreatedAt(q => q.Gte(start).Lt(end))     // [start, end)
 .WithCreatedAt(q => q.Gt(start).Lte(end))     // (start, end]
@@ -266,282 +272,169 @@ public long CreatedAt { get; set; }
 .WithCreatedAt(q => q.Lt(end))                // (-∞, end)
 ```
 
-### **Joins (Foreign Key Relationships)**
+### **Query execution**
 
-Prague supports compile-time safe joins between caches with automatic index management:
+| Terminal | Allocates | Clones elements | Use |
+|---|---|---|---|
+| `Execute(skip, take)` | new array | no | one-off, tests |
+| `ExecuteCloned(skip, take)` | new array | yes | caller mutates the rows |
+| `ExecutePooled(skip, take)` | `ArrayPool` rent | no | **hot paths — `using var`** |
+| `ExecutePooledCloned(skip, take)` | `ArrayPool` rent | yes | pooled + safe to mutate |
+| `Count()` | none | — | matching count without materializing |
 
-#### **Defining Relationships**
+All return `QueryResults<T>`: `Count`, `TotalCount` (before paging), `Truncated`, indexer, `AsSpan()`,
+`Slice`, `Sort`, `Map`, `ToArray` / `ToList` / `ToDictionary`, an implicit `ReadOnlySpan<T>` conversion
+and a **ref enumerator** (`foreach (ref var x in results)` edits the backing array in place).
 
-```csharp
-// Parent entity
-[DataCache]
-public partial class Product {
-    [DataCacheKey]
-    public int Id { get; set; }
-    public string Brand { get; set; }
-}
+**Execution plan:** the first lane seeds the candidate set, every later lane intersects it on a
+stackalloc bitmap, an empty intersection stops immediately, and `Where` predicates run only on the
+survivors. Place the most selective index first on the eager path; the frozen path picks the seed
+itself.
 
-// One-to-One: Each product has exactly one ProductInfo
-[DataCache]
-public partial class ProductInfo {
-    [DataCacheKey] 
-    public int Id { get; set; }
-    
-    [DataCacheForeignKey<Product>(DataCacheJoinType.OneToOne)]
-    public int ProductId { get; set; }
-    
-    public string Warehouse { get; set; }
-}
+`UseIndex(index, value | span | list)` narrows by an index field directly — the raw
+`InMemoryDataCache<TKey,TValue>` has no generated `WithXxx` and uses this form.
 
-// One-to-Many: Each product has multiple offers
-[DataCache]
-public partial class Offer {
-    [DataCacheKey] 
-    public int Id { get; set; }
-    
-    [DataCacheForeignKey<Product>(DataCacheJoinType.OneToMany)]
-    public int ProductId { get; set; }
-    
-    public decimal Price { get; set; }
-}
-```
+### **OR queries**
 
-#### **Registering Joined Caches**
-
-```csharp
-var registry = new DataCacheRegistry();
-var productCache = registry.GetCache<ProductCache>();
-var productInfoCache = registry.GetCache<ProductInfoCache>();
-var offerCache = registry.GetCache<OfferCache>();
-
-// Register the relationship
-productCache.AddJoinedCaches(productInfoCache, offerCache);
-```
-
-#### **Querying with Joins**
-
-```csharp
-// Standard execution (allocates result objects)
-var results = productCache.Query()
-    .WithReleaseDate(q => q.Gte(now))
-    .JoinWithProductInfo()           // 1:1 join
-    .JoinWithOffer()                 // 1:N join
-    .Execute();
-
-// Pooled execution (zero allocations - recommended!)
-var pooledResults = productCache.Query()
-    .WithReleaseDate(q => q.Gte(now))
-    .JoinWithProductInfo()
-    .JoinWithOffer()
-    .ExecutePooled();
-
-foreach (var result in pooledResults) {
-    var product = result.Left;       // Product entity
-    var info = result.Right1;        // ProductInfo (nullable for 1:1)
-    var offers = result.Right2;      // ReadOnlySpan<Offer> (for 1:N)
-}
-
-pooledResults.Dispose();             // Return buffers to pool
-```
-
-#### **Join Types**
-
-The attribute goes on the entity that *holds* the foreign key. Which cache gets `JoinWith{T}` depends on the cardinality:
-
-| Type | Attribute | Emitted on | Result Type | Use Case |
-|------|-----------|------------|-------------|----------|
-| **OneToOne** | `DataCacheJoinType.OneToOne` | both directions | `TRight?` | `ProductInfo.ProductId` → `ProductCache.JoinWithProductInfo()` **and** `ProductInfoCache.JoinWithProduct()` |
-| **OneToMany** | `DataCacheJoinType.OneToMany` | the target cache | `QueryResults<TRight>` | `Offer.ProductId` → `ProductCache.JoinWithOffer()` |
-| **ManyToOne** | `DataCacheJoinType.ManyToOne` | the declaring cache | `TRight?` | `Offer.ProductId` → `OfferCache.JoinWithProduct()` |
-| **ManyToOne** on a `List<TKey>` | `DataCacheJoinType.ManyToOne` | both directions | `QueryResults<TRight>` | `Doc.TagIds` → `DocCache.JoinWithTag()` and `TagCache.JoinWithDoc()` |
-
-Each of these also has an `InnerJoinWith{T}()` form (drops lefts with no match) and three filter flavors: no filter, a filter callback over the joined-in right side, and that callback plus a user-state argument. After a `.Sort()` / `.SortBounded()` only the outer, unfiltered `JoinWith{T}()` is available.
-
-#### **Performance**
-
-Joins are highly optimized:
-- **Automatic foreign key indexing**: FK properties get indices automatically
-- **Batch lookups**: All joined entities fetched in single pass
-- **Pooled results**: Zero allocations with `ExecutePooled()`
-- **Up to 5 joins**: Chain multiple `.JoinWith*()` calls
-
-```
-Single entity lookup:     ~2.5µs
-With 1:1 join:           ~12µs
-With 1:1 + 1:N joins:    ~300µs (500 products, 20 offers each)
-```
-
-### **OR Queries**
-
-Disjunction is expressed with the two-branch `.Or(...)` clause. Each branch is a
-narrowing-only sub-query; the two are unioned and intersected with the surrounding
-chain. Three or more branches compose via nesting.
+Disjunction is the two-branch `.Or(b1, b2)` clause. Each branch is narrowing-only; the two are unioned
+and the union is intersected with the surrounding chain. Three or more branches nest.
 
 ```csharp
 // (DepartmentId = 1 OR DepartmentId = 2) AND BrandId = 5
 var results = cache.Query()
     .WithBrandId(5)
-    .Or(
-        b => b.WithDepartmentId(1),
+    .Or(b => b.WithDepartmentId(1),
         b => b.WithDepartmentId(2))
     .Execute();
 
-// Three branches — nested Or
+// Chained WithXxx inside a branch is AND:
+// (DepartmentId=1 AND BrandId=5) OR (DepartmentId=2 AND BrandId=6)
 var results = cache.Query()
-    .Or(
-        b => b.WithDepartmentId(1),
-        b => b.Or(
-            c => c.WithDepartmentId(2),
-            c => c.WithDepartmentId(3)))
+    .Or(b => b.WithDepartmentId(1).WithBrandId(5),
+        b => b.WithDepartmentId(2).WithBrandId(6))
     .Execute();
 
-// Cross-property: A=x OR B=y — branches narrow by different indexes
-var results = cache.Query()
-    .Or(
-        b => b.WithDepartmentId(1),
-        b => b.WithBrandId(5))
-    .Execute();
-
-// Zero-allocation TArg overload — arg shared by both branches via static lambdas
+// Zero-allocation TArg overload — static lambdas, arg shared by both branches
 var args = (Dept1: 1L, Dept2: 2L);
 var results = cache.Query()
-    .Or(
-        static (b, a) => b.WithDepartmentId(a.Dept1),
+    .Or(static (b, a) => b.WithDepartmentId(a.Dept1),
         static (b, a) => b.WithDepartmentId(a.Dept2),
         args)
     .Execute();
-
-// Chained WithXxx inside a branch composes as AND (not OR)
-// → (DepartmentId=1 AND BrandId=5) OR (DepartmentId=2 AND BrandId=6)
-var results = cache.Query()
-    .Or(
-        b => b.WithDepartmentId(1).WithBrandId(5),
-        b => b.WithDepartmentId(2).WithBrandId(6))
-    .Execute();
 ```
 
-**Semantics:**
-- Two-branch arity is fixed; **3+ branches** are written by **nesting** another `Or` in a branch.
-- Each branch receives a restricted builder where only `WithXxx` / `UseIndex` / nested `Or` are reachable. `Where`, `Sort`, `Join`, `Execute*` are compile-unreachable inside a branch.
-- Branches compose: chained `WithXxx` within a single branch is **AND-narrowing**; across branches it is **UNION**; the result is intersected with the outer chain.
-- A no-op branch (lambda that doesn't narrow) is excluded from the union.
-- Reachable inside `JoinOne` filter callbacks too — the filter narrows the joined right-cache view.
+- Inside a branch only `WithXxx` / `UseIndex` / nested `Or` are reachable; `Where`, `Sort`, joins and
+  `Execute*` are compile errors there.
+- A branch that narrows nothing is excluded from the union.
+- `Or` is also reachable inside a join filter callback.
+- One stackalloc bitmap per `Or` level; the cross-branch merge is a SIMD `Vector<int>` OR; cost scales
+  with surviving candidates, not index-result size.
 
-**Performance:**
-- One stackalloc'd bitmap per Or level backs the cross-branch union (no per-branch
-  candidate-set allocations on either unpaired or paired cores).
-- Cross-branch merge is SIMD-vectorized via `Vector<int>` OR/AND over the bitmap.
-- Chained `WithXxx` within a branch uses mark-then-prune: O(|surviving marks|) per
-  follow-up index lookup, shrinking with narrowing.
-- Zero GC allocations on the happy path with `static` lambdas.
+### **Sorted paging — `Sort` vs `SortBounded`**
 
-### **Query Execution Strategy**
-
-Prague's query engine automatically optimizes your queries:
+Two plans; you pick one. `[DataCacheSort("ByDate", "ReleaseDate:-1", "Id:-1")]` emits
+`XxxCache.ByDateComparer` (an `IComparer<T>`); any `IComparer<T>` works, and a **struct** comparer makes
+the sort allocation-free.
 
 ```csharp
-var results = cache.Query()
-    .WithDepartmentId(1)      // Index 1: Returns ~1000 candidates
-    .WithBrandId(brands)      // Index 2: Intersects to ~50 candidates
-    .WithReleaseDate(...)     // Index 3: Intersects to ~10 candidates
-    .Where(e => e.IsPublished) // Filter: Reduces to ~5 results
-    .Execute();
-```
-
-**Execution plan:**
-1. First index builds candidate set (pooled `HashSet<TKey>`)
-2. Subsequent indices intersect with candidates
-3. **Short-circuit**: Empty intersection stops processing
-4. Final filters run only on remaining candidates
-5. **Zero allocations**: Uses stack allocation + pooling
-
-**Performance:**
-```
-No indices:    Scan 10,000 items    → ~50µs
-One index:     Scan 1,000 items     → ~5µs
-Two indices:   Scan 50 items        → ~500ns
-Three indices: Scan 10 items        → ~100ns ✨
-```
-
-### **Sorted Paging — `Sort` vs `SortBounded`**
-
-Sorted queries come in two plans, and you pick one. Nothing is inferred, because they order
-comparer-equal rows differently.
-
-```csharp
-// Paging a large result: select just the page, never sort the rest.
-using var page = cache.Query()
-    .WithDepartmentId(1)
+// Paging — select just the page, never sort the rest
+using var page = cache.Query().WithDepartmentId(1)
     .SortBounded(new ByReleaseDateDesc())
     .ExecutePooled(skip: 40, take: 20);
 
-// Materialising a whole result: classic full sort.
-using var all = cache.Query()
-    .WithDepartmentId(1)
+// Materialising everything — classic full sort
+using var all = cache.Query().WithDepartmentId(1)
     .Sort(new ByReleaseDateDesc())
     .ExecutePooled();
 ```
 
-**Which one:**
-
 | You are… | Use | Why |
 |---|---|---|
-| paging — `take` is a small slice of what matched (tens to a few hundred rows) | `SortBounded` | **2.3–8.6× faster**; `skip` is irrelevant, deep pages win too |
-| taking a large chunk — `take` covers ~a quarter or more of what matched | `Sort` | bounded is **1.3–2.7× slower** there; no sort left to skip, just tuple overhead |
-| calling `Execute*()` with no page at all | `Sort` | unbounded always runs the classic sort anyway |
-| paging with a comparer that can **tie** | `SortBounded` — required | it breaks ties by encounter order, so consecutive pages partition the result |
+| paging — `take` is a small slice of what matched | `SortBounded` | **2.3–8.6× faster**; deep pages win too |
+| taking a quarter or more of what matched | `Sort` | bounded is **1.3–2.7× slower** there and rents an O(N) buffer |
+| calling `Execute*()` with no page | `Sort` | unbounded always runs the classic sort |
 
-The deciding variable is **`take` as a fraction of the matched rows**, not `skip` and not the cache
-size. `SortBounded` buffers rows as `(value, ordinal)` pairs — twice the bytes of a bare reference —
-and earns that back by not sorting what you did not ask for. Ask for a page and the saving dwarfs the
-overhead; ask for everything and only the overhead is left.
-
-**Ties matter more than speed.** A comparer that returns `0` for two distinct rows leaves their
-order unspecified — so paging with `Sort` can repeat or drop a row between pages, exactly like SQL
-`ORDER BY … LIMIT/OFFSET` without a unique tiebreaker. Two ways out: use `SortBounded`, or make the
-comparer *total* by falling back to the primary key. With a total comparer both plans return
-byte-identical output and the choice is purely performance.
-
-**Allocation:** `SortBounded` on a page allocates **nothing** — the comparer reaches the selection
-code as a struct type parameter, so there is no delegate and no boxed `IComparer<T>`. `Sort` costs
-~88 B/query (simple) or ~168 B (joined). A near-full `take` on `SortBounded` rents an O(N) buffer,
-which is one more reason that shape belongs to `Sort`.
-
-**Measured** (Apple M4 Pro, .NET 9, one process, both plans in the same run):
+Both plans break ties by encounter order, so consecutive pages of an unchanged result partition it;
+with a *total* comparer the two return byte-identical output. Measured (Apple M4 Pro, .NET 9):
 
 ```
                         page 20 of 100k   page 200 of 10k   half the result   whole result
 SortBounded                     940µs             194µs            10.3ms         16.2ms
 Sort (classic)                 8066µs             449µs             7.8ms          7.6ms
-                            8.6× faster       2.3× faster    1.3× slower    2.1× slower
 ```
 
-### **Prepared Queries — build once, execute on demand**
+### **Joins (foreign key relationships)**
 
-A prepared query is the command form of a query: you describe it once — optionally with a
-parameter struct — store it in a field, and execute it any number of times, from any thread. Every
-execution replays the description into the same engine the eager builder uses, so the results are
-byte-identical (same rows, same order, same `Truncated`/`TotalCount`), and the pooled paths allocate
-nothing per execution. The one allocation is `Build()`.
+Put `[DataCacheForeignKey<T>(joinType)]` on the property that **holds** the FK. The generator adds the
+index the join needs and emits `JoinWith{T}()` / `InnerJoinWith{T}()` on the right cache's builder.
+
+```csharp
+[DataCache]
+public partial class Book {
+    [DataCacheKey] public int Id { get; set; }
+
+    [DataCacheForeignKey<Author>(DataCacheJoinType.ManyToOne)]   // many books → one author
+    public int AuthorId { get; set; }
+}
+
+using var rows = bookCache.Query()
+    .WithAuthorId(authorId)
+    .JoinWithAuthor()                 // outer: rows kept when the author is missing
+    .ExecutePooled();
+
+foreach (var row in rows)
+    Console.WriteLine($"{row.Left.Title} by {row.Right?.Name ?? "unknown"}");
+
+using var byAuthor = authorCache.Query()
+    .JoinWithBook()                   // reverse direction: row.Right is QueryResults<Book>
+    .ExecutePooled();
+```
+
+| Declaration | Emitted on | Result slot | Example |
+|---|---|---|---|
+| `OneToOne` on a scalar | both caches | `TRight?` | `ProductInfo.ProductId` → `ProductCache.JoinWithProductInfo()` and `ProductInfoCache.JoinWithProduct()` |
+| `OneToMany` on a scalar | the target cache | `QueryResults<TRight>` | `Offer.ProductId` → `ProductCache.JoinWithOffer()` |
+| `ManyToOne` on a scalar | both caches | forward `TRight?`, reverse `QueryResults<TRight>` | `Book.AuthorId` → `BookCache.JoinWithAuthor()` and `AuthorCache.JoinWithBook()` |
+| `ManyToOne` on a `List<TKey>` | both caches | `QueryResults<TRight>` | `Doc.TagIds` → `DocCache.JoinWithTag()` and `TagCache.JoinWithDoc()` |
+
+- **Dual form:** `[DataCacheForeignKey<Book>(OneToMany, nameof(Book.AuthorId))]` on `Author.Id` when
+  you cannot annotate `Book`. **Selector form:** `[DataCacheForeignKey<T, TSelector>]` with a
+  `readonly struct : IForeignKeySelector<TFk, TPk>` when the FK type differs from the target PK type
+  (compound keys); `OneToOne` only, on the PK property.
+- Each `JoinWith{T}` has an `InnerJoinWith{T}` twin (drops lefts with no match) and three filter
+  flavors: none, a callback over the right cache's narrowing builder, and callback + user-state `TArg`
+  (`static` lambda, 0 B). After `Sort` / `SortBounded` only the outer, unfiltered form binds.
+- Joined rows are `JoinResult<TLeft, T1, …>` with `Left`, `Right`, `Right2`, `Right3`, … A query
+  chains up to 5 joins. Pooled join results rent one shared buffer and are returned by one `Dispose()`.
+- Lower-level `JoinOne(...)` / `JoinMany(...)` extensions exist for the raw cache; pass the cache
+  wrapper, not `.Query()`.
+- Caches created through `DataCacheRegistryBuilder` or `AddKafkaCaches` are joined automatically.
+  Stand-alone instances need `leftCache.AddJoinedCaches(rightCache, …)` once.
+
+### **Prepared queries — build once, execute on demand**
+
+A prepared query is the command form of a query: describe it once, optionally with a parameter struct,
+store it in a field and execute it any number of times from any thread. Every execution replays the
+description into the same engine the eager builder uses, so the results are the same rows in the same
+order with the same `TotalCount` / `Truncated`, and the pooled paths allocate nothing per execution.
+The one allocation is `Build()`.
 
 ```csharp
 public sealed class ProductSearch {
-    // Unnameable closed builder type behind a storable name; one object, immutable, thread-safe.
     private readonly PreparedQuery<(int dept, int brand, long since, decimal minPrice, bool inStockOnly),
                                    JoinResult<Product, ProductInfo?>> _search;
 
     public ProductSearch(ProductCache products) {
         _search = products.Prepare<(int dept, int brand, long since, decimal minPrice, bool inStockOnly)>()
-            .Or(
-                b => b.WithDepartmentId(static a => a.dept),    // parameterized WithXxx
+            .Or(b => b.WithDepartmentId(static a => a.dept),     // parameterized WithXxx
                 b => b.WithBrandId(static a => a.brand))
-            .WithReleaseDate(static (rb, a) => rb.Gte(a.since)) // parameterized range
-            .Where(static (p, in a) => p.Price >= a.minPrice)   // parameterized Where — no closure
-            .If(static a => a.inStockOnly,                      // narrowing that applies only when the arg says so
+            .WithReleaseDate(static (rb, a) => rb.Gte(a.since))  // parameterized range
+            .Where(static (p, in a) => p.Price >= a.minPrice)    // parameterized Where — `in a`, no closure
+            .If(static a => a.inStockOnly,                       // applies only when the arg says so
                 b => b.Where(static p => p.Stock > 0))
-            .SortBounded(new ByReleaseDateDesc())               // struct comparer, paged
-            .JoinWithProductInfo()                              // FK-generated join, unchanged
-            .Build();                                           // the only allocation
+            .SortBounded(new ByReleaseDateDesc())                // struct comparer, paged
+            .JoinWithProductInfo()                               // FK-generated join, unchanged
+            .Build();                                            // the only allocation
     }
 
     public int CountPage((int dept, int brand, long since, decimal minPrice, bool inStockOnly) args) {
@@ -551,99 +444,30 @@ public sealed class ProductSearch {
 }
 ```
 
-`Prepare()` (no arguments) and `Prepare<TArgs>()` exist on every generated cache and on the raw
-`InMemoryDataCache` (`UseIndex(index, static a => …)` instead of `WithXxx`). Each `WithXxx` /
-`WithoutXxx` / `WithKey` / `UpdatedAfter` overload has a prepared twin taking a `Func<TArgs, T>` next
-to the bound form; write the selectors as `static` lambdas so the delegate is created once at build.
-`Execute`, `ExecutePooled`, `Count` and the `*Cloned` variants take `in TArgs` plus the usual
-`skip`/`take`.
-
-**`TArgs` must be a struct** — a tuple, a `readonly record struct`, a primitive like `int`, or
-`NoArgs` for the parameterless `Prepare()`. A class or record class is a compile error: the whole
-prepared path is constrained `where TArgs : struct`, which keeps every generic over it
-JIT-specialized and gives the `in TArgs` passing below something to avoid copying.
-
-**The arg `Where` predicate takes `TArgs` by `in`** — it is the one callback that runs once per
-candidate row rather than once per execution, so a by-value `TArgs` would copy the whole struct per
-row. Its type is `ArgFilter<TValue, TArgs>`, not `Func<TValue, TArgs, bool>`, and the lambda has to
-spell the modifier: **`static (v, in a) => …`**. A plain `(v, a) => …` does not convert (CS1676);
-the parameter type is still inferred, and a stored delegate must be typed `ArgFilter<…>`. Prefer a
-`readonly struct` / `readonly record struct` for `TArgs`: `in` removes the copy at the call, but
-reading a *property* of a non-readonly struct through an `in` reference copies it again inside the
-lambda. Field access on a `ValueTuple` is free.
-
-Every other callback is an ordinary `Func<…>` and needs no change — the `WithXxx` / `UseIndex`
-selectors, `If` / `IfElse` conditions, `Match` tag selectors, `UpdatedAfter` instants and the
-`(rb, a) => …` range builder all run once per execution, where the copy is 1–2 ns and not worth an
-API break.
-
-**`Match` — the multi-way branch**, in two forms. Both are the prepared twin of a C# statement over
-type-preserving reassignments, with the arms *recorded* rather than run, so `Explain()` and the frozen
-planner can see every one of them:
-
-```csharp
-// Tag form: a switch. The selector runs once per execution; the first equal tag wins.
-.Match(static a => a.Mode, m => m
-    .Case(Mode.ByDepartment, b => b.WithDepartmentId(static a => a.dept))
-    .Case(Mode.ByBrand,      b => b.WithBrandId(static a => a.brand))
-    .Default(b => b.Where(static p => p.Featured)))
-
-// Guard form: an if / else if / else. No selector; the first true guard wins, later guards never run.
-// A guard is a plain Func<TArgs, bool> — only the arg Where predicate takes TArgs by `in`.
-.Match(m => m
-    .Case(static a => a.minPrice > 0, b => b.Where(static (p, in a) => p.Price >= a.minPrice))
-    .Case(static a => a.inStockOnly,  b => b.Where(static p => p.Stock > 0))
-    .Default())
-```
-
-**Every `Match` ends in a `Default`** — the arm chain is type-state (`IOpenMatchArms` →
-`IClosedMatchArms`), so an open chain, a chain with no arm, or a `Case` after `Default` is a compile
-error (CS0315), and exactly one arm always runs. Write the parameterless `Default()` for the explicit
-"nothing matched, narrow nothing" arm: it is the same execution a silent fall-through used to give,
-now stated in the query instead of implied by its absence.
-
-**`If` / `IfElse` are sugar over a one-`Case` guard `Match`** — `If(c, b)` *is*
-`Match(m => m.Case(c, b).Default())` and `IfElse(c, t, e)` *is* `Match(m => m.Case(c, t).Default(e))`.
-Their parameter lists are unchanged, so existing call sites are untouched; what changed is what you see
-in `Explain()`, which now prints an `If` as `match#0 {guard#0: [...]; default: []}` and its per-execution
-choice as `select#0 → arm 1` (the empty `Default`) when the condition is false.
-
-**What a branch may contain:**
-- `Or(b1, b2)` branches: `WithXxx` / `UseIndex` (bound or parameterized), nested `Or`, narrow-only `If` / `Match`.
-- `If(cond, b)` / `IfElse(cond, then, else)` branches and `Match` arms: everything an `Or` branch may, plus `Where` and nested `Or`/`If`/`Match`.
-- Never inside a branch: joins, `Sort`/`SortBounded`, `Build()` — these are top-level only and a
-  compile error otherwise, exactly like the eager `Or`.
-- Prepared builders have no `Execute*`; `Build()` is the only terminal and is reachable only once the
-  chain is executable.
-
-**Parity and cost.** A prepared execution copies the stored struct to the stack, replays the
-recorded narrowers into a fresh eager core (one delegate call per parameterized narrower) and runs the
-eager execution code — there is no second engine. The prepared side only *saves* where the eager
-spelling needs a closure to carry the per-call argument (`Where(v => v.X >= arg)`), because the
-argument is bound into a per-thread pooled predicate box instead. Measured on the raw cache
-(`benchmarks/Prague.Benchmarks/PreparedQueryBenchmarks.cs`, 100k rows, 1k-row list buckets, Apple M4 Pro,
-.NET 9, pooled + disposed):
-
-| Shape | Eager | Prepared | Ratio |
-|---|---:|---:|---:|
-| list index + `Where(v => v.Id >= a.min)` (argument captured) | 8.99 µs / **89 B** | 9.16 µs / **≈0 B** | 1.02 |
-| unique lookup, parameterized | 134 ns / 0 B | 133 ns / 0 B | 0.99 |
-| range, parameterized | 13.4 µs / 0 B | 13.5 µs / 0 B | 1.01 |
-| `SortBounded` page of 20 over a 1k bucket, struct comparer | 16.2 µs / 0 B | 16.4 µs / 0 B | 1.01 |
-| `JoinOne`, parameterized (1k left rows) | 32.2 µs / 5 B | 31.7 µs / 5 B | 0.98 |
-
-Design: `docs/superpowers/specs/2026-09-09-prepared-query-command-design.md`; engine notes in
-`context/query.md`, generated surface in `context/generated.md`.
+- `Prepare()` (`TArgs = NoArgs`) and `Prepare<TArgs>()` exist on every generated cache and on the raw
+  `InMemoryDataCache` (`UseIndex(index, static a => …)` instead of `WithXxx`). Every `WithXxx` /
+  `WithoutXxx` / `WithKey` / `UpdatedAfter` overload has a prepared twin taking a `Func<TArgs, T>`.
+- **`TArgs` must be a `struct`** — a tuple, a `readonly record struct`, a primitive, or `NoArgs`. A
+  class is CS0453. Prefer `readonly`; reading a property of a non-readonly struct through `in` copies it.
+- **The arg `Where` predicate takes `TArgs` by `in`**: write `static (v, in a) => …`. It is the one
+  callback that runs per candidate row. Its delegate type is `ArgFilter<TValue, TArgs>`; a plain
+  `(v, a) => …` does not convert (CS1676). Every other callback is an ordinary `Func<…>`.
+- **`Match`** is the multi-way branch — tag form (`Match(static a => a.Mode, m => m.Case(Mode.X, b => …).Default(…))`)
+  or guard form (`Match(m => m.Case(static a => a.minPrice > 0, b => …).Default())`). **Every `Match`
+  ends in a `Default`** — an open chain is CS0315. `If` / `IfElse` are sugar over a one-`Case` guard `Match`.
+- Inside `Or` branches: `WithXxx` / `UseIndex`, nested `Or`, narrow-only `If` / `Match`. Inside `If` /
+  `Match` arms: those plus `Where`. Never inside a branch: joins, `Sort` / `SortBounded`, `Build()`.
+- Prepared builders have no `Execute*`; `Build()` / `BuildFrozen()` are the only terminals. Executions
+  take `in TArgs` plus `skip` / `take`: `Execute`, `ExecutePooled`, `Count` and the `*Cloned` variants.
 
 #### **`BuildFrozen()` — the same query, planned once**
 
-`BuildFrozen()` ends the chain where `Build()` does, but instead of replaying the description into a
-fresh eager core on every execution it plans the query once and binds it to an executor built for that
-shape: a point lookup for a unique-index equality, a **single-pass pipeline** for everything else it can
-take — one index step's keys are copied out and every other step becomes an O(1) probe on the key or on
-the fetched value, so there is no candidate set and no intersection — and the prepared replay for the
-rest. Joins fuse into that pass (one right lookup per row), `Sort` / `SortBounded` feed the eager
-top-k container directly, and `Count` skips the values it does not need.
+`BuildFrozen()` ends the chain where `Build()` does but plans the query once and binds it to an
+executor built for that shape: a **point lookup** for a unique-index equality, a **single-pass
+pipeline** for everything else it can take (one index step's keys are copied out and every other step
+becomes an O(1) probe — no candidate set, no intersection; joins fuse into the pass, `Sort` /
+`SortBounded` feed the top-k container directly, `Count` skips the values it does not need), and the
+prepared **replay** for the rest.
 
 ```csharp
 private readonly FrozenQuery<(int dept, int brand), JoinResult<Product, ProductInfo?>> _page =
@@ -652,985 +476,271 @@ private readonly FrozenQuery<(int dept, int brand), JoinResult<Product, ProductI
         .WithBrandId(static a => a.brand)
         .SortBounded(new ByReleaseDateDesc())
         .JoinWithProductInfo()
-        .BuildFrozen();                       // BuildFrozen(FrozenOptions) to tune; see below
+        .BuildFrozen();                       // BuildFrozen(new FrozenOptions { … }) to tune
 
 using var page = _page.ExecutePooled((dept, brand), skip: 0, take: 20);   // 0 B, any thread
 Console.WriteLine(_page.Explain());           // the plan, the live optimizations, the last seed chosen
 ```
 
-**What a frozen result guarantees.** The same rows as the eager builder's, with the same `Count`,
-`TotalCount` and `Truncated`, the same clone timing, the same pooling and leak safety, 0 B per pooled
-execution, and pages that are slices of the same whole. **Order is not part of the contract unless you
-ask for it:** an unsorted result carries no row-order guarantee, and the **ties** of a sorted one are
-unspecified too — the comparer does not order them. A `Sort` / `SortBounded` with a **total** comparer
-is byte-identical to eager.
+**The ordering contract.** A frozen result holds the same rows as eager, with the same `Count` /
+`TotalCount` / `Truncated`, pooling, leak safety and 0 B per pooled execution. **Order is not part of
+the contract unless you ask for it:** an unsorted result carries no row-order guarantee and the ties of
+a sorted one are unspecified. A `Sort` / `SortBounded` with a **total** comparer is byte-identical to
+eager. That freedom is what pays: the pipeline seeds from whichever index step is narrowest *for this
+execution's arguments*, not the one you declared first. `new FrozenOptions { PreserveEagerOrder = true }`
+restores the eager sequence at the eager cost. The other flags — `FuseFilters`, `AdaptiveFilterOrdering`,
+`CapacityHints`, `Pipeline` (default on), `IndexSideProbes` (default off) — are read once at build.
 
-That freedom is what pays: the pipeline seeds from whichever index step is narrowest *for this
-execution's arguments* rather than the one you happened to declare first, so `WithDepartmentId(...)`
-followed by a hundred-row `WithBrandId(...)` walks the hundred rows whichever way round you wrote it.
-If you need the eager sequence back — a snapshot diffed row by row, a golden test — set
-`new FrozenOptions { PreserveEagerOrder = true }`: it pins the seed to the first declared step, walks
-the store for an `Or`-first query and replays a chain containing an inner left-symmetric join, and
-costs what those choices cost.
-
-Measured on the raw cache (`benchmarks/Prague.Benchmarks/FrozenQueryBenchmarks.cs`, 100k rows, 1k-row
-list buckets, Apple M4 Pro, .NET 9, `--inProcess`, pooled + disposed; every frozen row 0 B per execution):
+Measured on the raw cache (100k rows, 1k-row list buckets, Apple M4 Pro, .NET 9, pooled + disposed;
+every frozen row 0 B per execution):
 
 | Shape | Eager | `Build()` | `BuildFrozen()` | Ratio |
 |---|---:|---:|---:|---:|
 | unique lookup, parameterized | 132 ns | 129 ns | **18.0 ns** | 7.3× |
 | list bucket + `Where` | 8.62 µs | 8.58 µs | **5.84 µs** | 1.5× |
 | list ∩ list (1k ∩ 100, largest declared first) | 9.26 µs | 9.11 µs | **1.29 µs** | 7.2× |
-| list ∩ list ∩ list (1k ∩ 333 ∩ 111) | 11.2 µs | 11.1 µs | **1.78 µs** | 6.3× |
 | list ∩ 60k-row range window | 398 µs | 396 µs | **11.2 µs** | 35× |
-| "everything since T" ∩ list | 216 µs | 216 µs | **9.66 µs** | 22× |
 | `Or` of two 1k buckets, first narrowing | 976 µs | 983 µs | **26.9 µs** | 36× |
 | `SortBounded` page of 20 over list ∩ list | 10.8 µs | 10.8 µs | **2.84 µs** | 3.8× |
 | 3 lists → `SortBounded(page)` → `JoinOne` | 14.2 µs | 13.9 µs | **3.9 µs** | 3.6× |
-| …the same shape's `Count` | 11.0 µs | 10.8 µs | **1.42 µs** | 7.7× |
 | `Sort` over a 1k bucket → `JoinMany` | 118 µs | 119 µs | **14.3 µs** | 8.3× |
 
-Design: `docs/superpowers/specs/2026-09-09-frozen-pipeline-executor-design.md`; engine notes in
-`context/query.md`; every measured table in `benchmarks/Prague.Benchmarks/RESULTS.MD`.
+Design: [`docs/superpowers/specs/2026-09-09-prepared-query-command-design.md`](docs/superpowers/specs/2026-09-09-prepared-query-command-design.md),
+[`docs/superpowers/specs/2026-09-09-frozen-pipeline-executor-design.md`](docs/superpowers/specs/2026-09-09-frozen-pipeline-executor-design.md);
+engine notes in [`context/query.md`](context/query.md); generated surface in [`context/generated.md`](context/generated.md).
 
-### **Conditional Updates**
+### **Conditional updates**
 
-Prague detects when data hasn't changed and avoids unnecessary work:
-
-```csharp
-// First update
-bool changed = cache.AddOrUpdate(order);  // true - new item
-
-// Same data arrives (common in event streams)
-bool changed = cache.AddOrUpdate(order);  // false - no change
-                                           // Zero allocations!
-```
-
-**How it works:**
-- Generated `CacheEquals()` performs deep structural equality
-- Compares all properties recursively
-- For collections: uses `SequenceEqual` or `SetEquals`
-- For large structs: vectorized SIMD comparison
-- **No update if equal**: Indices not touched, zero allocations
-
-**Why this matters:**
-```
-Kafka stream: 100,000 events/sec
-Actual changes: 10,000/sec (90% duplicates)
-
-Without Prague:
-- 100k dictionary updates
-- 100k index updates
-- 100k allocations
-- High GC pressure
-
-With Prague:
-- 10k dictionary updates (only real changes)
-- 10k index updates
-- 10k allocations
-- 90k fast equality checks (~25ns each)
-- 90% less GC pressure ✨
-```
-
-### **Deep Cloning**
-
-Prague generates efficient deep clone methods:
+Every write goes through `AddOrUpdate`. The cache compares the incoming value to the resident one with
+the generated `CacheEquals` (deep, property-by-property, collections included) and reports the outcome.
 
 ```csharp
-var original = cache.Query().WithId("123").Execute().First();
-var clone = original.Clone();  // Deep copy, not reference
-
-clone.Items[0].Quantity = 99;  // Doesn't affect original
+bool changed = cache.AddOrUpdate(order, out var previous);   // true: Add or Update; false: Same
 ```
 
-**Generated clone code:**
-- Recursively clones nested objects
-- For collections: uses optimized methods
-  - `List<T>`: `ConvertAll()` (faster than LINQ)
-  - `Dictionary<K,V>`: Pre-allocated capacity
-  - `ImmutableHashSet<T>`: Structural sharing (cheap)
-- For value types: Direct copy
-- **No reflection**: Pure C# code
+- `[DataCacheIgnoreEquality]` excludes a property (a monotonic timestamp, an audit field) from the
+  comparison, so a re-emit that differs only there is `Same`.
+- On `Same` nothing is swapped, no index is touched and no after-handler sees a phantom update. On a
+  compacted topic that re-emits state on every rebuild, this is the difference between thousands of
+  no-op `Update` events at startup and exactly the real transitions.
+- The Kafka path surfaces the outcome as `UpdateType` (`Filtered`, `Same`, `Add`, `Update`, `Delete`)
+  to `ICacheAfterHandler<TKey, TValue>`.
 
----
+### **Deep cloning**
 
-## 🔥 Advanced Features
+The generator emits `Clone()` for every `[DataCache]` type (recursive, collection-aware, no reflection).
+`ExecuteCloned()` / `ExecutePooledCloned()` return cloned rows so you can mutate them without touching
+the cache; `QueryResults<T>.CloneElements()` does the same after the fact.
 
-### **Batch Operations**
+### **Result mapping**
 
-Retrieve multiple items efficiently:
-
-```csharp
-var orderIds = new[] { "ORD-001", "ORD-002", "ORD-003" };
-
-// Method 1: Zero-allocation span-based
-var values = new Order[orderIds.Length];
-var found = new bool[orderIds.Length];
-int foundCount = cache.Cache.TryGetValues(orderIds, values, found);
-
-for (int i = 0; i < orderIds.Length; i++) {
-    if (found[i]) {
-        Process(values[i]);
-    }
-}
-
-// Method 2: List-based (only found items)
-List<Order> orders = cache.Cache.TryGetValues(orderIds.AsSpan());
-```
-
-**Performance:** 3-5x faster than looping `TryGetValue` (single volatile read, better cache locality)
-
-### **Custom Sorting**
-
-Define custom sort orders via attributes:
+`Map` lives on `QueryResults<T>` and runs after execution. It projects into a result of the same
+pooled kind and **consumes the source** (the source is disposed for you), so dispose the mapped result.
 
 ```csharp
-[DataCacheSort("ByPriority", "Priority:1", "CreatedAt:-1")]
-[DataCacheSort("ByTotal", "Total:-1", "CustomerId:1")]
-public class Order { ... }
-```
-
-**Generated:**
-```csharp
-cache.Query()
+using var totals = cache.Query()
     .WithCustomerId(42)
-    .SortByPriority()        // Priority ASC, CreatedAt DESC
-    .Execute(skip: 0, take: 10);
+    .ExecutePooled(skip: 20, take: 10)
+    .Map(order => new { order.OrderId, order.Total });   // TotalCount preserved
 
-cache.Query()
-    .SortByTotal()           // Total DESC, CustomerId ASC
-    .Execute();
+Console.WriteLine($"Showing {totals.Count} of {totals.TotalCount}");
 ```
 
-Or use custom comparers:
+### **Batch reads**
 
 ```csharp
-cache.Query()
-    .Sort(new MyCustomComparer())
-    .Execute();
+var keys = new[] { "ORD-001", "ORD-002", "ORD-003" };
+
+Span<Order> buffer = new Order[keys.Length];
+int found = cache.Cache.TryGet(keys, buffer);              // fills the span, returns the hit count
+
+List<Order> orders = cache.Cache.TryGet(keys);             // only the found items
+List<Order> big    = cache.Cache.TryGet(keys, o => o.Total > 100m);
 ```
 
-### **Result Mapping**
+### **Global last update index**
 
-Transform query results into different shapes using the `Map` method. This is useful for:
-- Projecting to DTOs or view models
-- Extracting specific fields
-- Reducing data transfer size
-- Creating API responses
-
-#### **Basic Mapping**
+Track the latest update per grouping key **across caches** — the primitive behind incremental sync.
 
 ```csharp
-// Map to a single property
-var amounts = cache.Query()
-    .WithCustomerId(42)
-    .Map(order => order.Total)
-    .Execute();
+// 1. A partial class the generator completes
+public partial class DepartmentLastUpdatedIndex : IDataCacheGlobalLastUpdateIndex<int>;
 
-foreach (decimal amount in amounts) {
-    Console.WriteLine($"Order total: {amount}");
-}
-
-// Map to anonymous type
-var summaries = cache.Query()
-    .WithStatus(OrderStatus.Pending)
-    .Map(order => new { order.OrderId, order.Total, order.CreatedAt })
-    .Execute();
-
-// Map to DTO
-var dtos = cache.Query()
-    .WithCustomerId(42)
-    .Map(order => new OrderDto {
-        Id = order.OrderId,
-        Amount = order.Total,
-        ItemCount = order.Items.Count
-    })
-    .Execute();
-```
-
-#### **Mapping with Sorting**
-
-The `Map` method preserves sorting when used with `Sort` or generated sort methods:
-
-```csharp
-// Sort then map - comparer is preserved
-var topAmounts = cache.Query()
-    .WithCustomerId(42)
-    .SortByPriority()                    // Sort orders
-    .Map(order => order.Total)           // Then extract amounts
-    .Execute(skip: 0, take: 10);         // Top 10
-
-// With custom comparer
-var comparer = Comparer<Order>.Create((a, b) => a.Total.CompareTo(b.Total));
-var sortedTotals = cache.Query()
-    .Sort(comparer)
-    .Map(order => order.Total)
-    .Execute();
-```
-
-#### **Mapping with Pagination**
-
-`Map` works seamlessly with pagination, preserving `TotalCount`:
-
-```csharp
-var result = cache.Query()
-    .WithCustomerId(42)
-    .Map(order => new { order.OrderId, order.Total })
-    .Execute(skip: 20, take: 10);
-
-Console.WriteLine($"Showing {result.Count} of {result.TotalCount} orders");
-```
-
-#### **Performance**
-
-- **Zero-allocation**: Mapped results use the same pooled infrastructure
-- **Lazy evaluation**: Mapping function called only for returned items
-- **Type-safe**: Compile-time checked transformation
-- **No reflection**: Direct function call
-
-```csharp
-// Example: Extract only IDs for a large result set
-var orderIds = cache.Query()
-    .WithStatus(OrderStatus.Pending)
-    .Map(order => order.OrderId)      // Much smaller than full Order objects
-    .Execute();
-
-// Reduces memory: 1000 orders × 1KB each = 1MB
-//              vs 1000 strings × ~40 bytes = 40KB ✨
-```
-
-### **Kafka Integration**
-
-Prague integrates seamlessly with Kafka:
-
-```csharp
-services.AddPragueKafka(options => {
-    options.BootstrapServers = "localhost:9092";
-})
-.AddConsumer(consumer => consumer
-    .AddOrderCache()                          // Generated extension
-    .WithHeaderEqualsFilter("tenant", "acme") // Filter messages
-)
-.AddProducer(producer => producer
-    .AddOrderCache("orders.output")           // Produce topic
-);
-```
-
-**Consumer with Enrichment:**
-```csharp
-[DataCache]
-public class Order {
-    [DataCacheFromTimestamp]
-    public long ReceivedAt { get; set; }  // Auto-populated from Kafka timestamp
-    
-    [DataCacheHeader("tenant-id")]
-    public string TenantId { get; set; }  // Auto-populated from header
-}
-```
-
-**Producer (Conditional):**
-```csharp
-// Only produces to Kafka if value changed
-cache.AddOrUpdateAndProduce(order);  
-
-// No-op if order unchanged (zero allocations, zero Kafka messages)
-```
-
-### **Global Last Update Index**
-
-Track the last update timestamp per grouping key across multiple caches. This is useful for incremental synchronization, change detection, and efficient polling patterns. Multiple caches can share the same global index, allowing you to track updates across your entire domain.
-
-#### **Step 1: Define the Global Index Class**
-
-First, create a partial class that implements `IDataCacheGlobalLastUpdateIndex<TKey>`:
-
-```csharp
-// Tracks last update per DepartmentId across all department-related caches
-public partial class DepartmentLastUpdatedIndex : IDataCacheGlobalLastUpdateIndex<int> { }
-
-// Tracks last update per BrandId
-public partial class BrandLastUpdatedIndex : IDataCacheGlobalLastUpdateIndex<long> { }
-
-// Tracks last update per ProductId (for when the key IS the grouping key)
-public partial class ProductLastUpdatedIndex : IDataCacheGlobalLastUpdateIndex<int> { }
-```
-
-The source generator will complete these partial classes with the implementation.
-
-#### **Step 2: Apply to Cache Properties**
-
-Use `[DataCacheGlobalLastUpdateIndex<TIndex>]` on properties to track updates:
-
-```csharp
+// 2. Mark the group key on every contributing cache
 [DataCache]
 public partial class CatalogProduct {
-    [DataCacheKey] 
-    public string ListingId { get; set; }
-    
-    public string Name { get; set; }
-    
-    // Track updates by DepartmentId using the default timestamp (from AddOrUpdate)
-    [DataCacheGlobalLastUpdateIndex<DepartmentLastUpdatedIndex>]
+    [DataCacheKey] public string ListingId { get; set; }
+
+    [DataCacheGlobalLastUpdateIndex<DepartmentLastUpdatedIndex>]              // timestamp from AddOrUpdate
     public int DepartmentId { get; set; }
-    
-    // Track updates by BrandId using a custom timestamp property
-    [DataCacheGlobalLastUpdateIndex<BrandLastUpdatedIndex>(nameof(UpdatedAt))]
+
+    [DataCacheGlobalLastUpdateIndex<BrandLastUpdatedIndex>(nameof(UpdatedAt))] // or from a property
     public long BrandId { get; set; }
-    
     public DateTimeOffset UpdatedAt { get; set; }
 }
 
-// Another cache sharing the same DepartmentLastUpdatedIndex
-[DataCache]
-public partial class CatalogMaker {
-    [DataCacheKey] 
-    public string MakerId { get; set; }
-    
-    public string MakerName { get; set; }
-    
-    // Updates to CatalogMaker also update the shared DepartmentLastUpdatedIndex
-    [DataCacheGlobalLastUpdateIndex<DepartmentLastUpdatedIndex>]
-    public int DepartmentId { get; set; }
-}
-
-// Track updates by the primary key itself (common for product catalogs)
 [DataCache]
 public partial class Product {
     [DataCacheKey]
-    [DataCacheGlobalLastUpdateIndex<ProductLastUpdatedIndex>]
+    [DataCacheGlobalLastUpdateIndex<ProductLastUpdatedIndex>]                 // on the PK → UpdatedAfter(...)
     public int ProductId { get; set; }
-    
-    public string Name { get; set; }
-    public decimal Price { get; set; }
 }
-```
 
-#### **Step 3: Use via DataCacheRegistry**
-
-The registry automatically manages global indexes as singletons:
-
-```csharp
-var registry = new DataCacheRegistry();
-
-// Get caches - global indexes are automatically wired up
-var listingCache = registry.GetCache<CatalogProductCache>();
-var makerCache = registry.GetCache<CatalogMakerCache>();
-var productCache = registry.GetCache<ProductCache>();
-
-// Access the shared global index
+// 3. Resolve it (registry or DI singleton)
 var departmentIndex = registry.GetGlobalIndex<DepartmentLastUpdatedIndex>();
-```
-
-#### **Querying by Last Update**
-
-Use the global index to find entities updated after a timestamp:
-
-```csharp
-// Find all products updated after a timestamp
-var recentProducts = productCache.Cache.Query()
-    .UseIndex(productIndex, lastSyncTimestamp)
-    .Execute();
-
-// With max output for pagination/next sync
-var products = productCache.Cache.Query()
-    .UseIndex(productIndex, lastSyncTimestamp, out long maxTimestamp)
-    .Execute();
-// Use maxTimestamp for next incremental sync
-
-// Query a specific time window
-var windowProducts = productCache.Cache.Query()
-    .UseIndex(productIndex, startTimestamp, endTimestamp)
-    .Execute();
-```
-
-#### **Global Index API**
-
-```csharp
-var departmentIndex = registry.GetGlobalIndex<DepartmentLastUpdatedIndex>();
-
-// Get min/max timestamps with their keys
-if (departmentIndex.TryGetMin(out long minTimestamp, out int minDepartmentId)) {
-    Console.WriteLine($"Oldest update: DepartmentId {minDepartmentId} at {minTimestamp}");
-}
-
-if (departmentIndex.TryGetMax(out long maxTimestamp, out int maxDepartmentId)) {
-    Console.WriteLine($"Latest update: DepartmentId {maxDepartmentId} at {maxTimestamp}");
-}
-
-// Get timestamp only
-if (departmentIndex.TryGetMin(out long oldestMs)) {
-    Console.WriteLine($"Oldest timestamp: {oldestMs}");
-}
-
-// Count entities for a specific grouping key
-int count = departmentIndex.GetEntitiesCount(42);  // Entities for DepartmentId=42
-```
-
-#### **UpdatedAfter Query Methods (Auto-Generated)**
-
-When a cache has a global index on its **primary key type**, Prague generates convenient `UpdatedAfter` methods on the QueryBuilder:
-
-```csharp
-// Product has [DataCacheGlobalLastUpdateIndex] on its primary key (ProductId)
-// So it gets these generated methods:
-
-var recentProducts = productCache.Query()
-    .UpdatedAfter(lastSyncTimestamp)
-    .Execute();
-
-var products = productCache.Query()
-    .UpdatedAfter(lastSyncTimestamp, out long maxTimestamp)
-    .Execute();
-
-var windowProducts = productCache.Query()
-    .UpdatedAfter(startTimestamp, endTimestamp)
-    .Execute();
-
-// DateTime/DateTimeOffset overloads
-var products = productCache.Query()
-    .UpdatedAfter(DateTimeOffset.UtcNow.AddMinutes(-5))
-    .Execute();
-```
-
-#### **Multi-Cache Shared Index Example**
-
-Multiple caches updating the same global index:
-
-```csharp
-var registry = new DataCacheRegistry();
-var listingCache = registry.GetCache<CatalogProductCache>();
-var makerCache = registry.GetCache<CatalogMakerCache>();
-var departmentIndex = registry.GetGlobalIndex<DepartmentLastUpdatedIndex>();
-
-// Updates from either cache affect the shared index
-listingCache.AddOrUpdate(new CatalogProduct { ListingId = "E1", DepartmentId = 1 }, timestamp: 1000);
-makerCache.AddOrUpdate(new CatalogMaker { MakerId = "T1", DepartmentId = 1 }, timestamp: 2000);
-
-// The global index tracks the latest update across both caches
-departmentIndex.TryGetMax(out long latestTs, out int departmentId);
-// latestTs = 2000, departmentId = 1
-
-// Query listings updated after a timestamp for a specific department
-var recentListings = listingCache.Cache.Query()
-    .UseIndex(departmentIndex, lastSyncTimestamp)
-    .Execute();
-```
-
-#### **Use Cases**
-
-1. **Incremental Sync**: Track what changed since last poll
-   ```csharp
-   long lastSync = LoadLastSyncTimestamp();
-   var changes = productCache.Query()
-       .UpdatedAfter(lastSync, out long newSync)
-       .Execute();
-   
-   ProcessChanges(changes);
-   SaveLastSyncTimestamp(newSync);
-   ```
-
-2. **Change Detection**: Find the most recently updated entity
-   ```csharp
-   if (globalIndex.TryGetMax(out long latestMs, out int latestKey)) {
-       cache.TryGet(latestKey, out var latestEntity);
-   }
-   ```
-
-3. **Time-Windowed Queries**: Query specific time ranges
-   ```csharp
-   var lastHour = DateTimeOffset.UtcNow.AddHours(-1);
-   var now = DateTimeOffset.UtcNow;
-   
-   var recentUpdates = cache.Query()
-       .UpdatedAfter(lastHour, now)
-       .Execute();
-   ```
-
-### **Type-Safe Topics**
-
-Topic names validated at compile time:
-
-```csharp
-[DataCacheTopic("orders.v1")]
-public class Order { ... }
-
-// Generated constant
-OrderCache.Topic  // "orders.v1"
-
-// With placeholders
-[DataCacheTopic("orders.[v:version].[e:environment]")]
-// Resolved at runtime: "orders.v2.production"
-```
-
----
-
-## 🏗️ Architecture
-
-### **Generated Code Structure**
-
-For each `[DataCache]` entity, Prague generates:
-
-```
-YourNamespace/
-├── OrderCache.g.cs              // Main cache class
-│   ├── Cache (InMemoryDataCache)
-│   ├── CustomerIdIndex
-│   ├── CreatedAtIndex
-│   ├── InvoiceNumberIndex
-│   └── Query() → QueryBuilder
-│
-├── Order.Clone.g.cs             // Deep clone
-│   └── Clone() → Order
-│
-├── Order.Equality.g.cs          // Structural equality
-│   ├── CacheEquals(Order)
-│   └── CacheGetHashCode()
-│
-└── (If Prague.Kafka referenced)
-    ├── Order.Enrichable.g.cs    // Kafka enrichment
-    ├── CacheMarshall.cs         // Producer access
-    └── Extensions.cs            // AddOrUpdateAndProduce
-```
-
-### **Performance Characteristics**
-
-| Operation | Complexity | Typical Latency |
-|-----------|-----------|-----------------|
-| **TryGet (direct)** | O(1) | 15-25ns |
-| **AddOrUpdate (new)** | O(1) + O(indices) | 40-60ns |
-| **AddOrUpdate (unchanged)** | O(1) | 25-35ns |
-| **Query (one index)** | O(1) + O(results) | 500ns-5µs |
-| **Query (multi-index)** | O(intersect) + O(results) | 100ns-2µs |
-| **Range query** | O(log n) + O(range) | 1-10µs |
-| **Query with 1:1 join** | O(query) + O(n) | ~12µs |
-| **Query with 1:1 + 1:N joins** | O(query) + O(n×m) | ~300µs |
-| **Batch read (100 keys)** | O(n) | 1.5-3µs |
-
-**Memory:**
-- Cache overhead: ~48 bytes/item (pointers, hash)
-- KeyValue index: ~32 bytes/mapping
-- KeyValueList index: ~64 bytes + 32 bytes/value in set
-- Range index: ~48 bytes/node
-
-**Concurrency:**
-- Lock striping: One lock per CPU core
-- Read scalability: Near-linear to core count
-- Write scalability: Linear up to lock count
-- No lock contention on reads
-
----
-
-## 🆚 Comparison
-
-### **vs. Distributed Caches**
-
-| Feature | **Prague** | **Redis** | **Hazelcast** | **Memcached** |
-|---------|-----------|-----------|---------------|---------------|
-| **Deployment** | Embedded | Client-Server | Distributed | Client-Server |
-| **Latency (read)** | **<100ns** | ~500µs | ~500µs-1ms | ~300µs |
-| **Latency (write)** | **<50ns** | ~600µs | ~1-2ms | ~400µs |
-| **Throughput (single node)** | **5M+ ops/sec** | ~100k/sec | ~50k/sec | ~200k/sec |
-| **Secondary indices** | ✅ Auto | ⚠️ Limited | ✅ Manual | ❌ |
-| **Range queries** | ✅ O(log n) | ✅ Sorted sets | ✅ Predicates | ❌ |
-| **Query optimization** | ✅ **Automatic** | ❌ Manual | ❌ Manual | N/A |
-| **Type safety** | ✅ **Compile-time** | ❌ Runtime | ❌ Runtime | ❌ Runtime |
-| **Network overhead** | **None** | High | High | High |
-| **Consistency** | ✅ Immediate | ⚠️ Eventual | ⚠️ Eventual | ⚠️ None |
-| **Use case** | Embedded, low-latency | Distributed, shared state | Enterprise distributed | Simple K/V |
-
-**Verdict:** Prague is **50-100x faster** for embedded scenarios, with better developer experience.
-
----
-
-### **vs. .NET In-Memory Solutions**
-
-| Feature | **Prague** | **MemoryCache** | **LiteDB** | **EF In-Memory** | **NCache** |
-|---------|-----------|-----------------|------------|------------------|-----------|
-| **Secondary indices** | ✅ 3 types | ❌ | ✅ B-tree | ❌ | ⚠️ Limited |
-| **Range queries** | ✅ Sorted | ❌ | ✅ SQL | ⚠️ LINQ (slow) | ⚠️ Queries |
-| **Index intersection** | ✅ **Automatic** | ❌ | ⚠️ Manual | ❌ | ⚠️ Manual |
-| **Conditional updates** | ✅ **Unique** | ❌ | ❌ | ❌ | ❌ |
-| **Code generation** | ✅ Full | ❌ | ❌ | ⚠️ Migrations | ❌ |
-| **Compile-time safety** | ✅ **Full** | ❌ | ❌ | ⚠️ Partial | ❌ |
-| **Latency (indexed)** | **<1µs** | N/A | ~10-50µs | ~100µs | ~5-10µs |
-| **Memory efficiency** | ✅ High | ⚠️ Overhead | ⚠️ B-tree | ⚠️ Tracking | ⚠️ Serialization |
-| **Eviction** | ❌ | ✅ LRU/TTL | ❌ | ❌ | ✅ Policies |
-| **Kafka integration** | ✅ Native | ❌ | ❌ | ❌ | ⚠️ Messaging |
-
-**Verdict:** Prague is **10-100x faster** with indices, has **compile-time safety**, and **zero reflection**.
-
----
-
-### **vs. Document Databases (In-Memory)**
-
-| Feature | **Prague** | **RavenDB** | **MongoDB** | **Marten** | **Couchbase** |
-|---------|-----------|-------------|-------------|------------|---------------|
-| **Query language** | ✅ Fluent C# | RQL | MQL | LINQ | N1QL |
-| **Index definition** | ✅ **Attributes** | ⚠️ Manual/auto | ⚠️ Manual | ⚠️ Manual | ⚠️ Manual |
-| **Index updates** | ✅ **Realtime** | ⚠️ Eventually | ⚠️ Background | ⚠️ Background | ⚠️ Background |
-| **Compile-time safety** | ✅ **Generated** | ❌ Runtime | ❌ Runtime | ⚠️ Partial | ❌ Runtime |
-| **Read latency** | **<100ns** | ~50-500µs | ~500µs-5ms | ~100µs-1ms | ~500µs-2ms |
-| **Write latency** | **<50ns** | ~100µs-1ms | ~1-10ms | ~500µs-5ms | ~1-5ms |
-| **Learning curve** | **Easy** | Moderate | High | Moderate | High |
-| **Persistence** | ❌ (memory) | ✅ Disk | ✅ Disk | ✅ Disk | ✅ Disk |
-| **Use case** | Real-time events | Full database | Full database | .NET docs | Distributed |
-
-**Verdict:** Prague is **100-1000x faster** for in-memory, with superior DX (compile-time safety, generated code).
-
----
-
-### **What Makes Prague Unique**
-
-**Nobody else has ALL of these:**
-
-1. ✅ **Compile-Time Query Safety** - IntelliSense-driven queries, validated at build time
-2. ✅ **Automatic Index Intersection** - Query engine picks optimal strategy
-3. ✅ **Zero-Allocation Queries** - Stack-allocated bitmaps, pooled sets (90KB vs 4.7GB)
-4. ✅ **Compile-Time Joins** - Type-safe 1:1 and 1:N relationships with generated methods
-5. ✅ **Conditional Updates** - Built-in change detection, returns boolean
-6. ✅ **Generated Deep Clone/Equality** - No reflection, recursive, vectorized
-7. ✅ **Kafka-Native** - Static dispatch, conditional produce, enrichment
-8. ✅ **Type-Safe Range Queries** - Fluent API prevents invalid ranges
-
-**Prague is essentially:**
-> **"SQLite for Real-Time Event Sourcing"**
-> 
-> Embedded, high-performance, compile-time safe, event-first
-
----
-
-## 📚 Examples
-
-### **Real-Time Product Catalog**
-
-```csharp
-// Product entity - the root
-[DataCache]
-public partial class Product {
-    [DataCacheKey]
-    public int Id { get; set; }
-    
-    [DataCacheIndex(DataCacheIndexType.Range)]
-    public long ReleaseDate { get; set; }
-    
-    public string Manufacturer { get; set; }
-    public string Supplier { get; set; }
-    public bool IsPublished { get; set; }
-}
-
-// Product info - 1:1 relationship
-[DataCache]
-public partial class ProductInfo {
-    [DataCacheKey] 
-    public int Id { get; set; }
-    
-    [DataCacheForeignKey<Product>(DataCacheJoinType.OneToOne)]
-    public int ProductId { get; set; }
-    
-    public string Warehouse { get; set; }
-    public string Inspector { get; set; }
-    public int StockLevel { get; set; }
-}
-
-// Offers - 1:N relationship  
-[DataCache]
-public partial class Offer {
-    [DataCacheKey] 
-    public int Id { get; set; }
-    
-    [DataCacheForeignKey<Product>(DataCacheJoinType.OneToMany)]
-    public int ProductId { get; set; }
-    
-    public string OfferType { get; set; }
-    public decimal RetailPrice { get; set; }
-    public decimal SalePrice { get; set; }
-    public decimal WholesalePrice { get; set; }
-}
-
-// Setup
-var registry = new DataCacheRegistry();
-var productCache = registry.GetCache<ProductCache>();
-var productInfoCache = registry.GetCache<ProductInfoCache>();
-var offerCache = registry.GetCache<OfferCache>();
-productCache.AddJoinedCaches(productInfoCache, offerCache);
-
-// Query with joins - zero allocations with pooled execution
-var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-
-var results = productCache.Query()
-    .WithReleaseDate(q => q.Gte(now))         // Products releasing now or later
-    .Where(p => p.IsPublished)                // Published only
-    .JoinWithProductInfo()                    // Include warehouse info
-    .JoinWithOffer()                          // Include all offers
+departmentIndex.TryGetMax(out long latestMs, out int departmentId);
+int count = departmentIndex.GetEntitiesCount(42);
+
+// 4. Query — when the group key is the cache's primary key the generator emits UpdatedAfter;
+//    UseIndex(globalIndex, …) is the raw-cache spelling of the same thing
+using var changed = productCache.Query()
+    .UpdatedAfter(lastSyncMs, out long newWatermark)     // strictly greater than lastSyncMs
     .ExecutePooled();
 
-foreach (var result in results) {
-    var product = result.Left;
-    var info = result.Right1;                 // ProductInfo (1:1)
-    var offers = result.Right2;               // ReadOnlySpan<Offer> (1:N)
-    
-    Console.WriteLine($"{product.Manufacturer} - {product.Supplier}");
-    Console.WriteLine($"  Warehouse: {info?.Warehouse}");
-    Console.WriteLine($"  Offers: {offers.Length}");
-}
+using var window = productCache.Cache.Query()
+    .UseIndex(productIndex, startMs, endMs)
+    .ExecutePooled();
 
-results.Dispose();  // Return to pool
+// A group key that is not the PK (DepartmentId above) is read through the index itself:
+// which departments changed, then query each department's rows by its own index
+var changedDepartments = departmentIndex.Index.GetValuesGt(lastSyncMs);
 ```
 
-### **E-Commerce Order Processing**
+`UpdatedAfter` / `UseIndex(globalIndex, …)` have `long`, `DateTime` and `DateTimeOffset` overloads, an
+`(after, untilInclusive)` window form, an `out long max` form and prepared twins; they bind only when the
+global index is keyed by the cache's primary key type. The filtered variant
+`[DataCacheGlobalLastUpdateIndex<TIndex, TFilter>]` (a `readonly struct : IDataCacheGlobalLastUpdateFilter<T>`)
+tracks only entities the filter admits, re-evaluated on every update.
+
+### **Topics**
 
 ```csharp
-[DataCache]
-[DataCacheTopic("orders.events.[e:env]")]
-public class Order : IDataCacheItem<string, Order> {
-    [DataCacheKey]
-    public string OrderId { get; set; }
-    
-    [DataCacheIndex(DataCacheIndexType.Many)]
-    public int CustomerId { get; set; }
-    
-    [DataCacheIndex(DataCacheIndexType.Many)]
-    public OrderStatus Status { get; set; }
-    
-    [DataCacheIndex(DataCacheIndexType.Range)]
-    public long CreatedAt { get; set; }
-    
-    [DataCacheIndex(DataCacheIndexType.Range)]
-    public decimal Total { get; set; }
-    
-    [DataCacheFromTimestamp]
-    public long ProcessedAt { get; set; }
-    
-    public List<OrderItem> Items { get; set; }
-    
-    public string GetKey() => OrderId;
-}
+[DataCacheTopic("orders.{env}")]            // default template without the attribute: "Cache.{ClassName}"
+public partial class Order { … }
 
-// Get pending high-value orders for VIP customers
-var vipCustomers = new[] { 42, 123, 456 };
-
-var highValueOrders = cache.Query()
-    .WithCustomerId(vipCustomers)
-    .WithStatus(OrderStatus.Pending)
-    .WithTotal(q => q.Gte(1000m))  // Over $1000
-    .Execute();
+OrderCache.TopicNameTemplate                // "orders.{env}" — compile-time constant
 ```
 
-### **IoT Sensor Data**
-
-```csharp
-[DataCache]
-public class SensorReading : IDataCacheItem<string, SensorReading> {
-    [DataCacheKey]
-    public string ReadingId { get; set; }
-    
-    [DataCacheIndex(DataCacheIndexType.Many)]
-    public string DeviceId { get; set; }
-    
-    [DataCacheIndex(DataCacheIndexType.Many)]
-    public string SensorType { get; set; }
-    
-    [DataCacheIndex(DataCacheIndexType.Range)]
-    public long Timestamp { get; set; }
-    
-    [DataCacheIndex(DataCacheIndexType.Range)]
-    public double Value { get; set; }
-    
-    public string GetKey() => ReadingId;
-}
-
-// Find temperature anomalies in last 5 minutes
-var fiveMinAgo = DateTimeOffset.UtcNow.AddMinutes(-5).ToUnixTimeMilliseconds();
-
-var anomalies = cache.Query()
-    .WithDeviceId("SENSOR-001")
-    .WithSensorType("temperature")
-    .WithTimestamp(q => q.Gte(fiveMinAgo))
-    .WithValue(q => q.Gt(80.0).Or.Lt(10.0))  // Too hot or too cold
-    .Execute();
-```
+`{name}` placeholders resolve against `KafkaCachesOptions.Vars` at registration time.
 
 ---
 
-## 🛠️ Configuration
-
-### **Kafka Consumer**
+## 🔥 Kafka integration
 
 ```csharp
-services.AddPragueKafka(options => {
-    options.BootstrapServers = "kafka:9092";
-    options.GroupId = "my-service";
-    options.AutoOffsetReset = AutoOffsetReset.Earliest;
-})
-.AddConsumer(consumer => consumer
-    .AddProductCache()
-    .WithHeaderEqualsFilter("tenant", "acme")
-    .WithHeaderEqualsFilter("version", 1, 2)  // v1 or v2
-    
-    .AddOrderCache("orders.input")
-    .WithHeaderExistsFilter("correlation-id")
-);
+services.AddKafkaCaches(
+    o => {
+        o.BootstrapServers = "kafka:9092";
+        o.ClientSettings["group.id"] = "my-service";      // forwarded to librdkafka
+        o.Vars["env"] = "prod";                           // topic-template placeholders
+    },
+    b => {
+        b.AddCache<OrderCache, string, Order>()                      // topic from [DataCacheTopic]
+            .WithHeaderEqualsFilter("tenant", "acme")
+            .WithValueFilter(static o => o.Status == OrderStatus.Active, treatAsDelete: true)
+            .WithAfterHandler<OrderProjector>();
+        b.AddCache<CustomerCache, int, Customer>("customers-{env}");  // explicit topic
+        b.AddInternalCache<ViewCache, int, View>();                   // in the registry, not consumed
+    });
+
+var orders = provider.GetRequiredService<OrderCache>();
 ```
 
-### **Kafka Producer**
+- One `AddKafkaCaches` call per cluster (`configsSectionName` distinguishes them). Each registers a
+  hosted service whose `StartAsync` returns once every cache has reached its initial-load EOF, so an
+  ASP.NET Core host does not serve before the caches are loaded. Elsewhere: `await host.DataCachesLoadCompletion()`.
+- Each process consumes under its own `group.id` by default and commits no offsets, so every instance
+  loads every topic in full (broadcast, not work-sharing) and a restart re-reads everything.
+- **Filters** (`WithHeader*Filter`, `WithKeyFilter`, `WithValueFilter`) AND-compose and are an ingress
+  gate evaluated once per message on the consume thread. Header filters run before key deserialization.
+  `treatAsDelete: true` turns a rejection into a tombstone for the key. DI-aware overloads resolve
+  state **once** at build (`WithKeyFilter(static sp => …snapshot…, static (state, key) => …)`).
+- **Tombstones** (null value) skip the key and value filters and always delete the key. Only a header
+  filter that explicitly rejected the value, or the producer self-filter, drops one.
+- **After-handlers** (`ICacheAfterHandler<TKey, TValue>`) fire on the live phase only, with the
+  `UpdateType`; `Filtered` carries neither key nor value.
+- **Enrichment:** `[DataCacheFromTimestamp]` fills a property from the message timestamp,
+  `[DataCacheHeader("tenant-id")]` from a header.
+
+**Producer.** Registered as a keyed singleton under the section name:
 
 ```csharp
-services.AddPragueKafka(options => {
-    options.BootstrapServers = "kafka:9092";
-})
-.AddProducer(producer => producer
-    .AddOrderCache("orders.output")
-);
+public sealed class OrderService([FromKeyedServices("kafkaCaches")] KafkaCacheProducer producer) {
+    public void Place(Order o) => producer.Produce("orders", o.OrderId, o);     // upsert
+    public void Cancel(string id) => producer.Delete("orders", id);             // tombstone
+}
+
+orderCache.AddOrUpdateAndProduce(order);   // writes locally; produces only when the value changed
+orderCache.RemoveAndProduce(orderId);      // removes locally and publishes the tombstone
 ```
 
-### **Topic Placeholders**
+Fire-and-forget: `Produce` / `Delete` return once queued in librdkafka; a broker-side failure is only
+logged; `acks=all` is librdkafka's default, which is why `min.insync.replicas` matters on the topic.
+**A process never re-consumes its own writes** (the `X-Producer-Id` header self-filter), so prefer the
+`*AndProduce` helpers over a bare `Produce` when the local cache must reflect the write.
 
-```csharp
-[DataCacheTopic("events.[v:apiVersion].[e:environment]")]
+**MessagePack isolation.** Every SerDe call goes through `PragueMessagePack.Options`; host changes to
+`MessagePackSerializer.DefaultOptions` do not affect Prague's wire format. Extend the resolver chain with
+`options.WithMessagePackResolver(defaultResolver => …)` on the third `AddKafkaCaches` argument.
 
-// Resolves to: "events.v2.production"
-services.AddPragueKafka(options => {
-    options.Variables["apiVersion"] = "v2";
-    options.EnvironmentVariables["environment"] = "production";
-});
-```
+Full guide, including the suggested topic configuration and the filter lifecycle:
+[`www/docs/articles/advanced/kafka-integration.md`](www/docs/articles/advanced/kafka-integration.md).
 
 ---
 
-## 🩺 Health Checks
+## 🩺 Health checks
 
-Prague ships split **liveness** and **readiness** `IHealthCheck` implementations
-ready to plug into `Microsoft.Extensions.Diagnostics.HealthChecks`. The healthy
-path is **zero allocation** — safe to call at any probe rate.
-
-### **1. Register**
-
-```csharp
-services
-    .AddKafkaCaches(/* your existing config */);
-
-services
-    .AddHealthChecks()
-    .AddPragueKafkaLiveness()    // default name: "prague-kafka-live",  failure: Unhealthy
-    .AddPragueKafkaReadiness();  // default name: "prague-kafka-ready", failure: Degraded
-```
-
-That's it — defaults work out of the box: 3 s poll-loop heartbeat timeout,
-5 s per-handler processing watchdog, `MinBrokersUp = 1`,
-`StatisticsEnabled = true`.
-
-### **2. Expose endpoints (k8s-style)**
-
-Tag the checks so each endpoint runs only its own probe:
+Split **liveness** and **readiness** `IHealthCheck` implementations for
+`Microsoft.Extensions.Diagnostics.HealthChecks`. The healthy path is zero-allocation.
 
 ```csharp
 services.AddHealthChecks()
-    .AddPragueKafkaLiveness (tags: new[] { "live"  })
-    .AddPragueKafkaReadiness(tags: new[] { "ready" });
+    .AddPragueKafkaLiveness (tags: ["live"])    // "prague-kafka-live",  failure → Unhealthy
+    .AddPragueKafkaReadiness(tags: ["ready"]);  // "prague-kafka-ready", failure → Degraded
 
-app.MapHealthChecks("/health/live",  new HealthCheckOptions {
-    Predicate = r => r.Tags.Contains("live")
-});
+app.MapHealthChecks("/health/live",  new HealthCheckOptions { Predicate = r => r.Tags.Contains("live") });
 app.MapHealthChecks("/health/ready", new HealthCheckOptions {
     Predicate = r => r.Tags.Contains("ready"),
     ResultStatusCodes = {
         [HealthStatus.Healthy]   = StatusCodes.Status200OK,
-        [HealthStatus.Degraded]  = StatusCodes.Status503ServiceUnavailable,
+        [HealthStatus.Degraded]  = StatusCodes.Status503ServiceUnavailable,   // default maps Degraded → 200
         [HealthStatus.Unhealthy] = StatusCodes.Status503ServiceUnavailable,
     }
 });
-```
 
-> ⚠️ The default `MapHealthChecks` mapping returns **200** for `Degraded` —
-> if you want k8s to pull a Degraded pod from the LB, map `Degraded → 503`
-> as shown above.
-
-```yaml
-livenessProbe:
-  httpGet: { path: /health/live,  port: http }
-  periodSeconds: 10
-  failureThreshold: 3      # ~30 s before pod restart
-readinessProbe:
-  httpGet: { path: /health/ready, port: http }
-  periodSeconds: 5
-  failureThreshold: 2      # ~10 s before pod is pulled from LB
-```
-
-### **3. What each check covers**
-
-**Liveness** (any failure ⇒ `Unhealthy`):
-
-| Predicate | Catches |
-|---|---|
-| `FatalLatched` | Fatal Kafka error or app-fatal error code; consumer is unsafe |
-| `PollLoopStalled` | Outer poll loop hasn't returned within `PollLoopHeartbeatTimeout` (deadlock, wedged librdkafka) |
-| `HandlerLoopFaulted` | A per-cache `ChannelLoop` has terminated with an exception |
-| `HandlerProcessingTimeout` | A single message has been in-flight in a handler longer than `HandlerProcessingTimeout` |
-
-**Readiness** (= liveness AND, on failure ⇒ `Degraded`):
-
-| Predicate | Catches |
-|---|---|
-| `InitialLoadIncomplete` | At least one cache hasn't finished its initial load — queries would see partial data. Also permanently true if a cache topic has more than one partition (see the topic requirement above) |
-| `NoPartitionAssigned` | A cache's topic has zero partitions assigned (rebalance stuck, ACL revoked, missing topic) |
-| `BrokersDown` | Fewer than `MinBrokersUp` brokers in `UP` state |
-| `PartitionsLost` | Last rebalance event was a partitions-lost (session timeout / broker death) and re-assignment hasn't happened |
-
-When something fails, `HealthCheckResult.Data` includes
-`<consumer>.failures = [...]` and `<consumer>.caches = [...]` so logs and
-default JSON output show *which* consumer/cache is at fault.
-
-### **4. Configuration overrides**
-
-```csharp
 services.Configure<KafkaCachesHealthOptions>(o => {
-    o.PollLoopHeartbeatTimeout = TimeSpan.FromSeconds(3);
-    o.HandlerProcessingTimeout = TimeSpan.FromSeconds(5);
-    o.MinBrokersUp             = 1;
+    o.PollLoopHeartbeatTimeout = TimeSpan.FromSeconds(3);   // default
+    o.HandlerProcessingTimeout = TimeSpan.FromSeconds(5);   // default
+    o.MinBrokersUp             = 1;                         // default; needs StatisticsEnabled (default on)
 });
-
-// or from configuration
-services.Configure<KafkaCachesHealthOptions>(configuration.GetSection("KafkaHealth"));
 ```
 
-> ℹ️ **`MinBrokersUp` requires `KafkaCachesGlobalOptions.StatisticsEnabled = true`** (the default).
-> If you explicitly disable statistics, librdkafka stops reporting broker
-> state, so `BrokerUpCount` stays at 0 — set `MinBrokersUp = 0` in that case
-> to disable the predicate.
+| Check | Predicate | Catches |
+|---|---|---|
+| Liveness | `FatalLatched` | fatal Kafka error; consumer unsafe |
+| | `PollLoopStalled` | poll loop silent longer than `PollLoopHeartbeatTimeout` |
+| | `HandlerLoopFaulted` | a per-cache worker terminated with an exception |
+| | `HandlerProcessingTimeout` | one message in flight longer than `HandlerProcessingTimeout` |
+| Readiness (= liveness +) | `InitialLoadIncomplete` | a cache has not reached initial-load EOF |
+| | `NoPartitionAssigned` | a cache topic has zero partitions assigned |
+| | `BrokersDown` | fewer than `MinBrokersUp` brokers `UP` |
+| | `PartitionsLost` | last rebalance lost partitions and nothing was re-assigned |
+
+`HealthCheckResult.Data` carries `<consumer>.failures` and `<consumer>.caches` so the output names the
+culprit. Set `MinBrokersUp = 0` if you disable librdkafka statistics.
 
 ---
 
-## 📊 OpenTelemetry Metrics
+## 📊 OpenTelemetry metrics
 
-Prague ships an opt-in OpenTelemetry metric surface sourced entirely from the
-statistics already collected by the consumer/cache subsystem. Every instrument
-is **observable** (callback-based) and runs on the exporter's scrape — **zero
-allocations per scrape after warm-up**, **zero hot-path cost**.
-
-### **1. Register**
-
-Add the OTel package and call the extension inside your `MeterProviderBuilder`:
+Opt-in, observable (callback-based) instruments sourced from the statistics the consumer already
+collects — zero hot-path cost, zero allocations per scrape after warm-up.
 
 ```csharp
-services
-    .AddKafkaCaches(/* your existing config */);
-
-services
-    .AddOpenTelemetry()
-    .WithMetrics(m => m
-        .AddPragueKafkaInstrumentation()       // → "prague.kafka.*"
-        .AddPrometheusExporter());
+services.AddOpenTelemetry().WithMetrics(m => m
+    .AddPragueKafkaInstrumentation()        // → "prague.kafka.*"; AddPragueKafkaInstrumentation("acme.") to prefix
+    .AddPrometheusExporter());
 ```
-
-The default prefix is empty, so metric names are `prague.kafka.*`. Pass a
-prefix to namespace the metrics differently:
-
-```csharp
-m.AddPragueKafkaInstrumentation();             // → "prague.kafka.*"
-m.AddPragueKafkaInstrumentation("acme.");      // → "acme.prague.kafka.*"
-```
-
-### **2. Metrics emitted**
 
 | Metric | Kind | Unit | Tags |
 |---|---|---|---|
@@ -1642,93 +752,156 @@ m.AddPragueKafkaInstrumentation("acme.");      // → "acme.prague.kafka.*"
 | `prague.kafka.cache.health` | Gauge | `0`/`1` | `consumer`, `cache` |
 | `prague.kafka.cache.index.size` | UpDownCounter | `{item}` | `consumer`, `cache`, `index`, `kind=keys\|values` |
 
-- `broker.rtt.p99` is **max-of-p99 across brokers** (worst-broker tail).
-- `cache.size` is the **live** row count, not the snapshot.
-- `messages.received` is cumulative (from librdkafka per-topic `rxmsgs`).
-- `cache.index.size` emits one measurement per index per `kind` — `keys` is the unique-key count, `values` is the total value count.
-
-### **3. Health semantics**
-
-Both `health` gauges follow Prometheus `up`-style: **`1` = healthy, `0` = unhealthy**. No reason tag — the metric is a binary alarm, and the `/health` endpoint's `Data` carries the failure reasons. Same predicates as the liveness/readiness checks (single source of truth via `KafkaCachesHealthPredicates`).
+The `health` gauges follow Prometheus `up` semantics (`1` healthy) and share their predicates with the
+health checks; the `/health` endpoint carries the reasons.
 
 ```promql
-# Alert if any consumer goes unhealthy
 min by (consumer) (prague_kafka_consumer_health) == 0
-
-# Alert if any specific cache goes unhealthy
-min by (consumer, cache) (prague_kafka_cache_health) == 0
 ```
 
-### **4. Performance**
+---
 
-Observable callbacks read existing volatile fields on the stats struct. No hot-path instrumentation. After warm-up, a full scrape (all 7 instruments × N consumers × M caches × I indexes) is verified to allocate **exactly 0 bytes**:
+## 🔎 HTTP inspection (`Prague.Api`, `Prague.Api.UI`)
 
-- Tag arrays cached per dimension combo via a lock-free `QuickLookupCache`.
-- `Measurement<T>` constructed via the no-tags ctor + `[UnsafeAccessor]` field swap — no internal tag-array clone.
-- Each instrument's callback returns a `ReusableMeasurementSource<T>` that implements both `IEnumerable<T>` and `IEnumerator<T>` — `GetEnumerator()` returns `this`, so the SDK's `foreach` doesn't allocate an enumerator either.
+```csharp
+app.MapPragueEndpoints();     // GET /prague (statistics), GET /prague/{CacheName}, GET /prague/{CacheName}/{id}
+builder.AddPragueUI();        // + app.MapPragueUI() — a MudBlazor front end over the same registry
+```
+
+The collection endpoint accepts the generated query-string API (`customerId=42&total>100`), the same
+parser exposed on every cache as `QueryParser.StringQueryPooled(...)`.
+
+---
+
+## 🧵 Concurrency contract
+
+Caches are written while queries read them — a live Kafka consumer on one side, request handlers on the
+other. There is no query-time lock and no snapshot isolation, by design:
+
+- **A query never fails because of a concurrent write.** No exception, no torn buffer.
+- **A query makes no consistency promise.** A row written mid-query may be included or missed, and two
+  legs of one join may disagree. Stale or short results are correct; the next query sees the write.
+- Readers are lock-free (volatile-published generations with grace-period reclamation); the single
+  writer per cache is the consumer thread. Value-side probes on the frozen path never return a row that
+  contradicts the query.
+
+---
+
+## 🏗️ Architecture
+
+**Data flow:** `[DataCache]` POCO → codegen emits `XxxCache` partial + index storage + fluent `Query()` /
+`Prepare()` → at runtime `InMemoryDataCache` resolves the index plan, intersects on a stackalloc bitmap
+and returns allocating or pooled results. `BuildFrozen()` plans once and binds one of three executors —
+`PointLookup`, `Pipeline`, `Replay`.
+
+```
+src/
+  Prague.Attributes/   Public attributes
+  Prague.Codegen/      Roslyn source generator (netstandard2.0)
+  Prague.Core/         Runtime: InMemoryDataCache, indexing, query execution, prepared/frozen
+                       queries, joins, T4-generated combinatorial join builders
+  Prague/              Top-level package facade
+  Prague.Kafka/        Raw zero-copy consumer/producer, SerDe, filters, health, OTel, background worker
+  Prague.Api/ Prague.Api.UI/   HTTP inspection surface + UI
+tests/        NUnit per layer: Core (raw POCOs, no codegen), Generated (through codegen), Kafka
+              (broker-free), Kafka.IntegrationTests (Testcontainers), Tests.Models (fixtures)
+benchmarks/   BenchmarkDotNet + RESULTS.MD (every measured table)
+perf/         Regression tripwire — compare.py diffs runs against perf/baseline/<machine>.json
+context/      Topic-first engineering notes (indexes, query, joins, kafka, …)
+www/          Public docs site (DocFX) + landing page
+docs/         Design specs and plans; llm-readme.txt
+```
+
+```bash
+dotnet build Prague.sln                 # warnings are errors
+dotnet test  Prague.Tests.slnf          # all tests; Kafka.IntegrationTests need Docker
+dotnet run -c Release -f net9.0 --project benchmarks/Prague.Benchmarks -- --inProcess --anyCategories <cat>
+perf/run.sh core|sort|sim|concurrent|all
+```
 
 ---
 
 ## 🧪 Testing
 
-Prague is designed for testability:
+A cache is a plain object — no mocks, no broker needed for the data path.
 
 ```csharp
-// In-memory cache for unit tests
-var cache = new OrderCache();
+[Test]
+public void Finds_orders_by_customer() {
+    var cache = new OrderCache();
+    cache.AddOrUpdate(new Order { OrderId = "T-1", CustomerId = 42, /* … */ });
 
-cache.AddOrUpdate(new Order { OrderId = "TEST-001", ... });
+    using var results = cache.Query().WithCustomerId(42).ExecutePooled();
 
-var results = cache.Query()
-    .WithCustomerId(42)
-    .Execute();
-
-Assert.AreEqual(1, results.Count);
+    Assert.That(results.Count, Is.EqualTo(1));
+}
 ```
 
-No mocking needed - it's an in-memory cache!
+For the Kafka path there is no in-memory broker substitute; Prague's own integration tests run against
+Testcontainers. Give each consumer under test its own `group.id`, and remember a process does not consume
+what it produced.
+
+---
+
+## 🆚 What Prague is — and is not
+
+**Is:** a library, not a server. Caches live in your process; there is no network hop. Storage, indices,
+joins and query builders are generated from attributes, so the plan is fixed by your call shape at
+compile time and nothing is reflected over at runtime. Result sets are pooled.
+
+**Is not:** a distributed cache (each process owns its caches; replication is the upstream log's job), a
+relational database (fluent expressions over typed indices, not SQL), or an eviction cache (no TTL / LRU —
+the topic's compaction is the retention policy).
+
+What you will not find elsewhere in one package: compile-time-checked queries with automatic index
+intersection, generated 1:1 / 1:N joins with pooled results, a prepared/frozen query form that executes
+at 0 B and is planned once, change detection baked into every write, and a Kafka hydration path that is
+zero-copy from the broker's buffer to your POCO.
+
+---
+
+## 📚 Documentation
+
+- **Docs site sources** — [`www/docs/`](www/docs/): [Introduction](www/docs/articles/getting-started/introduction.md)
+  · [Installation](www/docs/articles/getting-started/installation.md)
+  · [Quick Start](www/docs/articles/getting-started/quick-start.md)
+  · [Index Types](www/docs/articles/core-concepts/index-types.md)
+  · [Query Engine](www/docs/articles/core-concepts/query-engine.md)
+  · [Sorted Paging](www/docs/articles/core-concepts/sorted-paging.md)
+  · [Prepared and Frozen Queries](www/docs/articles/core-concepts/prepared-queries.md)
+  · [Conditional Updates](www/docs/articles/core-concepts/conditional-updates.md)
+  · [Joins](www/docs/articles/core-concepts/joins.md)
+  · [Kafka Integration](www/docs/articles/advanced/kafka-integration.md)
+  · [Global Last Update Index](www/docs/articles/advanced/global-last-update-index.md)
+  · [Performance Tuning](www/docs/articles/advanced/performance-tuning.md)
+- **For LLMs and coding assistants** — [`docs/llm-readme.txt`](docs/llm-readme.txt).
+- **Engineering notes** (how it works inside) — [`context/`](context/): `core.md`, `indexes.md`,
+  `query.md`, `joins.md`, `collections.md`, `generated.md`, `kafka.md`, `kafka-filters.md`,
+  `kafka-serde.md`, `kafka-health.md`. [`CLAUDE.md`](CLAUDE.md) maps topics to files.
+- **Design history** — [`docs/superpowers/specs/`](docs/superpowers/specs/) and
+  [`docs/superpowers/plans/`](docs/superpowers/plans/).
+- **Measurements** — [`benchmarks/Prague.Benchmarks/RESULTS.MD`](benchmarks/Prague.Benchmarks/RESULTS.MD);
+  regression baseline in [`perf/README.md`](perf/README.md).
 
 ---
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
----
+Issues and pull requests on [github.com/nanov/prague.net](https://github.com/nanov/prague.net/issues).
+Build with `dotnet build Prague.sln` (warnings are errors), test with `dotnet test Prague.Tests.slnf`.
+Never hand-edit `*.generated.cs` — change the generator or the T4 template. Re-measure A/B after any
+executor change; `RESULTS.MD` records the numbers.
 
 ## 📄 License
 
-Prague is licensed under the [MIT License](LICENSE).
-
----
+MIT — see [LICENSE](LICENSE).
 
 ## 🙏 Acknowledgments
 
-Named after Prague, the birthplace of Franz Kafka, whose works inspired the Kafka streaming platform that Prague integrates with.
-
-Built with modern .NET features:
-- Source Generators (Roslyn)
-- Span&lt;T&gt; and Memory&lt;T&gt;
-- ImmutableCollections
-- System.Threading.Lock
-
----
-
-## 📖 Documentation
-
-- [Getting Started Guide](docs/getting-started.md)
-- [Index Types Explained](docs/indices.md)
-- [Query Optimization](docs/query-optimization.md)
-- [Kafka Integration](docs/kafka.md)
-- [Performance Tuning](docs/performance.md)
-- [API Reference](docs/api-reference.md)
-
----
-
-## 💬 Community
-
-- [GitHub Discussions](https://github.com/yourorg/prague/discussions)
-- [Issue Tracker](https://github.com/yourorg/prague/issues)
+Named after Prague, the birthplace of Franz Kafka, whose works inspired the Kafka streaming platform
+that Prague integrates with. Kafka access is through the
+[`Nanov.Confluent.Kafka`](https://www.nuget.org/packages/Nanov.Confluent.Kafka) fork for its raw,
+span-based consume/produce APIs.
 
 ---
 
