@@ -1,14 +1,10 @@
 name: Build and deploy Prague website
 
+# The site ships with the library: a stable release (not a prerelease) rebuilds and deploys it from
+# the released tag, so the published docs describe the published package. A push to main does not
+# deploy; use "Run workflow" for an out-of-band docs fix. The github-pages environment allows the
+# refs `main`, `www/*` and tags `v*`, so a release-triggered deploy passes its branch policy.
 on:
-  push:
-    branches: [main]
-    paths:
-      - "www/**"
-      - "src/**"
-      - "docs/llm-readme.txt"
-      - "Directory.Build.props"
-      - ".github/workflows/pages.yml"
   release:
     types: [published]
   workflow_dispatch:
@@ -25,13 +21,12 @@ concurrency:
 jobs:
   build:
     name: Build site + docs
+    if: github.event_name != 'release' || !github.event.release.prerelease
     runs-on: ubuntu-latest
     steps:
-      # A release event runs on the tag ref; the site itself always builds from main.
+      # A release event runs on the tag ref, so the site is built from exactly the released commit.
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'release' && 'main' || '' }}
 
       - name: Setup Node 22
         uses: actions/setup-node@v4
