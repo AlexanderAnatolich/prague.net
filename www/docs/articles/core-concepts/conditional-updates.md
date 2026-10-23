@@ -57,6 +57,10 @@ Multiple handlers per cache are allowed (every `ICacheAfterHandler<TKey, TValue>
 
 `KafkaCacheProducer.Produce(topic, key, value)` always writes — there is no conditional skip on the producer. The generated `cache.AddOrUpdateAndProduce(value)` is the conditional form: it writes locally and produces only when `AddOrUpdate` reported a change. `cache.RemoveAndProduce(key)` removes locally and always publishes the tombstone, resident or not. See [Kafka integration](../advanced/kafka-integration.md#producer).
 
+When the current state has to go back onto the topic even though nothing changed locally (a fresh record for the compacted topic, a re-emit for consumers that are rebuilding or joining later), use `cache.AddOrUpdateAndProduce(value, force: true)`. The local write stays conditional; only the produce becomes unconditional. Consumers apply the record through their own equality gate, so a replica that already holds an equal value reports `Same`, exactly as for any re-emit.
+
+[!code-csharp[](../../../../samples/Prague.Samples/Advanced/KafkaIntegration.cs#produce-forced)]
+
 ## Why this matters
 
 Compacted Kafka topics naturally re-emit the latest state on each rebalance and rebuild. Without conditional updates a downstream projector would see thousands of `Update` events on startup that are no-ops. With them the count of `Update` events is exactly the number of state transitions across the topic's lifetime.

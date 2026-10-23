@@ -210,7 +210,9 @@ When a cache is registered with `AddCache` (not `AddInternalCache`), the generat
 
 [!code-csharp[](../../../../samples/Prague.Samples/Advanced/KafkaIntegration.cs#produce-through-the-cache)]
 
-`AddOrUpdateAndProduce` is the conditional form: it produces only when the local `AddOrUpdate` reported a change (see [Conditional Updates](../core-concepts/conditional-updates.md)). `Produce` itself always writes — there is no producer-side dedup. If you need it, consult `cache.Cache.TryGet(...)` before calling `Produce`.
+`AddOrUpdateAndProduce` is the conditional form: it produces only when the local `AddOrUpdate` reported a change (see [Conditional Updates](../core-concepts/conditional-updates.md)). `AddOrUpdateAndProduce(document, force: true)` keeps that local write conditional but always produces, which is how you re-publish the current state onto the topic. `Produce` itself always writes — there is no producer-side dedup. If you need it, consult `cache.Cache.TryGet(...)` before calling `Produce`.
+
+[!code-csharp[](../../../../samples/Prague.Samples/Advanced/KafkaIntegration.cs#produce-forced)]
 
 **Your own writes are not applied to your own cache.** Every consumer drops messages stamped with its own producer instance id, so a process that calls `Produce` or `Delete` directly does not see the result in its local cache until it restarts. For deletes, use the generated `cache.RemoveAndProduce(key)` instead: it removes the key locally *and* publishes the tombstone. The tombstone is published whether or not the key was resident locally — a key excluded by an ingress filter, or not loaded yet, still gets its delete — and the `bool` it returns says only whether the local cache held the key.
 

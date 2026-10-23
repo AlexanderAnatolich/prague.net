@@ -525,6 +525,9 @@ bool changed = cache.AddOrUpdate(order, out var previous);   // true: Add or Upd
   no-op `Update` events at startup and exactly the real transitions.
 - The Kafka path surfaces the outcome as `UpdateType` (`Filtered`, `Same`, `Add`, `Update`, `Delete`)
   to `ICacheAfterHandler<TKey, TValue>`.
+- `cache.AddOrUpdateAndProduce(order)` produces only when the local write changed something;
+  `cache.AddOrUpdateAndProduce(order, force: true)` keeps the local write conditional but always
+  produces, to re-publish the current state onto the topic.
 
 ### **Deep cloning**
 

@@ -2578,6 +2578,26 @@ public class CacheGenerator : IIncrementalGenerator {
 						});
 					});
 
+					// AddOrUpdateAndProduce(document, force): the same conditional local write, but the produce
+					// step is unconditional. Re-emits the current state onto the topic (a fresh compacted record,
+					// consumers that rebuild or join later see it) without pretending the local value changed.
+					w.Line();
+					w.Summary("Adds or updates a document in the cache and produces it to Kafka.",
+						"With <paramref name=\"force\"/> the message is produced even when the local write reported no change",
+						"(the document is cache-equal to the resident one); the local write itself stays conditional, and",
+						"consumers apply the record through their ordinary equality gate.");
+					w.Method($"public static void AddOrUpdateAndProduce(this {cacheFullName} cache, {typeName} document, bool force)", (ref CodeWriter w) => {
+						if (!string.IsNullOrEmpty(keyPropertyName))
+							w.Line($"var key = document.{keyPropertyName};");
+						else
+							w.Line("var key = document.GetKey();");
+
+						w.Line("var changed = cache.Cache.AddOrUpdate(key, document);").Line();
+						w.If("changed || force", (ref CodeWriter w) => {
+							w.Line($"{namespaceName}.CacheMarshall.Produce(cache, key, document);");
+						});
+					});
+
 					// RemoveAndProduce extension method
 					w.Line();
 					w.Summary("Removes a document from the cache and produces a delete (tombstone) message to Kafka.",

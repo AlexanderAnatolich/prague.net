@@ -134,6 +134,7 @@ InvoiceNumber (Unique), sort "ByPriority":
     bool CacheEquals(Order? other); int CacheGetHashCode(); Order Clone()
   With Prague.Kafka referenced, extension methods:
     orderCache.AddOrUpdateAndProduce(order)         local write; produces ONLY if changed
+    orderCache.AddOrUpdateAndProduce(order, force: true)   local write; produces ALWAYS
     orderCache.RemoveAndProduce(key) → bool         local remove + tombstone (published either way)
     IEnrichable<Order>                              header/timestamp enrichment
 
@@ -152,6 +153,9 @@ at most MaxJoins = 5 joins, result structs go to MaxJoinResults = 15 slots). Nev
   cache.Cache.TryGet(ICollection<TKey> keys, Span<TValue> results [, predicate]) → int  (hit count)
 Semantics: AddOrUpdate compares with CacheEquals; equal → nothing swapped, no index touched, result
 "Same". Timestamps are Unix ms and feed LastUpdated indices.
+  cache.AddOrUpdateAndProduce(doc)               local conditional write, Produce only if it changed
+  cache.AddOrUpdateAndProduce(doc, force: true)  same local write, Produce ALWAYS (re-publish current
+                                                 state; consumers still apply it through CacheEquals)
 
 
 5. READING — THE EAGER BUILDER
