@@ -864,18 +864,17 @@ zero-copy from the broker's buffer to your POCO.
 
 - **Docs site** — [nanov.github.io/prague.net](https://nanov.github.io/prague.net/): guides at [`/docs/`](https://nanov.github.io/prague.net/docs/),
   generated [API reference](https://nanov.github.io/prague.net/docs/api/index.html), and [`/llms.txt`](https://nanov.github.io/prague.net/llms.txt) for assistants.
-- **Docs site sources** — [`www/docs/`](www/docs/): [Introduction](www/docs/articles/getting-started/introduction.md)
-  · [Installation](www/docs/articles/getting-started/installation.md)
-  · [Quick Start](www/docs/articles/getting-started/quick-start.md)
-  · [Index Types](www/docs/articles/core-concepts/index-types.md)
-  · [Query Engine](www/docs/articles/core-concepts/query-engine.md)
-  · [Sorted Paging](www/docs/articles/core-concepts/sorted-paging.md)
-  · [Prepared and Frozen Queries](www/docs/articles/core-concepts/prepared-queries.md)
-  · [Conditional Updates](www/docs/articles/core-concepts/conditional-updates.md)
-  · [Joins](www/docs/articles/core-concepts/joins.md)
-  · [Kafka Integration](www/docs/articles/advanced/kafka-integration.md)
-  · [Global Last Update Index](www/docs/articles/advanced/global-last-update-index.md)
-  · [Performance Tuning](www/docs/articles/advanced/performance-tuning.md)
+- **Docs site sources** — [`www/docs/`](www/docs/), organised by what you are trying to do:
+  [Tutorial: Build an Order Service](www/docs/articles/tutorial/build-an-order-service.md)
+  · Core concepts ([Index Types](www/docs/articles/core-concepts/index-types.md), [Query Engine](www/docs/articles/core-concepts/query-engine.md),
+  [Sorted Paging](www/docs/articles/core-concepts/sorted-paging.md), [Prepared and Frozen Queries](www/docs/articles/core-concepts/prepared-queries.md),
+  [Conditional Updates](www/docs/articles/core-concepts/conditional-updates.md), [Joins](www/docs/articles/core-concepts/joins.md))
+  · [How-to guides](www/docs/articles/how-to/) (page an API, incremental sync, filters, after-handlers, DI hosting, HTTP inspection, testing, health and metrics)
+  · [Kafka Integration](www/docs/articles/advanced/kafka-integration.md), [Global Last Update Index](www/docs/articles/advanced/global-last-update-index.md), [Performance Tuning](www/docs/articles/advanced/performance-tuning.md)
+  · Explanation ([How Prague Works](www/docs/articles/explanation/architecture.md), [The Concurrency Contract](www/docs/articles/explanation/concurrency.md), [Ordering and Determinism](www/docs/articles/explanation/ordering-and-determinism.md))
+  · Reference ([Attributes and Generated Code](www/docs/articles/reference/attributes.md), [Generator Diagnostics](www/docs/articles/reference/diagnostics.md), [Benchmarks](www/docs/articles/reference/benchmarks.md)).
+- **Compiled samples** — [`samples/Prague.Samples/`](samples/Prague.Samples/): every code block on the docs site is a region of
+  this NUnit project and runs in CI, so the docs cannot drift from the library.
 - **For LLMs and coding assistants** — [`docs/llm-readme.txt`](docs/llm-readme.txt).
 - **Engineering notes** (how it works inside) — [`context/`](context/): `core.md`, `indexes.md`,
   `query.md`, `joins.md`, `collections.md`, `generated.md`, `kafka.md`, `kafka-filters.md`,
