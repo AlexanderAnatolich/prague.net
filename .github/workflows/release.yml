@@ -98,9 +98,10 @@ jobs:
             | jq -r '.[] | select(.isDraft == false and .isPrerelease == true) | .tagName' \
             | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-pre\.[0-9]+$' | sed 's/^v//' | sort -V | tail -n1 || true)
 
+          PRE_BASE=""
+          [[ -n "$LATEST_PRE" ]] && PRE_BASE="${LATEST_PRE%%-pre.*}"
+
           if [[ "${IS_PRERELEASE,,}" == "true" ]]; then
-            PRE_BASE=""
-            [[ -n "$LATEST_PRE" ]] && PRE_BASE="${LATEST_PRE%%-pre.*}"
             # Reuse the in-flight prerelease base only while it is still ahead of the latest full
             # release (else it was already promoted -> start fresh by bumping the release).
             # Within an in-flight series, `patch` continues it; `minor`/`major` start a new
@@ -129,6 +130,15 @@ jobs:
             else
               BASE="$PROPS_VERSION"
               echo "No releases; using props base $BASE"
+            fi
+            # A stable release never lands below an in-flight prerelease series: the commit being
+            # released already carries what that series shipped, so the series is promoted instead
+            # (0.7.0-pre.N -> 0.7.0). The bump still wins when it reaches further (major over a
+            # 0.7.0 series -> 1.0.0). Before this, the stable path ignored prereleases entirely and
+            # v0.6.0 was cut while v0.7.0-pre.2 was in flight.
+            if [[ -n "$PRE_BASE" ]] && ! ver_ge "$BASE" "$PRE_BASE"; then
+              echo "Promoting in-flight prerelease series $PRE_BASE (ahead of $BASE)"
+              BASE="$PRE_BASE"
             fi
             VERSION="$BASE"
           fi
