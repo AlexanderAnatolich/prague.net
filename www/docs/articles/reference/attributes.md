@@ -190,8 +190,7 @@ Pass it to `Sort(…)` or `SortBounded(…)` ([Sorted Paging](../core-concepts/s
 
 Targets a property; for `[DataCache<T>]` the cache class with `(string propertyName)` (CACHE017, CACHE018). Intended effect: the property is left out of the generated `CacheEquals` and `CacheGetHashCode`, so a re-emit that differs only in that property is reported as `UpdateType.Same` by `AddOrUpdate(doc, out old)` and by the Kafka after-handlers ([Conditional Updates](../core-concepts/conditional-updates.md)). `Clone()` still copies it.
 
-> [!WARNING]
-> In the current generator the attribute is read, but the per-assembly `CacheEqualityHelper` that `CacheEquals` delegates to still compares the property. The sample below pins that behaviour: the two products differ only in `LastSeenAtUnixMs`, `CacheEquals` returns `false` and `AddOrUpdate` reports an update. Until the generator is fixed, do not rely on the attribute to suppress updates.
+The sample below shows the effect: the two products differ only in `LastSeenAtUnixMs`, so `CacheEquals` returns `true` and `AddOrUpdate` reports the write as `Same` without swapping the stored instance.
 
 [!code-csharp[](../../../../samples/Prague.Samples/Reference/Attributes.cs#ignore-equality)]
 

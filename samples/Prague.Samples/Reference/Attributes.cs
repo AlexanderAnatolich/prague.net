@@ -329,12 +329,11 @@ public class Attributes {
 		var changed = products.AddOrUpdate(seenAgain, out var previous);     // false when equal: nothing swapped, reported as Same
 		#endregion
 
-		// Pins the generator as it stands: the per-assembly CacheEqualityHelper still compares the ignored
-		// property, so the two instances are NOT equal and the write IS an update. When the generator starts
-		// honouring the attribute these three assertions flip and reference/attributes.md must be updated.
-		Assert.That(equal, Is.False);
-		Assert.That(changed, Is.True);
-		Assert.That(previous, Is.SameAs(stored));
+		// The generated CacheEqualityHelper skips [DataCacheIgnoreEquality] properties, so the two
+		// instances are equal and the write is reported as Same: nothing is swapped.
+		Assert.That(equal, Is.True);
+		Assert.That(changed, Is.False);
+		Assert.That(previous, Is.Null);
 	}
 
 	[Test]
