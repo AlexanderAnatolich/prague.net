@@ -82,7 +82,7 @@ short-circuits on the first empty set — no further index walks, no allocations
 ## ✨ Why Prague?
 
 ### **🚀 Extreme Performance**
-- **15.9M+ reads/sec** with pooled queries (concurrent benchmark)
+- **11M+ reads/sec** with pooled queries (concurrent 3-level join, 10 readers + 2 writers; `HeavyJoinPooledBenchmarks`, see RESULTS.MD)
 - **<100 ns** indexed lookups; **18 ns** for a frozen unique-key point lookup
 - **0 B per execution** on pooled and frozen paths
 - **3–36×** over the eager builder with `BuildFrozen()` on indexed shapes

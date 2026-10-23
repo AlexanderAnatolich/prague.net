@@ -2122,3 +2122,21 @@ should be re-blessed on a quiet box after the merge.**
 Reading it: the frozen ratios on the bounded joined shapes fall because the *eager* side got faster —
 shape A is now 14.2 → 3.9 µs (3.6×) and shape B 28.4 → 17.9 (1.6×); the frozen rows themselves did not
 move. The prepared replay runs the eager containers, so its rows moved with eager.
+
+# HeavyJoinPooledBenchmarks — first logged run (2026-10-23, docs round)
+
+The README's "15.9M+ reads/sec" headline was never recorded here. Two runs on the same day, both
+`--inProcess --filter *HeavyJoinPooled*`, net10.0, Apple M4 Pro, 10 reader threads + 2 writer threads,
+3-level join Product → ProductInfo (1:1) → Offers (1:N), reads = result rows returned ÷ wall-clock
+seconds. **Machine not idle: 1-minute load 2.7 (run 2) / 4.1 (run 1) at start, 5-minute load 11–21 from
+test suites that had just finished.** Re-bless on a quiet box before quoting more than "11M+".
+
+Run 2 (InProcessNoEmitToolchain, IterationCount=5, WarmupCount=1):
+
+| Method | Queries/s | Reads/s | Writes | Gen0 | Gen1 | Allocated |
+|---|---:|---:|---:|---:|---:|---:|
+| ExecutePooled() (pooled, disposed) | 44,361 | **11,100,645** | 26,406 | - | - | 9.19 KB |
+| Execute() (allocating) | 36,988 | 9,265,067 | 22,248 | 880000.0000 | 438000.0000 | 7175945 KB |
+
+Run 1 (same job, 1-minute load 4.1 at start): pooled 11,741,457 Reads/s / 46,923 Queries/s / 12.23 KB;
+allocating 9,927,888 Reads/s / 39,656 Queries/s / 7689312.44 KB.

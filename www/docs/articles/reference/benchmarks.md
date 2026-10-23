@@ -24,7 +24,7 @@ The README and the docs index quote three figures. Here is where each one lives 
 |---|---|---|
 | **18 ns** frozen unique-key point lookup | `UniqueArg` `BuildFrozen()` **17.99 ns**; `Unique (bound int args)` **17.94 ns** (first logged as `UniqueArg_Frozen` 18.84 ns, default job) | "Frozen queries — the ordering relaxation", table "Every row in the sweep"; "Frozen queries — `BuildFrozen()` stage 1" |
 | **<100 ns** indexed lookup | No row of the log measures a bare index probe plus fetch. The nearest rows: the eager unique-key query `Unique_Eager` at **130.97 ns**, which includes renting and disposing the pooled result container; a store lookup at **133.3 ns per 100 keys** and a `PooledSet` probe at **414.2 ns per 100 keys** (≈1.3 ns and ≈4 ns per key) | "Every row in the sweep"; "Lock vs lock-free", S1 table (`Store_ConcurrentCacheStore`, `Probe_PooledSet`, SeedSize 100) |
-| **15.9M+ reads/sec** concurrent pooled join | Measured by `HeavyJoinPooledBenchmarks` (`ConcurrentHeavyJoin_Pooled`: 10 reader threads + 2 writer threads, pooled 3-level join, reads = result rows returned ÷ wall-clock seconds). **That table is not in the log.** The nearest logged row is `ConcurrentReadsWithWriter_Pooled` at **9711801 Reads/s** (11 reader threads, 3 s) | `# v0.0.9`, table "Optimimizations Rounds 3 - Final" |
+| **11M+ reads/sec** concurrent pooled join | `HeavyJoinPooledBenchmarks`, `ExecutePooled()` row: **11,100,645 Reads/s** (run 2) and 11,741,457 (run 1); 10 reader threads + 2 writer threads, pooled 3-level join, reads = result rows returned ÷ wall-clock seconds, 9.19 KB allocated for the whole 3 s window versus 7.2 GB on the allocating path. The README used to say 15.9M+; that figure was never logged and did not reproduce on a non-idle machine (1-minute load 2.7–4.1 at start) | "HeavyJoinPooledBenchmarks — first logged run (2026-10-23)" |
 
 ## Indexed lookups
 
@@ -194,7 +194,7 @@ From `# v0.0.9`, table "Optimimizations Rounds 3 - Final" (`ConcurrentReadWriteB
 | `ConcurrentReadsWithWriter_Pooled` | 29591857 | 1535 | **9711801** | - | **90.2 KB** |
 | `ConcurrentReadsWithWriter_NotPooled` | 24763813 | 1545 | 8132615 | 607000.0000 | 4841851.1 KB |
 
-The 15.9M+ reads/sec headline comes from the newer `HeavyJoinPooledBenchmarks` run described in the README; that table has not been recorded in the log (see [The headline numbers, traced](#the-headline-numbers-traced)).
+The 11M+ reads/sec headline comes from `HeavyJoinPooledBenchmarks` (pooled 3-level join under 2 writers), logged on 2026-10-23 on a non-idle machine; see [The headline numbers, traced](#the-headline-numbers-traced).
 
 Whether locks could beat the lock-free primitives was measured and answered in "Lock vs lock-free (pipeline primitives)" (`LockVsLockFreeConcurrencyBenchmarks`, wall-clock harness, 8 reader threads; the composed pass = copy a 1k seed → probe 1k keys against a 300-bucket → fetch the hits):
 
