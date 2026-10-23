@@ -1,5 +1,6 @@
 ---
 title: Joins
+description: Declare foreign keys with DataCacheForeignKey and query across Prague caches with generated JoinWith and InnerJoinWith methods, filters and chained joins.
 ---
 
 # Joins
@@ -32,10 +33,19 @@ public partial class Book
 
 The generator emits:
 
-- A symmetric many-index on `Book.AuthorId` (`BookCache.AuthorIdIndex`).
-- A forward `JoinWithAuthor()` method on `Book`'s query builder.
-- A reverse `JoinWithBook()` method on `Author`'s query builder.
-- `InnerJoinWith{Other}` variants of both that drop misses.
+- A symmetric many-index on `Book.AuthorId` (`BookCache.AuthorIdIndex`), so `WithAuthorId(...)` works too.
+- A forward `JoinWithAuthor()` method on `Book`'s query builder; the slot is `Author?`.
+- A reverse `JoinWithBook()` method on `Author`'s query builder; the slot is `QueryResults<Book>`.
+- `InnerJoinWith{Other}` variants of both that drop lefts with no match.
+
+Which cache gets which method depends on the declaration:
+
+| Declaration | Emitted on | Result slot |
+| --- | --- | --- |
+| `OneToOne` on a scalar FK | both caches | `TRight?` |
+| `OneToMany` on a scalar FK | the target cache only | `QueryResults<TRight>` |
+| `ManyToOne` on a scalar FK | both caches | forward `TRight?`, reverse `QueryResults<TRight>` |
+| `ManyToOne` on a `List<TKey>` | both caches | `QueryResults<TRight>` |
 
 `DataCacheJoinType` values:
 
@@ -99,7 +109,9 @@ using var rows = bookCache.Query()
     .ExecutePooled();
 ```
 
-Chained joins are supported up to 5 levels:
+Caches created through `DataCacheRegistryBuilder` or `AddKafkaCaches` are joined automatically; stand-alone `new XxxCache()` instances need `leftCache.AddJoinedCaches(rightCache, …)` once before joining.
+
+Chained joins are supported up to 5 per query:
 
 ```csharp
 using var rows = orderCache.Query()
@@ -109,7 +121,7 @@ using var rows = orderCache.Query()
     .ExecutePooled();
 ```
 
-Each `JoinWith{X}` appends a typed slot; the result element type is `JoinResult<Order, Customer?, Region?>` (or `JoinResult<Order, Customer, Region>` if both are inner).
+Each `JoinWith{X}` appends a typed slot; the result element type is `JoinResult<Order, Customer?, Region?>`. The fields are `Left`, `Right` (the first joined slot — there is no `Right1`), `Right2`, `Right3`, … Pooled join results rent one shared buffer; a single `Dispose()` on the outer `QueryResults` returns everything.
 
 ## Filtering the right side
 
@@ -125,7 +137,7 @@ For zero-allocation static lambdas, pass an argument:
 .JoinWithAuthor(static (q, status) => q.WithStatus(status), AuthorStatus.Active)
 ```
 
-The filter callback receives a non-executable builder; only narrowing methods (`WithXxx`, `UseIndex`, `.Or`) are visible — `Execute*` is hidden by the discriminator.
+The filter callback receives a non-executable builder; only narrowing methods (`WithXxx`, `UseIndex`, `.Or`) are visible — `Where` and `Execute*` are hidden by the discriminator. The callback runs once per query, not per row.
 
 ### Or inside the filter
 
@@ -155,7 +167,7 @@ Internally the join's right-side narrowing runs on a paired-core builder, so the
 
 ## Sorting after joins
 
-`Sort` can be applied either before or after a join:
+`Sort` / `SortBounded` can be applied either before or after a join. After a sorter, only the outer, unfiltered `JoinWith{T}()` binds — `InnerJoinWith{T}` and the filter overloads must come before it:
 
 ```csharp
 using var top = bookCache.Query()
@@ -164,7 +176,7 @@ using var top = bookCache.Query()
     .ExecutePooled(0, 10);
 ```
 
-The comparer operates on the join result; if you sort before joins, the comparer is on the left value and joins are applied in sorted order.
+Sorting before the join compares left values and the join fills the sorted rows (`SortBounded` then pages before joining, so only the page is joined). Sorting after the join compares `JoinResult<…>` rows and always runs the classic full sort.
 
 ## Resolver families (informational)
 
@@ -172,12 +184,13 @@ The generator picks a resolver based on the relationship shape; the call site is
 
 - **PK-to-PK** — left PK equals right PK. No FK declaration needed; useful for cross-cache views of the same key.
 - **Right-unique-index** — right entity carries a unique FK back to the left (e.g. `Book → BookInfo` where `BookInfo.BookId` is `[DataCacheIndex(Unique)]`).
-- **Left-symmetric-index** — left entity carries a symmetric many/unique FK (`ManyToOne`/`OneToOne`); join walks the index's reverse map.
+- **Left-symmetric-index** — left entity carries a symmetric many FK (`ManyToOne`); join walks the index's reverse map.
 - **Left-symmetric-unique-index** — bijective 1:1 via a symmetric unique FK on the left.
 
-All four use a paired-execution core that intersects candidate keys with index hits and dispatches a single bulk read into the right cache. Pairs are guarded by a leak-safety contract that returns rented arrays exactly once.
+All four use a paired-execution core that intersects candidate keys with index hits and dispatches a single bulk read into the right cache. Pairs are guarded by a leak-safety contract that returns rented arrays exactly once. Lower-level `JoinOne(...)` / `InnerJoinOne(...)` / `JoinMany(...)` / `InnerJoinMany(...)` extensions exist for the raw cache; pass the cache wrapper, not `.Query()`.
 
 ## Next
 
+- [Prepared and Frozen Queries](prepared-queries.md) — joins on a frozen query fuse into the single pass.
 - [Kafka integration](../advanced/kafka-integration.md) — wiring caches to topics so the join sides stay in sync.
 - [Performance tuning](../advanced/performance-tuning.md) — hot-path guidance for joined queries.

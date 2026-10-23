@@ -1,12 +1,14 @@
 ---
 title: Sorted Paging
+description: Sort versus SortBounded in Prague queries - when each plan wins, how ties are broken, allocation behaviour and measured timings.
 ---
 
 # Sorted Paging
 
 Sorted queries come in two execution plans, and you choose one. Nothing is inferred from the
 arguments, because the plans order comparer-equal rows differently — so which one runs has to be
-your decision, not the engine's.
+your decision, not the engine's. Both accept any `IComparer<T>`, including the `XxxCache.{Name}Comparer`
+fields emitted from `[DataCacheSort]`.
 
 ```csharp
 // Paging a large result: select just the page, never sort the rest.
@@ -80,6 +82,9 @@ permutation — and the choice becomes purely a performance one.
 
 Neither plan gives you snapshot isolation: pages partition an *unchanged* result. Writes landing
 between two page queries can still move a row across the boundary.
+
+After `Sort` / `SortBounded` only the outer, unfiltered `JoinWith{T}()` binds. On a [frozen query](prepared-queries.md)
+the ties of a sorted result are unspecified; a total comparer gives byte-identical pages there too.
 
 ## Allocation
 

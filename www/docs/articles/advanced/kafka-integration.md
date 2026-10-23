@@ -1,5 +1,6 @@
 ---
 title: Kafka Integration
+description: Wire Prague caches to compacted Kafka topics - topic settings, AddKafkaCaches, filters, after-handlers, producer, health checks and OpenTelemetry.
 ---
 
 # Kafka Integration
@@ -8,7 +9,7 @@ title: Kafka Integration
 
 ## Kafka model in one paragraph
 
-Prague assumes each cache is backed by a single compacted Kafka topic where the message key maps to the cache's primary key. Tombstones (`null` value) delete; non-null values upsert. Partition EOF marks the boundary between *initial load* (replay of the topic state) and *live* (subsequent live updates). Consumer group offset commit, partition rebalance, and broker failover are delegated to `Confluent.Kafka` and librdkafka. If you want a refresher, read the Confluent intro to log compaction — you only need to know that, and the rest of this page makes sense.
+Prague assumes each cache is backed by a single compacted Kafka topic **with one partition**, where the message key maps to the cache's primary key. Tombstones (`null` value) delete; non-null values upsert. Partition EOF marks the boundary between *initial load* (replay of the topic state) and *live* (subsequent live updates); the load handshake completes on the first partition EOF, so a multi-partition topic goes live before the load has finished (not enforced in code). Consumer group offset commit, partition rebalance, and broker failover are delegated to `Confluent.Kafka` and librdkafka. If you want a refresher, read the Confluent intro to log compaction — you only need to know that, and the rest of this page makes sense.
 
 ## Creating a topic
 
@@ -108,8 +109,8 @@ builder.AddCache<OrderCache, string, Order>()
     .WithHeaderEqualsFilter("priority", 1, 2, 3)              // OR (int)
     .WithHeaderNotEqualsFilter("source", "synthetic")
     .WithHeaderExistsFilter("tenantId")
-    .WithHeaderFilter<DateTime>("dispatchedAt",
-        ts => ts > DateTime.UtcNow.AddDays(-7),
+    .WithHeaderFilter<long>("dispatchedAt",
+        ts => ts > cutoffUnixMs,
         passOnNull: false)
     .WithKeyFilter(static k => !k.StartsWith("tmp-"))
     .WithValueFilter(static o => o.Status == OrderStatus.Active)
@@ -118,7 +119,7 @@ builder.AddCache<OrderCache, string, Order>()
         static (allow, k) => allow.Contains(k));
 ```
 
-Numeric overloads (`int`, `long`) compare the header bytes directly without deserialization. The generic `WithHeaderFilter<T>` deserializes via MessagePack first; if that fails, falls back to raw little/big-endian bytes for backward compatibility.
+`WithHeaderEqualsFilter` / `WithHeaderNotEqualsFilter` take `string`, `int` or `long` values (one or more; several values are an OR). Numeric headers are read MessagePack-first with a fallback to raw 4/8-byte values for backward compatibility; the generic `WithHeaderFilter<T>` deserializes the header via MessagePack and hands the value to your predicate (`passOnNull` decides what a missing header does). Header filters run before the key is deserialized and have no `treatAsDelete`.
 
 `WithValueFilter(Func<TValue, bool> predicate, bool treatAsDelete = false)` runs the predicate against the **deserialized** cache entity and admits the message only when it returns `true`. It is a plain ingestion-time predicate — *not* an indexed query, so the body is arbitrary C# (combine conditions with `||` / `&&` inside the single lambda; there is no "OR filter" at ingestion). It is evaluated **exactly once per message, as that message is consumed**, and never against records that are already in the cache. Use it to keep only the records you care about (e.g. a status, a tenant, a non-empty field). Header and key filters are evaluated first, so the value is deserialized only for messages that already passed them.
 
@@ -205,6 +206,10 @@ public sealed class OrderProjector : ICacheAfterHandler<string, Order>
 
 After-handlers run only in the live phase. Multiple handlers per cache run sequentially; exceptions in one don't skip the others. See [Conditional Updates](../core-concepts/conditional-updates.md) for the `UpdateType` enum semantics.
 
+## Enrichment
+
+Two property attributes fill fields from the message rather than its payload: `[DataCacheFromTimestamp]` on a `long` property stores the Kafka message timestamp, and `[DataCacheHeader("tenant-id")]` stores a header value (MessagePack-first numeric SerDe for `int` / `long`).
+
 ## Awaiting initial load
 
 `AddKafkaCaches` registers a hosted service whose `StartAsync` returns only once every cache has reached its initial-load EOF, so a generic host does not finish starting (and an ASP.NET Core host does not start serving) before the caches are loaded. A load that stalls fails startup with a `TimeoutException` naming the caches still waiting, when the host's startup token fires.
@@ -231,8 +236,52 @@ services.Configure<KafkaCachesHealthOptions>(o => {
 });
 ```
 
-- **Liveness** fails if the consumer's poll loop hasn't returned within `PollLoopHeartbeatTimeout`, or any handler has a message in-flight beyond `HandlerProcessingTimeout`.
-- **Readiness** fails until every cache reaches initial-load EOF and `MinBrokersUp` brokers are in the `UP` state per librdkafka stats. Disable the broker predicate (`MinBrokersUp = 0`) if you run with `StatisticsEnabled = false`.
+| Check | Predicate | Catches |
+| --- | --- | --- |
+| Liveness | `FatalLatched` | fatal Kafka error; consumer unsafe |
+| | `PollLoopStalled` | poll loop silent longer than `PollLoopHeartbeatTimeout` |
+| | `HandlerLoopFaulted` | a per-cache worker terminated with an exception |
+| | `HandlerProcessingTimeout` | one message in flight longer than `HandlerProcessingTimeout` |
+| Readiness (= liveness +) | `InitialLoadIncomplete` | a cache has not reached initial-load EOF |
+| | `NoPartitionAssigned` | a cache topic has zero partitions assigned |
+| | `BrokersDown` | fewer than `MinBrokersUp` brokers `UP` per librdkafka statistics |
+| | `PartitionsLost` | last rebalance lost partitions and nothing was re-assigned |
+
+`HealthCheckResult.Data` carries `<consumer>.failures` and `<consumer>.caches` so the output names the culprit. The healthy path allocates nothing. Disable the broker predicate (`MinBrokersUp = 0`) if you run with `StatisticsEnabled = false`. The default `MapHealthChecks` returns 200 for `Degraded`; map it to 503 for a Kubernetes readiness probe:
+
+```csharp
+app.MapHealthChecks("/health/live",  new HealthCheckOptions { Predicate = r => r.Tags.Contains("live") });
+app.MapHealthChecks("/health/ready", new HealthCheckOptions {
+    Predicate = r => r.Tags.Contains("ready"),
+    ResultStatusCodes = {
+        [HealthStatus.Healthy]   = StatusCodes.Status200OK,
+        [HealthStatus.Degraded]  = StatusCodes.Status503ServiceUnavailable,
+        [HealthStatus.Unhealthy] = StatusCodes.Status503ServiceUnavailable,
+    }
+});
+```
+
+## OpenTelemetry metrics
+
+Opt-in observable instruments sourced from the statistics the consumer already collects — no hot-path cost, no allocations per scrape after warm-up. The extension lives in `Prague.Kafka.OpenTelemetry` and is registered on the `MeterProviderBuilder`:
+
+```csharp
+services.AddOpenTelemetry().WithMetrics(m => m
+    .AddPragueKafkaInstrumentation()        // "prague.kafka.*"; AddPragueKafkaInstrumentation("acme.") to prefix
+    .AddPrometheusExporter());
+```
+
+| Metric | Kind | Tags |
+| --- | --- | --- |
+| `prague.kafka.consumer.partitions.assigned` | UpDownCounter | `consumer` |
+| `prague.kafka.consumer.broker.rtt.p99` | Gauge (ms) | `consumer` |
+| `prague.kafka.consumer.health` | Gauge (0/1) | `consumer` |
+| `prague.kafka.cache.size` | UpDownCounter | `consumer`, `cache` |
+| `prague.kafka.cache.messages.received` | Counter | `consumer`, `cache` |
+| `prague.kafka.cache.health` | Gauge (0/1) | `consumer`, `cache` |
+| `prague.kafka.cache.index.size` | UpDownCounter | `consumer`, `cache`, `index`, `kind=keys\|values` |
+
+The `health` gauges share their predicates with the health checks (`1` = healthy); the health endpoint carries the reasons.
 
 ## Producer
 
@@ -279,6 +328,10 @@ There is no in-memory broker substitute (the former `Prague.Kafka.TestAdaptor` w
 
 - **Give each consumer under test its own `group.id`** (`ClientSettings["group.id"]`). The default group id is the process's instance id, shared by every Prague consumer in the process, so two providers built in one test run would otherwise join one group and split the partitions between them.
 - **A process does not consume what it produced.** The self-filter drops every message stamped with this process's `X-Producer-Id`, from any provider in the process. To load a cache with what code under test produced in the same process, read the raw messages and re-produce them without that header, or produce the fixtures with a plain Confluent producer.
+
+## HTTP inspection
+
+`Prague.Api` adds `app.MapPragueEndpoints()`: `GET /prague` (consumer and cache statistics), `GET /prague/{CacheName}` (accepts the generated query-string API, e.g. `?customerId=42&total>100`) and `GET /prague/{CacheName}/{id}`. `Prague.Api.UI` adds `builder.AddPragueUI()` + `app.MapPragueUI()`, a MudBlazor front end over the same registry.
 
 ## Next
 

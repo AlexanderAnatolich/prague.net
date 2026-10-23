@@ -32,3 +32,4 @@
       href: articles/advanced/performance-tuning.md
 - name: API Reference
   href: api/
+  topicHref: api/index.md

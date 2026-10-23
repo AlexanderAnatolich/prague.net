@@ -26,21 +26,33 @@
 	"build": {
 		"content": [
 			{
-				"files": ["**/*.{md,yml}"],
-				"exclude": ["_site/**", "templates/**", "obj/**"]
+				"files": [
+					"**/*.{md,yml}"
+				],
+				"exclude": [
+					"_site/**",
+					"templates/**",
+					"obj/**"
+				]
 			}
 		],
 		"resource": [
 			{
-				"files": ["images/**"]
+				"files": [
+					"images/**"
+				]
 			}
 		],
 		"output": "_site",
-		"template": ["default", "modern", "templates/prague"],
+		"template": [
+			"default",
+			"modern",
+			"templates/prague"
+		],
 		"globalMetadata": {
 			"_appName": "Prague",
-			"_appTitle": "Prague — High-performance .NET caching for Kafka",
-			"_appFooter": "© 2026 Prague · Built by systems engineers for scale",
+			"_appTitle": "Prague docs",
+			"_appFooter": "Prague documentation",
 			"_appLogoPath": "public/logo.png",
 			"_appFaviconPath": "public/logo.png",
 			"_pragueHomeUrl": "../",
@@ -51,18 +63,33 @@
 				"repo": "https://github.com/nanov/prague.net",
 				"branch": "main"
 			},
-			"pdf": false
+			"pdf": false,
+			"_lang": "en",
+			"_pragueVersion": "0.6.0"
 		},
 		"globalMetadataFiles": [],
 		"fileMetadataFiles": [],
 		"xref": [],
-		"xrefService": ["https://xref.docs.microsoft.com/query?uid={uid}"],
+		"xrefService": [
+			"https://xref.docs.microsoft.com/query?uid={uid}"
+		],
 		"sitemap": {
 			"baseUrl": "https://nanov.github.io/prague.net/docs/",
-			"priority": 0.5,
-			"changefreq": "weekly"
+			"priority": 0.6,
+			"changefreq": "weekly",
+			"fileOptions": {
+				"api/**": {
+					"priority": 0.3,
+					"changefreq": "monthly"
+				}
+			}
 		},
 		"keepFileLink": false,
-		"disableGitFeatures": false
+		"disableGitFeatures": false,
+		"fileMetadata": {
+			"_isApiPage": {
+				"api/**": true
+			}
+		}
 	}
 }

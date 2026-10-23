@@ -1,0 +1,31 @@
+# Prague
+
+> Prague is a compile-time-safe, in-memory event cache for .NET (net9.0 and net10.0). A Roslyn source generator turns `[DataCache]` POCOs into typed caches with secondary indices, a fluent compile-time-checked query API, pooled zero-allocation results, compile-time joins and prepared/frozen queries. Caches are hydrated from compacted Kafka topics by Prague.Kafka. It is a library, not a server: not a distributed cache, not SQL, no eviction.
+
+Packages: `Prague` (facade: Core + Attributes + Codegen), `Prague.Kafka`, optional `Prague.Api` and `Prague.Api.UI`.
+Repository: https://github.com/nanov/prague.net — License: MIT.
+
+## Full reference for assistants
+
+- [llms-full.txt](https://nanov.github.io/prague.net/llms-full.txt): dense, source-checked description of the whole API, its invariants and the mistakes to avoid. Read this first.
+
+## Docs
+
+- [Introduction](https://nanov.github.io/prague.net/docs/articles/getting-started/introduction.html): what Prague is and is not, the data flow.
+- [Installation](https://nanov.github.io/prague.net/docs/articles/getting-started/installation.html): packages and project setup.
+- [Quick Start](https://nanov.github.io/prague.net/docs/articles/getting-started/quick-start.html): define an entity, create a cache, write, query.
+- [Index Types](https://nanov.github.io/prague.net/docs/articles/core-concepts/index-types.html): Unique, Many, Range, symmetric and key-set indices.
+- [Query Engine](https://nanov.github.io/prague.net/docs/articles/core-concepts/query-engine.html): fluent API, index intersection, OR clauses, pooled vs allocating execution.
+- [Sorted Paging](https://nanov.github.io/prague.net/docs/articles/core-concepts/sorted-paging.html): Sort vs SortBounded plans.
+- [Prepared and Frozen Queries](https://nanov.github.io/prague.net/docs/articles/core-concepts/prepared-queries.html): Prepare, Build, BuildFrozen, executors, ordering contract.
+- [Conditional Updates](https://nanov.github.io/prague.net/docs/articles/core-concepts/conditional-updates.html): generated deep equality and UpdateType.
+- [Joins](https://nanov.github.io/prague.net/docs/articles/core-concepts/joins.html): foreign-key driven 1:1 and 1:N joins with pooled results.
+- [Kafka Integration](https://nanov.github.io/prague.net/docs/articles/advanced/kafka-integration.html): topics, filters, after-handlers, health checks, OpenTelemetry.
+- [Global Last Update Index](https://nanov.github.io/prague.net/docs/articles/advanced/global-last-update-index.html): cross-cache change tracking for incremental sync.
+- [Performance Tuning](https://nanov.github.io/prague.net/docs/articles/advanced/performance-tuning.html): hot-path guidance.
+- [API Reference](https://nanov.github.io/prague.net/docs/api/index.html): generated from XML doc comments.
+
+## Optional
+
+- [README](https://github.com/nanov/prague.net/blob/main/README.md): human overview with code samples and measured numbers.
+- [Benchmark results](https://github.com/nanov/prague.net/blob/main/benchmarks/Prague.Benchmarks/RESULTS.MD): every measured table.
