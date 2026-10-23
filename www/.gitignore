@@ -12,3 +12,6 @@ docs/obj/
 # Assembled output (built locally, never committed)
 _dist/
 site/.prerender/
+
+# Generated at build time by docs/scripts/release-notes.sh (GitHub Releases); never committed
+docs/articles/reference/release-notes.md

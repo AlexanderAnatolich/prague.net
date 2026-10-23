@@ -79,6 +79,13 @@ jobs:
           npm ci
           npm run build
 
+      # The release-notes page is generated from GitHub Releases on every build and never committed
+      # (www/.gitignore); without it the toc.yml entry is a dead link and DocFX warns InvalidFileLink.
+      - name: Generate release notes page
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: www/docs/scripts/release-notes.sh
+
       - name: Build docs (DocFX)
         working-directory: www/docs
         run: docfx docfx.json --metadata _pragueVersion=${{ steps.version.outputs.version }}
@@ -93,6 +100,8 @@ jobs:
           test -f _site/index.html
           test -f _site/docs/index.html
           test -f _site/docs/api/index.html
+          test -f _site/docs/articles/reference/release-notes.html   # generated page made it in
+          test -f _site/docs/articles/reference/benchmarks.html
           grep -q 'Fast as' _site/index.html   # prerender actually ran
           grep -q "Prague v${{ steps.version.outputs.version }}" _site/docs/index.html   # version pill rendered
 
