@@ -7,10 +7,12 @@ Static site for Prague, built from two pieces and glued together at deploy time:
 | `www/site/` | Vite + React 19 + Tailwind v4, **prerendered to static HTML** (no JavaScript is shipped) | `www/site/dist/` |
 | `www/docs/` | DocFX (modern template + brand layout/CSS override) | `www/docs/_site/` |
 
-Deployed to GitHub Pages by `.github/workflows/pages.yml` on every push to `main` that touches
-`www/**`, `src/**` (the API reference is compiled from the source), `docs/llm-readme.txt` or
-`Directory.Build.props`, and whenever a GitHub release is published. It can also be run by hand
-(`workflow_dispatch`).
+Deployed to GitHub Pages by `.github/workflows/pages.yml` whenever a **stable** GitHub release is
+published (prereleases do not deploy); the build runs on the release tag, so the published site
+describes the published package. A push to `main` does not deploy. For an out-of-band docs fix run
+the workflow by hand (`workflow_dispatch`, from `main`). The `github-pages` environment allows
+deployments from the refs `main`, `www/*` and tags `v*`; a run on any other ref is rejected by the
+environment before the deploy job starts, which shows as a red run with a green build.
 
 Live at **https://nanov.github.io/prague.net/** — landing at the root, docs at `/docs/`, API reference
 at `/docs/api/`. The Vite app sets its `base` to `/prague.net/` at build time so asset paths resolve
@@ -78,7 +80,7 @@ mkdir -p /tmp/prague-www && ln -sfn "$PWD/www/_dist" /tmp/prague-www/prague.net
 ## Deploy
 
 1. One-time: **Settings → Pages → Source** must be **"GitHub Actions"**.
-2. Push to `main` (or **Actions → Build and deploy Prague website → Run workflow**).
+2. Publish a stable release (or **Actions → Build and deploy Prague website → Run workflow** on `main`).
 
 The version pill in the docs sidebar is the newest stable GitHub release (the same source
 `release.yml` bumps from; `<Version>` in `Directory.Build.props` is only a bootstrap fallback). CI passes
