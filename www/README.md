@@ -96,3 +96,28 @@ Edit `www/site/src/App.tsx`. It is rendered once at build time with `renderToSta
 stay free of hooks, effects and event handlers; use CSS for motion (and respect
 `prefers-reduced-motion`). `import.meta.env.BASE_URL` resolves to `/` in dev and `/prague.net/` in
 production builds — use it for any cross-page link (e.g. `${BASE_URL}docs/`).
+
+## Code samples are compiled
+
+Every C# block on a docs page is pulled out of `samples/Prague.Samples/`, an NUnit project that
+`dotnet test Prague.Tests.slnf` builds and runs in CI, so an example cannot stop compiling or stop
+being true without a test going red. The articles contain no hand-written C#.
+
+- `samples/Prague.Samples/Models/` is the one domain every page uses (`Order`, `Customer`, `OrderLine`,
+  `Shipment`, `Product`, `CustomerActivityIndex`). Add attributes to these models rather than inventing
+  new entities; each file opens with a `// docs:` line saying what it demonstrates.
+- One folder per docs section (`GettingStarted/`, …), one test class per article. Each block is a
+  `#region kebab-name` … `#endregion` containing exactly the code the reader should see; assertions and
+  set-up stay outside the region. Region names are unique within a file and describe the block, not
+  the test (`write-and-query`, `direct-index-access`).
+- A page references a region with DocFX's code-snippet syntax, relative to the article:
+
+  ```markdown
+  [!code-csharp[](../../../../samples/Prague.Samples/GettingStarted/QuickStart.cs#write-and-query)]
+  ```
+
+  DocFX reads the file from disk at build time (paths outside `www/docs` are fine), strips the
+  `#region` lines and renders the body with the common indentation removed. Rename the region and the
+  build warns `codesnippet-not-found`, so run `docfx build docfx.json` after moving one.
+- Run the samples alone with `dotnet test samples/Prague.Samples`. Every test must pass on both target
+  frameworks before the page that cites it is merged.
