@@ -90,12 +90,14 @@
 						</button>
 					</div>
 					<nav class="prague-sidebar-nav toc" id="toc" aria-label="Pages"></nav>
+					{{#_pragueVersion}}
 					<div class="prague-sidebar-footer">
-						<a class="prague-version-pill" href="https://www.nuget.org/packages/Prague/">
-							<span>Prague v{{_pragueVersion}}{{^_pragueVersion}}0.6.0{{/_pragueVersion}}</span>
+						<a class="prague-version-pill" href="https://www.nuget.org/packages/Prague/{{_pragueVersion}}" title="Prague {{_pragueVersion}} on NuGet">
+							<span>Prague v{{_pragueVersion}}</span>
 							<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M7 2h3v3M10 2L5 7M3 4v6a1 1 0 0 0 1 1h6"/></svg>
 						</a>
 					</div>
+					{{/_pragueVersion}}
 				</aside>
 
 				<div class="prague-main">

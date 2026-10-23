@@ -9,6 +9,8 @@ on:
       - "docs/llm-readme.txt"
       - "Directory.Build.props"
       - ".github/workflows/pages.yml"
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -25,8 +27,11 @@ jobs:
     name: Build site + docs
     runs-on: ubuntu-latest
     steps:
+      # A release event runs on the tag ref; the site itself always builds from main.
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'release' && 'main' || '' }}
 
       - name: Setup Node 22
         uses: actions/setup-node@v4
@@ -50,10 +55,21 @@ jobs:
       - name: Install DocFX
         run: dotnet tool update -g docfx
 
+      # Same source of truth as release.yml: the newest stable (non-draft, non-prerelease)
+      # GitHub release. <Version> in Directory.Build.props is only the bootstrap fallback.
       - name: Read library version
         id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          v=$(sed -n 's/.*<Version>\([^<]*\)<\/Version>.*/\1/p' Directory.Build.props | head -1)
+          set -euo pipefail
+          v=$(gh release list --limit 200 --json tagName,isPrerelease,isDraft \
+              | jq -r '.[] | select(.isDraft == false and .isPrerelease == false) | .tagName' \
+              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sed 's/^v//' | sort -V | tail -n1 || true)
+          if [[ -z "$v" ]]; then
+            v=$(sed -n 's/.*<Version>\([^<]*\)<\/Version>.*/\1/p' Directory.Build.props | head -1)
+            echo "No stable release found; falling back to Directory.Build.props"
+          fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
           echo "Prague version: $v"
 
@@ -78,6 +94,7 @@ jobs:
           test -f _site/docs/index.html
           test -f _site/docs/api/index.html
           grep -q 'Fast as' _site/index.html   # prerender actually ran
+          grep -q "Prague v${{ steps.version.outputs.version }}" _site/docs/index.html   # version pill rendered
 
       - name: Setup Pages
         uses: actions/configure-pages@v5

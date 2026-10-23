@@ -21,7 +21,7 @@ description: Prague NuGet packages, supported target frameworks and the project 
 | `Prague.Kafka` | Kafka consumer/producer on the `Nanov.Confluent.Kafka` fork, SerDe, filters, change detection, health checks, OpenTelemetry. Optional. |
 | `Prague.Api` / `Prague.Api.UI` | `MapPragueEndpoints()` HTTP inspection surface over live caches, and a MudBlazor UI for it. Optional. |
 
-Published versions are on the `0.6.0-pre.*` line.
+The version shown in the sidebar is the latest stable release on NuGet. Prerelease builds carry a `-pre.N` suffix and need `--prerelease` on `dotnet add package`.
 
 ## Install
 
