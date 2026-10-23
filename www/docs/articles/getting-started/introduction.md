@@ -24,11 +24,11 @@ Prague (`Prague`) is a compile-time-safe, in-memory event cache for .NET (`net9.
 
 ## The data flow
 
-![Prague data flow](../../images/data-flow.png)
+![Data flow: a compacted Kafka topic is consumed per cache, each message is deserialized and filtered, then fed into InMemoryDataCache, which maintains the secondary indices the fluent query API reads from.](../../images/data-flow.svg)
 
 A Kafka consumer per cache reads a compacted topic, deserializes each message into your POCO, applies any header/key/value filters, and feeds it into `InMemoryDataCache<TKey, TValue>` via `AddOrUpdate(value, timestampMs)`. Secondary indices are updated incrementally. The fluent `Query()` API runs over the resulting structure and returns a `QueryResults<T>` you enumerate and dispose.
 
-The live phase only begins after the consumer reaches partition EOF — at that point `ICacheAfterHandler` starts firing for every write, with an `UpdateType` distinguishing `Add` / `Update` / `Same` / `Delete` / `Filtered`. See [Conditional Updates](../core-concepts/conditional-updates.md).
+The live phase only begins after the consumer reaches partition EOF — at that point `ICacheAfterHandler` starts firing for every write, with an `UpdateType` distinguishing `Add` / `Update` / `Same` / `Delete` / `Filtered`. Writes applied during the initial load do not reach after-handlers. See [Conditional Updates](../core-concepts/conditional-updates.md).
 
 ## Where to go next
 

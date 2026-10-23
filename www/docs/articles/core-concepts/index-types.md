@@ -5,16 +5,17 @@ description: Unique, Many and Range indices, symmetric variants, predicate key-s
 
 # Index Types
 
-Every query in Prague is planned over typed indices. Each `[DataCacheIndex]` (and its specialized cousins below) becomes a strongly-typed field on the generated cache class plus a corresponding `With{Property}(...)` builder method.
+Every query in Prague is planned over typed indices. Each `[DataCacheIndex]` (and its specialized cousins below) becomes a strongly-typed field on the generated cache class plus a corresponding `With{Property}(...)` builder method. The examples on this page run against the sample domain — `Order`, `Customer`, `Product` and two smaller types — and every block is compiled and asserted in `samples/Prague.Samples/Concepts/IndexTypes.cs`.
+
+The `Order` entity declares most of what this page covers:
+
+[!code-csharp[](../../../../samples/Prague.Samples/Models/Order.cs#order-entity)]
 
 ## Primary index
 
-`[DataCacheKey]` marks the PK property. It must be applied exactly once per `[DataCache]` type and drives the `TKey` of the underlying `InMemoryDataCache<TKey, TValue>` (`TKey : notnull, IEquatable<TKey>`). The builder narrows by it with `WithKey(...)` / `With{KeyProperty}(...)`.
+`[DataCacheKey]` marks the PK property. It must be applied exactly once per `[DataCache]` type and drives the `TKey` of the underlying `InMemoryDataCache<TKey, TValue>` (`TKey : notnull, IEquatable<TKey>`). The builder narrows by it under two names — the property's own verb and the generic `WithKey(...)`:
 
-```csharp
-[DataCacheKey]
-public required string OrderId { get; init; }
-```
+[!code-csharp[](../../../../samples/Prague.Samples/Concepts/IndexTypes.cs#primary-key-lookup)]
 
 ## Secondary indices
 
@@ -24,46 +25,33 @@ public required string OrderId { get; init; }
 | --- | --- | --- |
 | `Unique` | `CacheUniqueIndex<TKey, TValue, TIndexKey>` | O(1) equality; one entity per index value. |
 | `Many` | `CacheKeyValueListIndex<TKey, TValue, TIndexKey>` | O(1) equality; many entities per index value. |
-| `Range` | `CacheRangeIndex<TKey, TValue, TIndexKey>` | Ordered range scans over a pooled B+tree; property must implement `IComparable<T>`. |
+| `Range` | `CacheRangeIndex<TKey, TValue, TIndexKey>` | Ordered range scans over a pooled B-tree; property must implement `IComparable<T>`. |
 
-`Many` is the default if you omit `IndexType`. A `Many` index takes a per-key bucket capacity hint: `[DataCacheIndex(DataCacheIndexType.Many, 4)]` (other types reject it at compile time).
+`Many` is the default if you omit the index type. A `Many` index takes a per-key bucket capacity hint — `[DataCacheIndex(DataCacheIndexType.Many, 4)]`, or just `[DataCacheIndex(4)]` — which sizes each per-key bucket up front; the other two types reject it at compile time. `Product` carries one of each, plus a hinted `Brand` index:
 
-```csharp
-[DataCacheIndex(DataCacheIndexType.Unique)] public required string Email { get; init; }
-[DataCacheIndex(DataCacheIndexType.Many)]   public required int CustomerId { get; init; }
-[DataCacheIndex(DataCacheIndexType.Range)]  public required long CreatedAtUnixMs { get; init; }
-```
+[!code-csharp[](../../../../samples/Prague.Samples/Models/Product.cs)]
 
-`Unique` and `Many` emit `WithProperty(...)` overloads for a single value, a nullable value (`null` skips the lane), a `ReadOnlySpan<T>`, an array and a `List<T>`. A multi-value call is an OR within that lane:
+Each flavour narrows differently: a `Unique` lane yields at most one row, a `Many` lane every row carrying the value, a `Range` lane an ordered walk from the bound.
 
-```csharp
-query.WithEmail("alice@example.com");
-query.WithEmail(new[] { "alice@example.com", "bob@example.com" });   // array / ReadOnlySpan
-query.WithEmail(new List<string> { "alice@example.com", "bob@example.com" });
-```
+[!code-csharp[](../../../../samples/Prague.Samples/Concepts/IndexTypes.cs#secondary-index-lanes)]
 
-The index fields are public too: `cache.EmailIndex.TryGetValue(email, out var key)` (Unique), `cache.CustomerIdIndex.GetValues(42)` (Many), `cache.CreatedAtUnixMsIndex.GetValuesBetween(a, b)` / `GetValuesGte(a)` (Range).
+`Unique` and `Many` emit `With{Property}(...)` overloads for a single value, a nullable value (`null` skips the lane and the query runs as if the call were not there), a `ReadOnlySpan<T>`, an array and a `List<T>`. A multi-value call is an OR within that lane:
 
-`Range` indices instead expose a sub-builder:
+[!code-csharp[](../../../../samples/Prague.Samples/Concepts/IndexTypes.cs#multi-value-lane)]
 
-```csharp
-query.WithCreatedAtUnixMs(q => q.Gte(yesterdayMs));
-query.WithCreatedAtUnixMs(q => q.Gte(startMs).Lt(endMs));
-query.WithCreatedAtUnixMs(q => q.Lt(nowMs));
-```
+`Range` indices expose a sub-builder instead. It is type-state: open with `Gt` / `Gte` or `Lt` / `Lte`, then optionally close the other side. There is no `Between` or `Eq`; a disjunction is the query-level `.Or(...)` from [Query Engine](query-engine.md#or--disjunction).
 
-The sub-builder is type-state: open with `Gt` / `Gte` or `Lt` / `Lte`, then optionally close the other side. There is no `Between` or `Eq`; a disjunction is the query-level `.Or(...)`.
+[!code-csharp[](../../../../samples/Prague.Samples/Concepts/IndexTypes.cs#range-sub-builder)]
+
+### Reading an index directly
+
+The index fields are public, and they answer with primary keys, not rows. `TryGetValue` on a `Unique` index, `GetValues` on a `Many` index, `GetValuesGte` / `GetValuesLt` / `GetValuesBetween` (both bounds inclusive) on a `Range` index, ordered by the index key:
+
+[!code-csharp[](../../../../samples/Prague.Samples/Concepts/IndexTypes.cs#direct-index-reads)]
 
 ## Symmetric variants
 
-`Symmetric = true` upgrades a `Many` index to `CacheSymmetricKeyValueListIndex<TKey, TValue, TIndexKey>` and a `Unique` index to `CacheSymmetricUniqueIndex<TKey, TValue, TIndexKey>`. The symmetric variant maintains a reverse map (`TKey → TIndexKey`), required for left-index-driven joins, where the left entity carries the index value rather than the right's primary key. See [Joins](joins.md).
-
-```csharp
-[DataCacheIndex(DataCacheIndexType.Many, Symmetric = true)]
-public required int CustomerId { get; init; }
-```
-
-Foreign keys declared with `[DataCacheForeignKey<T>(ManyToOne)]` get symmetric upgrades automatically.
+`Symmetric = true` upgrades a `Many` index to `CacheSymmetricKeyValueListIndex<TKey, TValue, TIndexKey>` and a `Unique` index to `CacheSymmetricUniqueIndex<TKey, TValue, TIndexKey>`. The symmetric variant maintains a reverse map (`TKey → TIndexKey`), required for left-index-driven joins, where the left entity carries the index value rather than the right's primary key. `Product.CategoryId` above is declared that way explicitly. Foreign keys declared with `[DataCacheForeignKey<T>(ManyToOne)]` get the symmetric upgrade automatically — `Order.CustomerId` has no `[DataCacheIndex]` at all, yet `OrderCache.CustomerIdIndex` is a `CacheSymmetricKeyValueListIndex<string, Order, int>`. See [Joins](joins.md).
 
 ## Predicate-based key-set indices
 
@@ -71,50 +59,45 @@ When a query is repeatedly filtered by `value OP constant` against a property, a
 
 | Attribute | Builder method | What it tracks |
 | --- | --- | --- |
-| `[DataCacheHasValueIndex]` | `WithProperty()` | Keys where `Property != null` (for ref / nullable types) or `Property == true` (for bool). |
-| `[DataCacheHasNotValueIndex]` | `WithoutProperty()` | Keys where `Property == null` (for ref / nullable types) or `Property == false` (for bool). |
+| `[DataCacheHasValueIndex]` | `With{Property}()` | Keys where `Property != null` (for ref / nullable types) or `Property == true` (for `bool`). |
+| `[DataCacheHasNotValueIndex]` | `Without{Property}()` | Keys where `Property == null` (for ref / nullable types) or `Property == false` (for `bool`). |
 | `[DataCacheValueIndex(CompareOp, value)]` | `With{IndexName}()` | Keys where `Property OP value` is true. |
 | `[DataCacheNoValueIndex(CompareOp, value)]` | `Without{IndexName}()` | Keys where `Property OP value` is false. |
 
-```csharp
-[DataCacheHasValueIndex]
-public DateTime? SettledAt { get; init; }
+Each attribute emits exactly the verb in its row: a has-value index gives you `WithSettledAtUnixMs()` and nothing else; the complement needs its own `[DataCacheHasNotValueIndex]` (and its own set), which `ShipmentLeg` declares:
 
-[DataCacheValueIndex(CompareOp.Equal, OrderStatus.Pending)]
-public required OrderStatus Status { get; init; }
-```
+[!code-csharp[](../../../../samples/Prague.Samples/Models/ShipmentLeg.cs)]
 
-All four are backed by `CacheKeySetIndex`; the predicate is evaluated once per write. `CompareOp` is `Equal`, `NotEqual`, `GreaterThan`, `GreaterThanOrEqual`, `LessThan`, `LessThanOrEqual`. An optional `IndexName` names the generated verb (`With{IndexName}()` / `Without{IndexName}()`).
+The four lanes in use — a nullable, a `bool`, a named value index and a has-not-value index:
+
+[!code-csharp[](../../../../samples/Prague.Samples/Concepts/IndexTypes.cs#key-set-lanes)]
+
+All four are backed by `CacheKeySetIndex<TKey, TValue>`; the predicate is evaluated once per write. `CompareOp` is `Equal`, `NotEqual`, `GreaterThan`, `GreaterThanOrEqual`, `LessThan`, `LessThanOrEqual`. `IndexName` names the generated verb and defaults to the property name; `Product.Stock` sets it to `InStock` so the verb reads `WithInStock()` rather than `WithStock()`.
 
 ## Sort definitions
 
-`[DataCacheSort("Name", "Prop:1", "OtherProp:-1")]` declares a class-level comparer that you can pass to `Sort(...)` or `SortBounded(...)` on a query. `:1` is ascending, `:-1` is descending. Multiple sort attributes per class are allowed:
+`[DataCacheSort("Name", "Prop:1", "OtherProp:-1")]` declares a class-level comparer that you can pass to `Sort(...)` or `SortBounded(...)` on a query. `:1` is ascending, `:-1` is descending; later properties break ties of earlier ones. Multiple sort attributes per class are allowed. `Order` declares `ByCreatedAt` (newest first, then `OrderId`) and `Product` declares `ByPrice`; the generator emits them as `OrderCache.ByCreatedAtComparer` and `ProductCache.ByPriceComparer`, `static readonly IComparer<T>` fields:
 
-```csharp
-[DataCache]
-[DataCacheSort("ByDate", nameof(CreatedAtUnixMs) + ":-1")]
-[DataCacheSort("ByCustomerThenDate", nameof(CustomerId) + ":1", nameof(CreatedAtUnixMs) + ":-1")]
-public partial class Order { ... }
-```
+[!code-csharp[](../../../../samples/Prague.Samples/Concepts/IndexTypes.cs#sort-comparers)]
 
-The generator emits `OrderCache.ByDateComparer` and `OrderCache.ByCustomerThenDateComparer` as `static readonly IComparer<Order>`. Use them with `.Sort(OrderCache.ByDateComparer)` or `.SortBounded(...)` — see [Sorted Paging](sorted-paging.md) for which to choose. Any `IComparer<T>` works; a `readonly struct` comparer makes either sort allocation-free.
+See [Sorted Paging](sorted-paging.md) for when to pick `Sort` over `SortBounded`. Any `IComparer<T>` works; a `readonly struct` comparer makes either sort allocation-free.
 
 ## External types
 
-If you can't add attributes to the source POCO (third-party DTOs, generated proto classes), use the type-parameter form `[DataCache<T>]` plus class-level `[DataCacheIndex("PropertyName", DataCacheIndexType.X)]` and the property-name form of the predicate indices:
+If you can't put attributes on the POCO (a protobuf- or OpenAPI-generated class), use the type-parameter form `[DataCache<T>(keyPropertyName)]` on a cache class of your own and declare the indices there with the property-name overload `[DataCacheIndex("PropertyName", DataCacheIndexType.X)]`. Two constraints:
 
-```csharp
-[DataCache<ExternalDto>(nameof(ExternalDto.Id))]
-[DataCacheIndex(nameof(ExternalDto.CustomerId), DataCacheIndexType.Many)]
-[DataCacheValueIndex(nameof(ExternalDto.Status), CompareOp.Equal, OrderStatus.Pending)]
-public partial class ExternalDtoCache;
-```
+- `T` must be `partial` and compiled with you: the generator completes it with the `CacheEquals` / `Clone` partials it needs. A type from a referenced assembly cannot be cached this way.
+- Only `[DataCacheIndex(propertyName, …)]` is honoured on the cache class. The property-name constructors of the key-set attributes (`[DataCacheHasValueIndex("Prop")]`, `[DataCacheValueIndex("Prop", …)]`) compile but produce no index and no verb today.
 
-The generated `CacheEquals` / `Clone` machinery for the external type is also emitted on this class.
+[!code-csharp[](../../../../samples/Prague.Samples/Models/CarrierTrackingEvent.cs)]
+
+The cache behaves like any other — the query below runs over the two `Many` indices declared above:
+
+[!code-csharp[](../../../../samples/Prague.Samples/Concepts/IndexTypes.cs#external-type-query)]
 
 ## Global last-update index
 
-`[DataCacheGlobalLastUpdateIndex<TIndex>]` on a property tracks the latest update per group key, shared across caches, and emits `UpdatedAfter(...)` when the group key is the primary key. See [Global Last Update Index](../advanced/global-last-update-index.md).
+`[DataCacheGlobalLastUpdateIndex<TIndex>]` on a property tracks the latest update per group key, shared across caches, and emits `UpdatedAfter(...)` on the cache whose group key is its primary key. `Order.CustomerId` and `Customer.Id` above both feed `CustomerActivityIndex`. See [Global Last Update Index](../advanced/global-last-update-index.md).
 
 ## Next
 

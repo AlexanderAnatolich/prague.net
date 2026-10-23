@@ -16,6 +16,8 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.0"/>
     <PackageReference Include="NUnit" Version="4.4.0"/>
     <PackageReference Include="NUnit3TestAdapter" Version="6.0.0-beta.1"/>
+    <!-- Only for the kafka-integration.md OpenTelemetry snippet (services.AddOpenTelemetry().WithMetrics(...)). -->
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.17.0"/>
   </ItemGroup>
 
   <ItemGroup>

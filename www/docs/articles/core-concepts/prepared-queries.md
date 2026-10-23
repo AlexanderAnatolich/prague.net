@@ -8,27 +8,10 @@ description: Prepare a Prague query once with a parameter struct, Build or Build
 The eager builder (`Query()…Execute()`) plans and executes a query in one breath. A **prepared** query
 separates the two: describe the query once, optionally with a parameter struct, store it in a field, and
 execute it any number of times from any thread. A **frozen** query goes one step further and plans the
-execution once too, binding the description to an executor built for that exact shape.
+execution once too, binding the description to an executor built for that exact shape. Every block on
+this page is compiled and asserted in `samples/Prague.Samples/Concepts/PreparedQueries.cs`.
 
-```csharp
-public sealed class ProductSearch {
-    private readonly FrozenQuery<(int dept, int brand), JoinResult<Product, ProductInfo?>> _page;
-
-    public ProductSearch(ProductCache products) {
-        _page = products.Prepare<(int dept, int brand)>()
-            .WithDepartmentId(static a => a.dept)
-            .WithBrandId(static a => a.brand)
-            .SortBounded(new ByReleaseDateDesc())
-            .JoinWithProductInfo()
-            .BuildFrozen();                                  // the only allocation
-    }
-
-    public int CountPage(int dept, int brand) {
-        using var page = _page.ExecutePooled((dept, brand), skip: 0, take: 20);   // 0 B, any thread
-        return page.Count;
-    }
-}
-```
+[!code-csharp[](../../../../samples/Prague.Samples/Concepts/PreparedQueries.cs#frozen-in-a-field)]
 
 `Prepare()` and `Prepare<TArgs>()` exist on every generated cache and on the raw `InMemoryDataCache`
 (`UseIndex(index, static a => …)` instead of `WithXxx`). Every `WithXxx` / `WithoutXxx` / `WithKey` /
@@ -46,23 +29,25 @@ lambdas so the delegate is created once, at build.
 | Allocation per pooled execution | 0 B | 0 B |
 | When to use | you need the eager sequence byte for byte | everything else |
 
+[!code-csharp[](../../../../samples/Prague.Samples/Concepts/PreparedQueries.cs#build-vs-build-frozen)]
+
 ## The arguments struct
 
 **`TArgs` must be a struct** — a tuple, a `readonly record struct`, a primitive such as `int`, or `NoArgs`
-for the parameterless `Prepare()`. A class is a compile error: the whole prepared path is constrained
-`where TArgs : struct`, which keeps every generic over it JIT-specialized.
+for the parameterless `Prepare()`. A class — `Prepare<string>()` included — is a compile error: the whole
+prepared path is constrained `where TArgs : struct`, which keeps every generic over it JIT-specialized.
+The examples below share one:
+
+[!code-csharp[](../../../../samples/Prague.Samples/Concepts/PreparedQueries.cs#lookup-args)]
 
 Prepared builders have no `Execute*`; `Build()` / `BuildFrozen()` are the only terminals. On the built
 query, `Execute`, `ExecutePooled`, `Count` and the `*Cloned` variants take `in TArgs` plus the usual `skip` /
 `take`. Every selector callback receives `TArgs` by value and runs once per execution, so no spelling
 changes there. **One callback is different: the arg `Where` predicate.** It runs once per candidate row,
 so it takes `TArgs` by `in` through the `ArgFilter<TValue, TArgs>` delegate, and the lambda must spell
-the modifier:
+the modifier — `static (o, a) => …` without the `in` does not compile (CS1676):
 
-```csharp
-.Where(static (p, in a) => p.Price >= a.minPrice)   // required form
-.Where(static (p, a) => p.Price >= a.minPrice)      // does not compile (CS1676)
-```
+[!code-csharp[](../../../../samples/Prague.Samples/Concepts/PreparedQueries.cs#arg-where-in)]
 
 Prefer a `readonly struct` or `readonly record struct` for `TArgs`: `in` removes the copy at the call,
 but reading a *property* of a non-readonly struct through an `in` reference copies it again inside the
@@ -78,22 +63,13 @@ and the planner still sees every arm.
 **`Match`**, in two forms. Every `Match` **must end in a `Default`**: the arm chain is type-state, so an
 open chain, an empty one, or a `Case` after `Default` is a compile error, and exactly one arm always runs.
 
-```csharp
-// Tag form — a switch. One selector call per execution, then constant compares; first equal tag wins.
-.Match(static a => a.Mode, m => m
-    .Case(Mode.ByDepartment, b => b.WithDepartmentId(static a => a.dept))
-    .Case(Mode.ByBrand,      b => b.WithBrandId(static a => a.brand))
-    .Default(b => b.Where(static p => p.Featured)))
+[!code-csharp[](../../../../samples/Prague.Samples/Concepts/PreparedQueries.cs#match-tag)]
 
-// Guard form — if / else if / else. No selector; guards run in order until one is true.
-.Match(m => m
-    .Case(static a => a.minPrice > 0, b => b.Where(static (p, in a) => p.Price >= a.minPrice))
-    .Case(static a => a.inStockOnly,  b => b.Where(static p => p.Stock > 0))
-    .Default())                                       // "nothing matched, narrow nothing", stated
-```
+[!code-csharp[](../../../../samples/Prague.Samples/Concepts/PreparedQueries.cs#match-guard)]
 
-**`If(cond, branch)` / `IfElse(cond, then, otherwise)`** are sugar over a one-`Case` guard `Match`; their
-signatures are unchanged.
+**`If(cond, branch)` / `IfElse(cond, then, otherwise)`** are sugar over a one-`Case` guard `Match`:
+
+[!code-csharp[](../../../../samples/Prague.Samples/Concepts/PreparedQueries.cs#if-else)]
 
 What a branch may contain: `Or` branches take `WithXxx` / `UseIndex` (bound or parameterized), nested
 `Or`, and narrow-only `If` / `Match`. `If` branches and `Match` arms take all of that plus `Where` and
@@ -111,12 +87,19 @@ At build time the planner classifies the chain and binds one of three executors:
 - **Replay** — the prepared behaviour, for shapes the pipeline does not take yet (nested `JoinMany`,
   two sorters, a marking step that is not first in an `Or` branch, filter-only plans, and a few more).
 
-`Explain()` prints the plan and its live state: the executor (`executor: Pipeline`, `PointLookup` or
-`Replay`), each step with its kind and binding (`step 0 ListEq (bound)`, `step 1 ListEq (arg)`), the
-sort mode (`sort: bounded`), which joins fused, and the seed chosen on the last execution with the
-signal that chose it — for example `last seed: step 1 ListEq (signal 34), free: smallest signal`, or
-under `PreserveEagerOrder` `last seed: step 0 ListEq (signal 0), fixed: first active step`. Read it once
-after building; if it says `Replay`, the shape is not on the pipeline yet.
+`Explain()` prints the plan and its live state:
+
+[!code-csharp[](../../../../samples/Prague.Samples/Concepts/PreparedQueries.cs#explain)]
+
+The first line names the executor (`executor: Pipeline`, `PointLookup` or `Replay`). `narrowers:` lists
+each step with its kind and binding — `ListEq (arg)`, `UniqueEq (arg)`, `Filter (bound)` — and the index
+it reads. `optimizations:` lists the `FrozenOptions` in effect. A pipeline plan then prints its seed rule,
+its steps with the side each probes on (`steps: [0 ListEq probe: value-side, 1 ListEq probe: value-side]`),
+its filters, `sort: bounded` when a page feeds the top-k container, and `joins: 1 (fused: 1, …)`. After
+the first execution a `last seed:` line names the step that seeded and the signal that chose it —
+`last seed: step 1 ListEq (signal 34), free: smallest signal`, or under `PreserveEagerOrder`
+`last seed: step 0 ListEq (signal 0), fixed: first active step`. Read it once after building; if it says
+`Replay`, the shape is not on the pipeline yet.
 
 ### The ordering contract
 
@@ -130,9 +113,7 @@ arguments*, not the one declared first, so a thousand-row bucket followed by a h
 the hundred rows whichever way round you wrote it. If you need the eager sequence back, for a snapshot
 diffed row by row or a golden test, set `PreserveEagerOrder`:
 
-```csharp
-.BuildFrozen(new FrozenOptions { PreserveEagerOrder = true });
-```
+[!code-csharp[](../../../../samples/Prague.Samples/Concepts/PreparedQueries.cs#preserve-eager-order)]
 
 ### `FrozenOptions`
 
